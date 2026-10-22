@@ -1,9 +1,12 @@
 import PDHostCore
+import PDSecurity
 import SwiftUI
 
+/// The menu bar panel.
 struct MenuContent: View {
     let controller: HostController
     @State private var permissions = HostPermissions.current()
+    @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @Environment(\.openWindow) private var openWindow
 
     private var state: HostState { controller.store.state }
@@ -13,10 +16,7 @@ struct MenuContent: View {
             header
 
             if !permissions.allGranted {
-                PermissionsCard(permissions: permissions) {
-                    HostPermissions.request()
-                    permissions = .current()
-                }
+                PermissionsPanel(permissions: permissions)
             }
 
             if let approval = state.pendingApprovals.first {
@@ -25,103 +25,209 @@ struct MenuContent: View {
                 }
             }
 
-            if !state.connected.isEmpty {
-                Section("Connected") {
-                    ForEach(state.connected) { phone in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Label(phone.deviceName, systemImage: "iphone")
-                            if let stream = phone.stream {
-                                Text("\(phone.window.map { "\($0.appName) — \($0.title)" } ?? "Main display") · \(stream.width)×\(stream.height)")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
+            ForEach(state.connected) { phone in
+                SessionPanel(phone: phone)
             }
 
             if !state.pairedPeers.isEmpty {
-                Section("Paired phones") {
+                Panel(title: "Paired phones") {
                     ForEach(state.pairedPeers) { peer in
-                        HStack {
-                            Text(peer.name)
-                            Spacer()
-                            Button("Forget") { Task { await controller.revoke(peer.fingerprint) } }
-                                .buttonStyle(.borderless)
+                        PairedPhoneRow(peer: peer, isConnected: state.connected.contains { $0.id == peer.fingerprint }) {
+                            Task { await controller.revoke(peer.fingerprint) }
                         }
                     }
                 }
             }
 
-            Divider()
-            Button("Pair a Phone…") {
-                openWindow(id: PairingWindow.id)
-                NSApplication.shared.activate()
-            }
-            Button("Quit PocketDesk") { NSApplication.shared.terminate(nil) }
+            footer
         }
         .padding(14)
-        .frame(width: 300)
-        .onAppear { permissions = .current() }
+        .frame(width: 320)
+        // Grants happen in System Settings; keep the panel in step while it's open.
+        .task {
+            while !Task.isCancelled {
+                permissions = .current()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
     private var header: some View {
-        HStack {
-            Text("PocketDesk").font(.headline)
-            Spacer()
-            switch state.listening {
-            case .starting:
-                Text("Starting…").foregroundStyle(.secondary)
-            case .listening:
-                Label("Ready", systemImage: "circle.fill").foregroundStyle(.green).labelStyle(.titleAndIcon)
-            case .stopped(let error):
-                Label(error == nil ? "Stopped" : "Error", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange).help(error ?? "")
+        HStack(spacing: 10) {
+            AppGlyph(symbol: state.connected.isEmpty ? "iphone" : "iphone.radiowaves.left.and.right")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("PocketDesk").font(.headline)
+                HStack(spacing: 6) {
+                    StatusDot(color: statusColor)
+                    Text(statusText).font(.caption).foregroundStyle(.secondary)
+                }
             }
+            Spacer()
         }
-        .font(.caption)
+    }
+
+    private var statusText: String {
+        switch state.listening {
+        case .starting: "Starting…"
+        case .listening:
+            if !state.connected.isEmpty { "\(state.connected.count) phone connected" }
+            else if !permissions.allGranted { "Needs permissions" }
+            else { "Ready for your phone" }
+        case .stopped(let error): error == nil ? "Stopped" : "Couldn't start"
+        }
+    }
+
+    private var statusColor: Color {
+        switch state.listening {
+        case .starting: .yellow
+        case .listening: permissions.allGranted ? .green : .orange
+        case .stopped: .red
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            Button {
+                openWindow(id: PairingWindow.id)
+                NSApplication.shared.activate()
+            } label: {
+                Label("Pair a Phone…", systemImage: "qrcode")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(HostBrand.accent)
+            .controlSize(.large)
+
+            Menu {
+                Toggle("Launch at Login", isOn: Binding(get: { launchAtLogin }, set: { enabled in
+                    try? LaunchAtLogin.set(enabled)
+                    launchAtLogin = LaunchAtLogin.isEnabled
+                }))
+                Divider()
+                Button("Quit PocketDesk") { NSApplication.shared.terminate(nil) }
+                    .keyboardShortcut("q")
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.glass)
+            .controlSize(.large)
+            .fixedSize()
+        }
     }
 }
 
-private struct PermissionsCard: View {
+private struct PermissionsPanel: View {
     let permissions: HostPermissions
-    let request: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("PocketDesk needs permission").font(.subheadline.bold())
-            Label("Screen Recording", systemImage: permissions.screenRecording ? "checkmark.circle.fill" : "xmark.circle")
-            Label("Accessibility (for mouse and keyboard)", systemImage: permissions.accessibility ? "checkmark.circle.fill" : "xmark.circle")
-            Button("Grant in System Settings…", action: request)
+        Panel(tint: .orange) {
+            Label("Allow PocketDesk to share this Mac", systemImage: "lock.shield")
+                .font(.subheadline.weight(.semibold))
+            row(.screenRecording, title: "Screen Recording", detail: "Shows your screen on the phone")
+            row(.accessibility, title: "Accessibility", detail: "Lets the phone click and type")
         }
-        .font(.caption)
-        .padding(10)
-        .background(.orange.opacity(0.12), in: .rect(cornerRadius: 8))
+    }
+
+    private func row(_ kind: HostPermissions.Kind, title: String, detail: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: permissions.isGranted(kind) ? "checkmark.circle.fill" : "circle.dashed")
+                .foregroundStyle(permissions.isGranted(kind) ? .green : .secondary)
+                .font(.title3)
+                .contentTransition(.symbolEffect(.replace))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.callout.weight(.medium))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !permissions.isGranted(kind) {
+                Button("Open") { HostPermissions.request(kind) }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+            }
+        }
     }
 }
 
+private struct SessionPanel: View {
+    let phone: HostState.ConnectedPhone
+
+    var body: some View {
+        Panel(tint: .green) {
+            HStack(spacing: 10) {
+                Image(systemName: "iphone.radiowaves.left.and.right")
+                    .font(.title2)
+                    .foregroundStyle(.green)
+                    .symbolEffect(.variableColor.iterative, options: .repeating)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(phone.deviceName).font(.callout.weight(.semibold))
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+        }
+    }
+
+    private var detail: String {
+        guard let stream = phone.stream else { return "Connecting…" }
+        let source = phone.window.map { "\($0.appName) window" } ?? "Whole screen"
+        return "\(source) · \(stream.width)×\(stream.height) · \(stream.fps) fps"
+    }
+}
+
+private struct PairedPhoneRow: View {
+    let peer: PairedPeer
+    let isConnected: Bool
+    let forget: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "iphone").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(peer.name).font(.callout)
+                Text(isConnected ? "Connected now" : "Paired \(peer.pairedAt.formatted(.relative(presentation: .named)))")
+                    .font(.caption)
+                    .foregroundStyle(isConnected ? .green : .secondary)
+            }
+            Spacer()
+            if hovering {
+                Button("Forget", role: .destructive, action: forget)
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .transition(.opacity)
+            }
+        }
+        .contentShape(.rect)
+        .onHover { hovering in withAnimation(.easeOut(duration: 0.15)) { self.hovering = hovering } }
+    }
+}
+
+/// A phone waiting for the person at the Mac to confirm its code.
 struct ApprovalCard: View {
     let approval: PairingApproval
     let decide: (Bool) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("“\(approval.deviceName)” wants to pair").font(.subheadline.bold())
-            Text("Accept only if your phone shows this code:").font(.caption)
-            Text(approval.code.inserting(" ", at: 3))
-                .font(.system(.title, design: .monospaced).bold())
+        Panel(tint: HostBrand.accent) {
+            Label("“\(approval.deviceName)” wants to pair", systemImage: "iphone.badge.exclamationmark")
+                .font(.subheadline.weight(.semibold))
+            Text("Accept only if your phone shows this code:")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            CodeTiles(code: approval.code, size: 30)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
             HStack {
                 Button("Decline", role: .cancel) { decide(false) }
-                Button("Accept") { decide(true) }.keyboardShortcut(.defaultAction)
+                    .buttonStyle(.glass)
+                    .frame(maxWidth: .infinity)
+                Button("Accept") { decide(true) }
+                    .buttonStyle(.glassProminent)
+                    .tint(HostBrand.accent)
+                    .keyboardShortcut(.defaultAction)
+                    .frame(maxWidth: .infinity)
             }
+            .controlSize(.large)
         }
-        .padding(10)
-        .background(.blue.opacity(0.1), in: .rect(cornerRadius: 8))
-    }
-}
-
-extension String {
-    fileprivate func inserting(_ separator: String, at offset: Int) -> String {
-        guard count > offset else { return self }
-        return String(prefix(offset)) + separator + String(dropFirst(offset))
     }
 }

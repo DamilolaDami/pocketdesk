@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 11), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 12), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -280,6 +280,19 @@ The person at the Mac always knows and controls who is using it:
 - Running a Mac Shortcut adds no new power: the person at the Mac made it, and a paired phone
   could already click it in the Mac's menu bar. Arbitrary shell commands are deliberately not
   an action.
+
+## Live tiles (protocol v12)
+
+- While the Shortcuts tab is on screen and the app is in front, `SessionController.watchStatus`
+  holds a catalog-mode connection (no video, no "connected") and sends `watchStatus`. While
+  streaming, it asks over the stream instead.
+- The Mac checks every second (`Configuration.statusInterval`) and sends `macStatus` only when
+  it changes. Closing the connection stops the polling.
+- `MacStatus`: volume and mute from Core Audio, plus `nowPlaying` from the private MediaRemote
+  framework. Since macOS 15.4 MediaRemote answers only some processes, so `nowPlaying` may
+  always be `nil`; tiles then show volume alone. The reader gives up after 0.5 s.
+- Tiles: Play / Pause shows the title and artist and swaps between play and pause; volume tiles
+  show the level or "Muted".
 
 ## Shortcuts outside the app (protocol v8)
 

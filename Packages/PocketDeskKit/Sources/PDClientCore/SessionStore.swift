@@ -58,6 +58,13 @@ public final class SessionStore {
         self.shortcuts = shortcuts
     }
 
+    /// The target Mac's volume and now playing while live tiles are on screen.
+    public private(set) var macStatus: MacStatus?
+
+    public func update(macStatus: MacStatus?) {
+        if self.macStatus != macStatus { self.macStatus = macStatus }
+    }
+
     /// The target Mac's Shortcuts-app shortcuts, for "Run Mac Shortcut".
     public private(set) var macShortcuts: [MacShortcut] = []
 

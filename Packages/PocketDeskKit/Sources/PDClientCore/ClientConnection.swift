@@ -20,6 +20,8 @@ public enum ClientEvent: Sendable, Equatable {
     case streamConfig(StreamConfig)
     case linkQuality(LinkQuality)
     case windows([WindowInfo])
+    /// Volume and now playing, for live tiles (after `watchStatus`).
+    case macStatus(MacStatus)
     /// Something to tell the person without ending the session (a shortcut that failed).
     case notice(String)
     case ended(reason: String?)
@@ -165,6 +167,7 @@ public actor ClientConnection {
                     case .streamConfig(let config): onEvent(.streamConfig(config))
                     case .linkQuality(let quality): onEvent(.linkQuality(quality))
                     case .clipboard(let item): onEvent(.clipboard(item))
+                    case .macStatus(let status): onEvent(.macStatus(status))
                     case .windows(let windows): onEvent(.windows(windows))
                     case .actionFailed(let reason): onEvent(.notice(reason))
                     case .bye(let reason):
@@ -173,7 +176,7 @@ public actor ClientConnection {
                     case .ping(let value): try await session.send(.pong(value))
                     case .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon,
-                         .listMacShortcuts, .macShortcuts:
+                         .listMacShortcuts, .macShortcuts, .watchStatus:
                         continue
                     }
                 }
@@ -297,6 +300,39 @@ extension ClientConnection {
                         try await session.send(.bye(reason: "done"))
                         // Let the Mac hang up first; closing now could discard the bye unsent.
                         while (try? await control.next()) != nil {}
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}
+
+extension ClientConnection {
+    /// A connection with no video that just listens: the Mac's status now and on every
+    /// change, for live tiles. Runs until cancelled or the Mac goes away.
+    public static func watchStatus(endpoint: NWEndpoint, hostFingerprint: Fingerprint, identity: DeviceIdentity,
+                                   deviceName: String) -> AsyncThrowingStream<MacStatus, any Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+                        var control = session.controlMessages.makeAsyncIterator()
+                        try await session.send(.hello(Hello(deviceName: deviceName, viewport: Viewport(width: 0, height: 0, scale: 1),
+                                                            mode: .catalog)))
+                        try await session.send(.watchStatus)
+                        // Cancelling ends this wait and closes the connection, which stops the Mac's polling.
+                        while let message = try await control.next() {
+                            switch message {
+                            case .macStatus(let status): continuation.yield(status)
+                            case .ping(let value): try await session.send(.pong(value))
+                            case .bye(let reason): throw ClientError.hostEnded(reason)
+                            default: continue
+                            }
+                        }
                     }
                     continuation.finish()
                 } catch {

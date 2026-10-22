@@ -64,6 +64,7 @@ public final class SessionController {
     private var catalogTask: Task<Void, Never>?
     private var catalogFetchedAt: [UUID: ContinuousClock.Instant] = [:]
     private var heldKey: (code: UInt16, task: Task<Void, Never>)?
+    private var statusTask: Task<Void, Never>?
 
     public init(identityLabel: String = "com.pocketdesk.phone.identity",
                 trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json"),
@@ -293,6 +294,8 @@ public final class SessionController {
             store.post(notice: item.text != nil ? "Copied from your Mac" : "Image copied from your Mac", kind: .done)
         case .windows(let windows):
             store.update(windows: windows)
+        case .macStatus(let status):
+            store.update(macStatus: status)
         case .notice(let text):
             store.post(notice: text)
         case .ended(let reason):
@@ -466,6 +469,39 @@ public final class SessionController {
         return macs.first { $0.hostID != nil && $0.hostID == preferredHostID }
             ?? macs.first { $0.hostID != nil && $0.hostID == lastHost?.hostID }
             ?? macs.first
+    }
+
+    // MARK: Live tiles
+
+    /// Keeps the store's `macStatus` current while tiles are on screen: through the stream if
+    /// one is up, else over a quiet connection of its own. Retries while it's wanted.
+    public func watchStatus(preferredHostID: UUID?) {
+        if case .streaming = store.state, let connection {
+            connection.send(.watchStatus)
+            return
+        }
+        guard statusTask == nil else { return }
+        statusTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if let host = shortcutTarget(preferredHostID: preferredHostID), let hostID = host.hostID,
+                   let browsedHost = browsed[host.id], let peer = trustStore.peer(hostID: hostID),
+                   let identity = try? DeviceIdentity.loadOrCreate(label: identityLabel) {
+                    let updates = ClientConnection.watchStatus(endpoint: browsedHost.endpoint, hostFingerprint: peer.fingerprint,
+                                                               identity: identity, deviceName: deviceName)
+                    do {
+                        for try await status in updates { store.update(macStatus: status) }
+                    } catch {}
+                }
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
+    }
+
+    public func stopWatchingStatus() {
+        statusTask?.cancel()
+        statusTask = nil
+        store.update(macStatus: nil)
     }
 
     // MARK: The Mac's apps

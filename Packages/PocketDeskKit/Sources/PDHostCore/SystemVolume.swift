@@ -17,6 +17,17 @@ enum SystemVolume {
         return Int((levels.reduce(0, +) / Float32(levels.count) * 100).rounded())
     }
 
+    static func isMuted() -> Bool? {
+        guard let device = defaultOutput() else { return nil }
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
+                                                 mScope: kAudioDevicePropertyScopeOutput,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectHasProperty(device, &address) else { return nil }
+        var muted: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        return AudioObjectGetPropertyData(device, &address, 0, nil, &size, &muted) == noErr ? muted != 0 : nil
+    }
+
     @discardableResult
     static func set(_ percent: Int) -> Bool {
         guard let device = defaultOutput() else { return false }

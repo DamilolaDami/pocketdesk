@@ -7,6 +7,7 @@ import SwiftUI
 struct ShortcutsView: View {
     let controller: SessionController
     @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
+    @Environment(\.scenePhase) private var scenePhase
     /// One sheet for both steps: swapping its item moves from the picks to the editor
     /// (presenting a second sheet as the first closes is unreliable).
     @State private var sheet: EditorSheet?
@@ -38,6 +39,12 @@ struct ShortcutsView: View {
             }
             // Real icons for app tiles; also warms the editor's app list.
             .task { controller.loadApps(preferredHostID: UUID(uuidString: defaultMacID)) }
+            // Live tiles: only while this screen is up and the app is in front.
+            .task(id: scenePhase) {
+                guard scenePhase == .active else { return controller.stopWatchingStatus() }
+                controller.watchStatus(preferredHostID: UUID(uuidString: defaultMacID))
+            }
+            .onDisappear { controller.stopWatchingStatus() }
             .sheet(item: $sheet) { sheet in
                 switch sheet {
                 case .picks:
@@ -81,6 +88,7 @@ struct ShortcutGrid: View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             ForEach(shortcuts) { shortcut in
                 ShortcutTile(shortcut: shortcut, appIcon: shortcut.appBundleID.flatMap { controller.store.appIcons[$0] },
+                             status: controller.store.macStatus,
                              edit: edit.map { edit in { edit(shortcut) } }) {
                     tapped += 1
                     run(shortcut)
@@ -109,6 +117,8 @@ struct ShortcutTile: View {
     let shortcut: Shortcut
     /// The Mac app's own icon (PNG), for app shortcuts.
     var appIcon: Data?
+    /// The Mac's volume and now playing, for tiles that show it live.
+    var status: MacStatus?
     var edit: (() -> Void)?
     var run: () -> Void = {}
     @State private var favicon: UIImage?
@@ -126,10 +136,12 @@ struct ShortcutTile: View {
                     .font(.headline)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                Text(shortcut.action.summary)
+                Text(live?.line ?? shortcut.action.summary)
                     .font(.caption.weight(.medium))
                     .opacity(0.75)
                     .lineLimit(1)
+                    .contentTransition(.numericText())
+                    .animation(.smooth, value: live?.line)
             }
             .foregroundStyle(.white)
             .padding(14)
@@ -184,8 +196,26 @@ extension ShortcutTile {
                 .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
                 .transition(.scale.combined(with: .opacity))
         } else {
-            Image(systemName: shortcut.symbol)
+            Image(systemName: live?.symbol ?? shortcut.symbol)
                 .font(.system(size: 24, weight: .semibold))
+                .contentTransition(.symbolEffect(.replace))
+        }
+    }
+
+    /// What the Mac is doing, for tiles where that's the point: what's playing on Play / Pause,
+    /// the level on volume tiles.
+    var live: (line: String, symbol: String?)? {
+        guard let status else { return nil }
+        switch shortcut.action {
+        case .media(.playPause):
+            guard let playing = status.nowPlaying else { return nil }
+            let line = [playing.title, playing.artist].compactMap(\.self).joined(separator: " · ")
+            return (line, playing.isPlaying ? "pause.fill" : "play.fill")
+        case .media(.volumeUp), .media(.volumeDown), .media(.mute), .setVolume:
+            if status.muted == true { return ("Muted", nil) }
+            return status.volume.map { ("Volume \($0)%", nil) }
+        default:
+            return nil
         }
     }
 }
@@ -259,6 +289,8 @@ struct ShortcutsSheet: View {
             }
             .navigationTitle("Shortcuts")
             .navigationBarTitleDisplayMode(.inline)
+            // While streaming this asks over the stream itself; the Mac keeps it up to date.
+            .task { controller.watchStatus(preferredHostID: nil) }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close", systemImage: "xmark", action: dismiss)

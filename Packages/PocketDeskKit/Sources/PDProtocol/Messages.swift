@@ -1,5 +1,5 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 11
+public let protocolVersion: UInt16 = 12
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -48,6 +48,9 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// The shortcuts in the Mac's Shortcuts app, for a "Run Mac Shortcut" tile.
     case listMacShortcuts
     case macShortcuts([MacShortcut])
+    /// Phone → host: send `macStatus` now and whenever it changes, until the session ends.
+    case watchStatus
+    case macStatus(MacStatus)
     case ping(UInt64)
     case pong(UInt64)
     case bye(reason: String)
@@ -329,5 +332,32 @@ public struct KeyPress: Codable, Sendable, Equatable {
         self.code = code
         self.isDown = isDown
         self.modifiers = modifiers
+    }
+}
+
+/// What live tiles show: the Mac's volume and what's playing.
+public struct MacStatus: Codable, Sendable, Equatable {
+    /// 0–100, or `nil` if the output device has no volume control.
+    public var volume: Int?
+    public var muted: Bool?
+    /// `nil` when nothing is playing, or when macOS won't say.
+    public var nowPlaying: NowPlaying?
+
+    public init(volume: Int? = nil, muted: Bool? = nil, nowPlaying: NowPlaying? = nil) {
+        self.volume = volume
+        self.muted = muted
+        self.nowPlaying = nowPlaying
+    }
+}
+
+public struct NowPlaying: Codable, Sendable, Equatable {
+    public var title: String
+    public var artist: String?
+    public var isPlaying: Bool
+
+    public init(title: String, artist: String? = nil, isPlaying: Bool) {
+        self.title = title
+        self.artist = artist
+        self.isPlaying = isPlaying
     }
 }

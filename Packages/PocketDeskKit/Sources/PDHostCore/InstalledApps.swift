@@ -9,10 +9,13 @@ public protocol AppCatalogSource: Sendable {
     func iconPNG(bundleID: String) async -> Data?
     /// The shortcuts in the Mac's Shortcuts app.
     func shortcuts() async -> [MacShortcut]
+    /// Volume and what's playing, for live tiles.
+    func status() async -> MacStatus
 }
 
 extension AppCatalogSource {
     public func shortcuts() async -> [MacShortcut] { [] }
+    public func status() async -> MacStatus { MacStatus() }
 }
 
 /// Apps in the usual folders (not every helper bundle on disk), named as Finder shows them.
@@ -72,6 +75,10 @@ public struct InstalledApps: AppCatalogSource {
     }
 }
 extension InstalledApps {
+    public func status() async -> MacStatus {
+        MacStatus(volume: SystemVolume.get(), muted: SystemVolume.isMuted(), nowPlaying: await NowPlayingReader.current())
+    }
+
     /// `shortcuts list --show-identifiers` prints "Name (UUID)" per line.
     public func shortcuts() async -> [MacShortcut] {
         guard let output = (try? await MacShortcuts.run(["list", "--show-identifiers"]))??.output else { return [] }

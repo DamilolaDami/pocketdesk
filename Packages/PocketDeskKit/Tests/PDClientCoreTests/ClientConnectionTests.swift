@@ -175,6 +175,29 @@ final class ClientConnectionTests {
         #expect(!events.all.contains { if case .sessionStarted = $0 { true } else { false } })
     }
 
+    @Test func watchesTheMacsStatus() async throws {
+        try TrustStore(peers: [PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone")]).save(to: trustStoreURL)
+        let service = try HostService(
+            configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
+                                 trustStoreURL: trustStoreURL, advertise: false),
+            makeFrameSource: { MovingFrames() }, clipboard: FakeClipboard(), input: SinkRecorder()
+        ) { _ in }
+        let serviceTask = Task { try await service.run() }
+        defer { serviceTask.cancel() }
+        var port: UInt16?
+        for _ in 0..<200 where port == nil {
+            port = await service.port
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let updates = ClientConnection.watchStatus(
+            endpoint: .hostPort(host: "127.0.0.1", port: .init(rawValue: try #require(port))!),
+            hostFingerprint: service.identity.fingerprint, identity: phone, deviceName: "Test iPhone")
+        var iterator = updates.makeAsyncIterator()
+        let status = try #require(try await iterator.next())
+        // This Mac's real output volume (every Mac has a default output device).
+        #expect(status.volume.map { (0...100).contains($0) } ?? true)
+    }
+
     @Test func catalogListsAppsAndIconsWithoutStreaming() async throws {
         // Already paired: the catalog is only for phones the Mac trusts.
         try TrustStore(peers: [PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone")]).save(to: trustStoreURL)

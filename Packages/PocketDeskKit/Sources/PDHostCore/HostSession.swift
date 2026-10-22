@@ -40,11 +40,14 @@ public actor HostSession {
         public var wake: WakeInfo?
         /// How often the Mac's clipboard is checked for something new to send.
         public var clipboardInterval: Duration
+        /// How often volume and now playing are checked for a phone watching them.
+        public var statusInterval: Duration
 
         public init(hostName: String, fps: Int = 60, maxFramesInFlight: Int = 2, refineFrames: Int = 8,
                     adaptInterval: Duration = .milliseconds(500), wake: WakeInfo? = nil,
-                    clipboardInterval: Duration = .milliseconds(500)) {
+                    clipboardInterval: Duration = .milliseconds(500), statusInterval: Duration = .seconds(1)) {
             self.clipboardInterval = clipboardInterval
+            self.statusInterval = statusInterval
             self.hostName = hostName
             self.fps = fps
             self.maxFramesInFlight = maxFramesInFlight
@@ -78,6 +81,7 @@ public actor HostSession {
     private var audioEnabled = true
     private var clipboardEnabled = false
     private var clipboardTask: Task<Void, Never>?
+    private var statusTask: Task<Void, Never>?
     /// The Mac clipboard's change count as last sent or written; anything newer goes out.
     private var clipboardSeen = 0
     private var currentSource: CaptureSource?
@@ -183,9 +187,11 @@ public actor HostSession {
             try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: [],
                                                       wake: configuration.wake)))
             var allowed: Bool?
+            defer { statusTask?.cancel() }
             while let message = try await messages.next() {
                 switch message {
                 case .listApps, .requestAppIcons, .listMacShortcuts: try await answer(message)
+                case .watchStatus: startWatchingStatus()
                 case .run(let action):
                     // Running something is using the Mac: "Ask Before Each Connection" applies.
                     if allowed == nil { allowed = await pairing.allowSession(peer: peer, deviceName: hello.deviceName) }
@@ -277,6 +283,8 @@ public actor HostSession {
                 try await run(action)
             case .listApps, .requestAppIcons, .listMacShortcuts:
                 try await answer(message)
+            case .watchStatus:
+                startWatchingStatus()
             case .ping(let value):
                 try await session.send(.pong(value))
             case .pong(let value):
@@ -289,9 +297,27 @@ public actor HostSession {
             case .bye:
                 return
             case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
-                 .actionFailed, .apps, .appIcon, .macShortcuts:
+                 .actionFailed, .apps, .appIcon, .macShortcuts, .macStatus:
                 continue
             }
+        }
+    }
+
+    /// Live tiles: the status now, then again whenever it changes.
+    private func startWatchingStatus() {
+        guard statusTask == nil else { return }
+        statusTask = Task { await self.watchStatus() }
+    }
+
+    private func watchStatus() async {
+        var last: MacStatus?
+        while !Task.isCancelled {
+            let status = await catalog.status()
+            if status != last {
+                guard (try? await session.send(.macStatus(status))) != nil else { return }
+                last = status
+            }
+            try? await Task.sleep(for: configuration.statusInterval)
         }
     }
 
@@ -588,6 +614,8 @@ public actor HostSession {
             await adaptTask.value
             self.adaptTask = nil
         }
+        statusTask?.cancel()
+        statusTask = nil
         if let clipboardTask {
             clipboardTask.cancel()
             await clipboardTask.value

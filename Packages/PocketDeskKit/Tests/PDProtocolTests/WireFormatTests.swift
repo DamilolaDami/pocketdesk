@@ -72,7 +72,12 @@ import Testing
     }
 
     @Test func macShortcutsRoundTrip() throws {
-        let messages: [ControlMessage] = [.listMacShortcuts, .macShortcuts([MacShortcut(id: "A-1", name: "Focus")])]
+        let messages: [ControlMessage] = [
+            .listMacShortcuts, .macShortcuts([MacShortcut(id: "A-1", name: "Focus")]), .watchStatus,
+            .macStatus(MacStatus(volume: 60, muted: false,
+                                 nowPlaying: NowPlaying(title: "Stranger Things", artist: "Netflix", isPlaying: true))),
+            .macStatus(MacStatus()),
+        ]
         for message in messages {
             #expect(try JSONDecoder().decode(ControlMessage.self, from: JSONEncoder().encode(message)) == message)
         }

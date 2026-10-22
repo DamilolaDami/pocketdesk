@@ -419,6 +419,16 @@ final class HostServiceTests {
 }
 
 @Suite struct MacShortcutListTests {
+    @Test func readsNowPlayingInfo() {
+        let playing = NowPlayingReader.parse(["kMRMediaRemoteNowPlayingInfoTitle": "Bad Guy",
+                                              "kMRMediaRemoteNowPlayingInfoArtist": "Billie Eilish",
+                                              "kMRMediaRemoteNowPlayingInfoPlaybackRate": 1.0])
+        #expect(playing == NowPlaying(title: "Bad Guy", artist: "Billie Eilish", isPlaying: true))
+        #expect(NowPlayingReader.parse(["kMRMediaRemoteNowPlayingInfoTitle": "Paused",
+                                        "kMRMediaRemoteNowPlayingInfoPlaybackRate": 0.0])?.isPlaying == false)
+        #expect(NowPlayingReader.parse([:]) == nil)
+    }
+
     @Test func aMissingMacShortcutSaysSo() async {
         await #expect(throws: MacActionError.self) {
             try await InputInjector().perform(.runShortcut(id: nil, name: "PocketDesk Test That Does Not Exist"))

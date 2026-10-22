@@ -225,6 +225,21 @@ We're skipping TCA (The Composable Architecture) because it adds a big dependenc
 learning curve, and Observation + actors + a reducer gives the same testability for an app
 this size. Revisit if feature count explodes.
 
+## Mac-side session controls
+
+The person at the Mac always knows and controls who is using it:
+
+- **Notifications.** "“iPhone” is now viewing this Mac" when a stream starts, with a
+  Disconnect action. It is removed when the session ends. Pairing and connection requests
+  are notified too, because the menu bar panel is often closed (`SessionNotifier`, in the app).
+- **Disconnect.** `HostService.disconnect(peer)` sends `bye(reason:)` to each of that phone's
+  sessions, so the phone shows why. If the phone doesn't hang up within 2 s, the connection
+  is closed. Forgetting a connected phone disconnects it.
+- **Ask Before Each Connection** (gear menu, off by default). A paired phone's stream waits on
+  `PairingAuthority.allowSession`, shown as an approval with no code. Silence after the
+  approval timeout is a no. A phone that has just been paired isn't asked a second time.
+- The menu bar icon changes while any phone is connected.
+
 ## Network.framework on iOS
 
 Releasing a QUIC stream or datagram flow after the connection is gone traps on iOS

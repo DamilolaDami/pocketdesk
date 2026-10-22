@@ -7,6 +7,7 @@ struct MenuContent: View {
     let controller: HostController
     @State private var permissions = HostPermissions.current()
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var askBeforeConnecting = false
     @Environment(\.openWindow) private var openWindow
 
     private var state: HostState { controller.store.state }
@@ -26,7 +27,9 @@ struct MenuContent: View {
             }
 
             ForEach(state.connected) { phone in
-                SessionPanel(phone: phone)
+                SessionPanel(phone: phone) {
+                    Task { await controller.disconnect(phone.id) }
+                }
             }
 
             if !state.pairedPeers.isEmpty {
@@ -43,6 +46,7 @@ struct MenuContent: View {
         }
         .padding(14)
         .frame(width: 320)
+        .onAppear { askBeforeConnecting = controller.askBeforeConnecting }
         // Grants happen in System Settings; keep the panel in step while it's open.
         .task {
             while !Task.isCancelled {
@@ -103,6 +107,10 @@ struct MenuContent: View {
                     try? LaunchAtLogin.set(enabled)
                     launchAtLogin = LaunchAtLogin.isEnabled
                 }))
+                Toggle("Ask Before Each Connection", isOn: Binding(get: { askBeforeConnecting }, set: { ask in
+                    controller.askBeforeConnecting = ask
+                    askBeforeConnecting = ask
+                }))
                 Divider()
                 Button("Quit PocketDesk") { NSApplication.shared.terminate(nil) }
                     .keyboardShortcut("q")
@@ -151,6 +159,7 @@ private struct PermissionsPanel: View {
 
 private struct SessionPanel: View {
     let phone: HostState.ConnectedPhone
+    let disconnect: () -> Void
 
     var body: some View {
         Panel(tint: .green) {
@@ -163,6 +172,12 @@ private struct SessionPanel: View {
                     Text(phone.deviceName).font(.callout.weight(.semibold))
                     Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
+                Spacer(minLength: 8)
+                Button("Disconnect", role: .destructive, action: disconnect)
+                    .buttonStyle(.glass)
+                    .tint(.red)
+                    .controlSize(.small)
+                    .help("End this session; the phone is told the Mac ended it.")
             }
         }
     }
@@ -209,19 +224,27 @@ struct ApprovalCard: View {
 
     var body: some View {
         Panel(tint: HostBrand.accent) {
-            Label("“\(approval.deviceName)” wants to pair", systemImage: "iphone.badge.exclamationmark")
-                .font(.subheadline.weight(.semibold))
-            Text("Accept only if your phone shows this code:")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            CodeTiles(code: approval.code, size: 30)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
+            if let code = approval.code {
+                Label("“\(approval.deviceName)” wants to pair", systemImage: "iphone.badge.exclamationmark")
+                    .font(.subheadline.weight(.semibold))
+                Text("Accept only if your phone shows this code:")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                CodeTiles(code: code, size: 30)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            } else {
+                Label("“\(approval.deviceName)” wants to view this Mac", systemImage: "iphone.badge.exclamationmark")
+                    .font(.subheadline.weight(.semibold))
+                Text("It will see your screen and can use the mouse and keyboard.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             HStack {
-                Button("Decline", role: .cancel) { decide(false) }
+                Button(approval.isConnectionRequest ? "Deny" : "Decline", role: .cancel) { decide(false) }
                     .buttonStyle(.glass)
                     .frame(maxWidth: .infinity)
-                Button("Accept") { decide(true) }
+                Button(approval.isConnectionRequest ? "Allow" : "Accept") { decide(true) }
                     .buttonStyle(.glassProminent)
                     .tint(HostBrand.accent)
                     .keyboardShortcut(.defaultAction)

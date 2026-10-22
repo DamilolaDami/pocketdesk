@@ -10,7 +10,25 @@ public final class HostController {
     private var service: HostService?
     private var runTask: Task<Void, Never>?
 
+    /// For the app's notifications; called after the store has the event.
+    public var onEvent: ((HostEvent) -> Void)?
+
     public init() {}
+
+    /// Ends every session of `peer` (the menu's Disconnect, or a notification action).
+    public func disconnect(_ peer: Fingerprint) async {
+        await service?.disconnect(peer)
+    }
+
+    public var askBeforeConnecting: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.askKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.askKey)
+            Task { [service] in await service?.setAskBeforeConnecting(newValue) }
+        }
+    }
+
+    private static let askKey = "PocketDesk.askBeforeConnecting"
 
     public func start() {
         guard runTask == nil else { return }
@@ -19,9 +37,13 @@ public final class HostController {
             let service = try HostService(configuration: .init(
                 hostID: Self.persistentHostID(),
                 hostName: Host.current().localizedName ?? "Mac",
-                trustStoreURL: Self.supportDirectory.appending(path: "trusted-phones.json")
-            ), input: InputInjector()) { event in
-                Task { @MainActor in store.send(event) }
+                trustStoreURL: Self.supportDirectory.appending(path: "trusted-phones.json"),
+                askBeforeConnecting: askBeforeConnecting
+            ), input: InputInjector()) { [weak self] event in
+                Task { @MainActor in
+                    store.send(event)
+                    self?.onEvent?(event)
+                }
             }
             self.service = service
             runTask = Task { try? await service.run() }

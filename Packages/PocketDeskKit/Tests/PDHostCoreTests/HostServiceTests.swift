@@ -36,12 +36,13 @@ final class HostServiceTests {
     }
 
     /// Starts the service. `approve` answers the verification-code prompt.
-    func startService(approve: @escaping @Sendable (PairingApproval) -> Bool = { _ in true }) async throws -> UInt16 {
+    func startService(askBeforeConnecting: Bool = false,
+                      approve: @escaping @Sendable (PairingApproval) -> Bool = { _ in true }) async throws -> UInt16 {
         let events = events
         let box = ServiceBox()
         let service = try HostService(
             configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
-                                 trustStoreURL: trustStoreURL, advertise: false),
+                                 trustStoreURL: trustStoreURL, advertise: false, askBeforeConnecting: askBeforeConnecting),
             makeFrameSource: { [frames] in frames }, input: input
         ) { event in
             events.append(event)
@@ -245,6 +246,81 @@ final class HostServiceTests {
             guard case .helloAck? = try await control.next() else { Issue.record("expected helloAck"); return }
             try await session.send(.bye(reason: "done"))
         }
+    }
+
+    func pinPhone() throws {
+        var store = TrustStore()
+        store.pin(PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone"))
+        try store.save(to: trustStoreURL)
+    }
+
+    private static let hello = ControlMessage.hello(Hello(deviceName: "Test iPhone",
+                                                           viewport: Viewport(width: 402, height: 874, scale: 3)))
+
+    @Test func macCanEndASessionAndThePhoneIsToldWhy() async throws {
+        try pinPhone()
+        let port = try await startService()
+        let service = try #require(service)
+        let phone = phone.fingerprint
+        let events = events
+
+        try await connect(port: port) { session in
+            var control = PhoneControl(session)
+            try await session.send(Self.hello)
+            guard case .helloAck? = try await control.next(), case .streamConfig? = try await control.next() else {
+                Issue.record("missing handshake"); return
+            }
+            await service.disconnect(phone)
+            #expect(try await control.next() == .bye(reason: "The Mac ended this session."))
+        }
+        for _ in 0..<200 where !events.all.contains(.sessionEnded(peer: phone)) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(events.all.contains(.sessionEnded(peer: phone)))
+    }
+
+    @Test func forgettingAConnectedPhoneDisconnectsIt() async throws {
+        try pinPhone()
+        let port = try await startService()
+        let service = try #require(service)
+        let phone = phone.fingerprint
+
+        try await connect(port: port) { session in
+            var control = PhoneControl(session)
+            try await session.send(Self.hello)
+            guard case .helloAck? = try await control.next(), case .streamConfig? = try await control.next() else {
+                Issue.record("missing handshake"); return
+            }
+            try await service.revoke(phone)
+            #expect(try await control.next() == .bye(reason: "This iPhone was removed from the Mac's paired phones."))
+        }
+        #expect(await !service.isTrusted(phone))
+    }
+
+    @Test func askBeforeConnectingLetsTheMacSayNo() async throws {
+        try pinPhone()
+        let port = try await startService(askBeforeConnecting: true) { approval in
+            #expect(approval.isConnectionRequest && approval.deviceName == "Test iPhone")
+            return false
+        }
+        try await connect(port: port) { session in
+            var control = PhoneControl(session)
+            try await session.send(Self.hello)
+            #expect(try await control.next() == .bye(reason: "The Mac didn't allow this connection."))
+        }
+        #expect(!events.all.contains { if case .sessionStarted = $0 { true } else { false } })
+    }
+
+    @Test func askBeforeConnectingLetsTheMacSayYes() async throws {
+        try pinPhone()
+        let port = try await startService(askBeforeConnecting: true) { _ in true }
+        try await connect(port: port) { session in
+            var control = PhoneControl(session)
+            try await session.send(Self.hello)
+            guard case .helloAck? = try await control.next() else { Issue.record("expected helloAck"); return }
+            try await session.send(.bye(reason: "done"))
+        }
+        #expect(events.all.contains { if case .approvalRequested(let approval) = $0 { approval.isConnectionRequest } else { false } })
     }
 
     /// The phone gave up waiting just before the Mac accepted, then scanned again.

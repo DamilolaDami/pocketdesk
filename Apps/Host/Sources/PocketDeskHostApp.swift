@@ -5,6 +5,7 @@ import SwiftUI
 @main
 struct PocketDeskHostApp: App {
     @State private var controller: HostController
+    @State private var notifier: SessionNotifier
 
     var body: some Scene {
         MenuBarExtra {
@@ -22,7 +23,10 @@ struct PocketDeskHostApp: App {
 
     init() {
         let controller = HostController()
+        let notifier = SessionNotifier(controller: controller)
+        controller.onEvent = { notifier.handle($0) }
         _controller = State(initialValue: controller)
+        _notifier = State(initialValue: notifier)
         controller.start()
     }
 }

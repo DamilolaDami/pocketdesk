@@ -33,6 +33,7 @@ struct StreamScreen: View {
                 if showsStatus && showStreamInfo {
                     StatusChip(hostName: hostName, config: config, link: controller.store.link)
                         .padding(.leading, 16)
+                        .padding(.top, topInset)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }

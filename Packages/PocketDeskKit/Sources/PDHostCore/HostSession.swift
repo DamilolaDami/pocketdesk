@@ -14,6 +14,12 @@ public protocol PairingAuthority: Sendable {
     /// Checks `token` against the open invite, asks the person at the Mac to confirm the
     /// verification code, and pins the phone if they accept.
     func approve(peer: Fingerprint, deviceName: String, token: [UInt8]) async -> Bool
+    /// A paired phone wants to stream: may it? (Yes, unless the Mac asks before each one.)
+    func allowSession(peer: Fingerprint, deviceName: String) async -> Bool
+}
+
+public extension PairingAuthority {
+    func allowSession(peer: Fingerprint, deviceName: String) async -> Bool { true }
 }
 
 /// One phone's session: pairing gate, handshake, then streaming until either side ends it.
@@ -125,6 +131,7 @@ public actor HostSession {
         var messages = session.controlMessages.makeAsyncIterator()
 
         var first = try await messages.next()
+        var justPaired = false
         if await pairing.isTrusted(peer) {
             // The phone gave up waiting just before the person at the Mac accepted, and asked
             // again: it's already pinned, so say yes.
@@ -143,6 +150,7 @@ public actor HostSession {
                 return
             }
             try await session.send(.pairResult(accepted: true))
+            justPaired = true
             first = try await messages.next()
         }
 
@@ -166,6 +174,11 @@ public actor HostSession {
                 default: continue
                 }
             }
+            return
+        }
+        // The person at the Mac just approved this phone; don't ask them twice.
+        if !justPaired, await !pairing.allowSession(peer: peer, deviceName: hello.deviceName) {
+            await finish(with: .bye(reason: "The Mac didn't allow this connection."))
             return
         }
         onEvent(.connected(peer: peer, deviceName: hello.deviceName))
@@ -260,6 +273,17 @@ public actor HostSession {
             }
         default:
             break
+        }
+    }
+
+    /// Ends the session from the Mac: the phone is told why and hangs up, which ends `run`.
+    /// If it doesn't within a couple of seconds, the connection is closed anyway.
+    public func end(reason: String) async {
+        try? await session.send(.bye(reason: reason))
+        let session = session
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            await session.close()
         }
     }
 

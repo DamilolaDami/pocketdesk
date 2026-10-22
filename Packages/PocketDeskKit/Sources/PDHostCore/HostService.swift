@@ -6,11 +6,22 @@ import PDSecurity
 import PDTransport
 import Synchronization
 
-/// A phone waiting for the person at the Mac to confirm its verification code.
+/// A phone waiting for the person at the Mac: to confirm its verification code (pairing),
+/// or, with "Ask before each connection" on, to let it in (`code == nil`).
 public struct PairingApproval: Sendable, Equatable, Identifiable {
     public var id: UUID
     public var deviceName: String
-    public var code: String
+    public var code: String?
+    public var peer: Fingerprint?
+
+    public init(id: UUID, deviceName: String, code: String?, peer: Fingerprint? = nil) {
+        self.id = id
+        self.deviceName = deviceName
+        self.code = code
+        self.peer = peer
+    }
+
+    public var isConnectionRequest: Bool { code == nil }
 }
 
 /// Everything the Mac UI needs to know, as events into `HostState.reduce`.
@@ -38,11 +49,14 @@ public actor HostService: PairingAuthority {
         public var approvalTimeout: Duration
         /// `false` for tests that connect over 127.0.0.1.
         public var advertise: Bool
+        /// Paired phones still need a yes from the person at the Mac for each session.
+        public var askBeforeConnecting: Bool
 
         public init(hostID: UUID, hostName: String,
                     identityLabel: String = "com.pocketdesk.host.identity",
                     trustStoreURL: URL, inviteLifetime: Duration = .seconds(300),
-                    approvalTimeout: Duration = .seconds(120), advertise: Bool = true) {
+                    approvalTimeout: Duration = .seconds(120), advertise: Bool = true,
+                    askBeforeConnecting: Bool = false) {
             self.hostID = hostID
             self.hostName = hostName
             self.identityLabel = identityLabel
@@ -50,11 +64,12 @@ public actor HostService: PairingAuthority {
             self.inviteLifetime = inviteLifetime
             self.approvalTimeout = approvalTimeout
             self.advertise = advertise
+            self.askBeforeConnecting = askBeforeConnecting
         }
     }
 
     public nonisolated let identity: DeviceIdentity
-    private let configuration: Configuration
+    private var configuration: Configuration
     private let makeFrameSource: @Sendable () -> any FrameSource
     private let input: any InputSink
     private let onEvent: @Sendable (HostEvent) -> Void
@@ -63,6 +78,8 @@ public actor HostService: PairingAuthority {
     private var invite: (value: PairingInvite, expires: ContinuousClock.Instant)?
     private var approvals: [UUID: CheckedContinuation<Bool, Never>] = [:]
     private var listener: QUICHostListener?
+    /// Live sessions by phone (a phone can have a stream and a quick app-list fetch at once).
+    private var sessions: [Fingerprint: [UUID: HostSession]] = [:]
 
     public init(configuration: Configuration,
                 makeFrameSource: @escaping @Sendable () -> any FrameSource = { ScreenCaptureSource() },
@@ -130,32 +147,39 @@ public actor HostService: PairingAuthority {
         onEvent(.approvalResolved(id: id))
     }
 
-    public func revoke(_ peer: Fingerprint) throws {
+    /// Forgets the phone, and ends its sessions: an unpaired phone mustn't stay connected.
+    public func revoke(_ peer: Fingerprint) async throws {
         trustStore.revoke(peer)
         try trustStore.save(to: configuration.trustStoreURL)
         onEvent(.pairedPeersChanged(Array(trustStore.peers.values)))
+        await disconnect(peer, reason: "This iPhone was removed from the Mac's paired phones.")
+    }
+
+    /// Ends every session of `peer`; the phone is told why.
+    public func disconnect(_ peer: Fingerprint, reason: String = "The Mac ended this session.") async {
+        for session in Array(sessions[peer, default: [:]].values) {
+            await session.end(reason: reason)
+        }
+    }
+
+    public func setAskBeforeConnecting(_ ask: Bool) {
+        configuration.askBeforeConnecting = ask
     }
 
     public func isTrusted(_ peer: Fingerprint) -> Bool {
         trustStore.trusts(peer)
     }
 
+    public func allowSession(peer: Fingerprint, deviceName: String) async -> Bool {
+        guard configuration.askBeforeConnecting else { return true }
+        return await ask(PairingApproval(id: UUID(), deviceName: deviceName, code: nil, peer: peer))
+    }
+
     public func approve(peer: Fingerprint, deviceName: String, token: [UInt8]) async -> Bool {
         guard let invite = openInviteIfValid(), invite.matches(token: Data(token)) else { return false }
-        let approval = PairingApproval(
+        let accepted = await ask(PairingApproval(
             id: UUID(), deviceName: deviceName,
-            code: Pairing.verificationCode(host: identity.fingerprint, client: peer, token: invite.token))
-
-        let timeout = Task { [configuration] in
-            try await Task.sleep(for: configuration.approvalTimeout)
-            self.resolveApproval(approval.id, accepted: false)
-        }
-        defer { timeout.cancel() }
-
-        let accepted = await withCheckedContinuation { continuation in
-            approvals[approval.id] = continuation
-            onEvent(.approvalRequested(approval))
-        }
+            code: Pairing.verificationCode(host: identity.fingerprint, client: peer, token: invite.token), peer: peer))
         guard accepted else { return false }
 
         trustStore.pin(PairedPeer(fingerprint: peer, name: deviceName))
@@ -169,6 +193,19 @@ public actor HostService: PairingAuthority {
         closeInvite()
         onEvent(.pairedPeersChanged(Array(trustStore.peers.values)))
         return true
+    }
+
+    /// Shows `approval` and waits for the person at the Mac; silence is a no.
+    private func ask(_ approval: PairingApproval) async -> Bool {
+        let timeout = Task { [configuration] in
+            try await Task.sleep(for: configuration.approvalTimeout)
+            self.resolveApproval(approval.id, accepted: false)
+        }
+        defer { timeout.cancel() }
+        return await withCheckedContinuation { continuation in
+            approvals[approval.id] = continuation
+            onEvent(.approvalRequested(approval))
+        }
     }
 
     // MARK: Sessions
@@ -206,7 +243,13 @@ public actor HostService: PairingAuthority {
                 onEvent(.sessionStreaming(peer: peer, config: config, window: window))
             }
         }
-        defer { if started.isSet { onEvent(.sessionEnded(peer: peer)) } }
+        let id = UUID()
+        sessions[peer, default: [:]][id] = hostSession
+        defer {
+            sessions[peer]?[id] = nil
+            if sessions[peer]?.isEmpty == true { sessions[peer] = nil }
+            if started.isSet { onEvent(.sessionEnded(peer: peer)) }
+        }
         do {
             try await hostSession.run()
         } catch {

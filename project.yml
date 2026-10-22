@@ -24,6 +24,10 @@ targets:
     dependencies:
       - package: PocketDeskKit
         product: PDHostCore
+      # Not linked: it's loaded into /usr/bin/perl, never into the host (see NowPlaying.m).
+      - target: PocketDeskNowPlaying
+        link: false
+        embed: true
     info:
       path: Apps/Host/Info.plist
       properties:
@@ -36,6 +40,18 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.host
         # Input injection (CGEvent) needs a non-sandboxed app: ship notarized via Developer ID.
         ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
+
+  # Reads what's playing for live tiles, from inside Apple's perl (see NowPlaying.m).
+  PocketDeskNowPlaying:
+    type: library.dynamic
+    platform: macOS
+    sources: [Apps/NowPlaying]
+    settings:
+      base:
+        EXECUTABLE_PREFIX: ""
+        PRODUCT_NAME: PocketDeskNowPlaying
+        CLANG_ENABLE_OBJC_ARC: YES
         ENABLE_HARDENED_RUNTIME: YES
 
   PocketDesk:

@@ -427,6 +427,9 @@ final class HostServiceTests {
         #expect(NowPlayingReader.parse(["kMRMediaRemoteNowPlayingInfoTitle": "Paused",
                                         "kMRMediaRemoteNowPlayingInfoPlaybackRate": 0.0])?.isPlaying == false)
         #expect(NowPlayingReader.parse([:]) == nil)
+        #expect(NowPlayingReader.parseHelper(#"{"title":"Netflix","isPlaying":true}"# + "\n")
+                == NowPlaying(title: "Netflix", isPlaying: true))
+        #expect(NowPlayingReader.parseHelper("{}\n") == nil)
     }
 
     @Test func aMissingMacShortcutSaysSo() async {

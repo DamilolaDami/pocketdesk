@@ -58,7 +58,7 @@ extension InputInjector {
         case .runShortcut(let id, let name):
             // A shortcut can take a while (or ask a question on the Mac): once it's been
             // running a few seconds, call it started rather than keep the phone waiting.
-            let result: MacShortcuts.Result?
+            let result: Subprocess.Result?
             do {
                 result = try await MacShortcuts.run(["run", id ?? name], keepOutput: false, timeout: .seconds(4))
             } catch {

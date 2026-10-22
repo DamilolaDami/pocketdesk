@@ -95,20 +95,29 @@ extension InstalledApps {
 
 /// The `shortcuts` command that ships with macOS.
 enum MacShortcuts {
+    /// Runs `/usr/bin/shortcuts`. Gives up waiting after `timeout` (the shortcut keeps
+    /// running) and returns `nil`.
+    /// A shortcut's own output is dropped (`keepOutput: false`): a big one would fill the
+    /// pipe and stall it.
+    static func run(_ arguments: [String], keepOutput: Bool = true,
+                    timeout: Duration = .seconds(20)) async throws -> Subprocess.Result? {
+        try await Subprocess.run("/usr/bin/shortcuts", arguments, keepOutput: keepOutput, timeout: timeout)
+    }
+}
+
+/// A command line tool, run and waited for.
+enum Subprocess {
     struct Result {
         var status: Int32
         var output: String
         var error: String
     }
 
-    /// Runs `/usr/bin/shortcuts`. Gives up waiting after `timeout` (the shortcut keeps
-    /// running) and returns `nil`.
-    /// A shortcut's own output is dropped (`keepOutput: false`): a big one would fill the
-    /// pipe and stall it.
-    static func run(_ arguments: [String], keepOutput: Bool = true,
-                    timeout: Duration = .seconds(20)) async throws -> Result? {
+    /// `nil` if it's still running after `timeout` (it's left to finish on its own).
+    static func run(_ executable: String, _ arguments: [String], keepOutput: Bool = true,
+                    timeout: Duration) async throws -> Result? {
         let process = Process()
-        process.executableURL = URL(filePath: "/usr/bin/shortcuts")
+        process.executableURL = URL(filePath: executable)
         process.arguments = arguments
         let output = Pipe(), error = Pipe()
         process.standardOutput = keepOutput ? output : FileHandle.nullDevice

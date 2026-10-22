@@ -289,8 +289,11 @@ The person at the Mac always knows and controls who is using it:
 - The Mac checks every second (`Configuration.statusInterval`) and sends `macStatus` only when
   it changes. Closing the connection stops the polling.
 - `MacStatus`: volume and mute from Core Audio, plus `nowPlaying` from the private MediaRemote
-  framework. Since macOS 15.4 MediaRemote answers only some processes, so `nowPlaying` may
-  always be `nil`; tiles then show volume alone. The reader gives up after 0.5 s.
+  framework. Since macOS 15.4 MediaRemote answers only Apple's processes, so the host bundles
+  `PocketDeskNowPlaying.dylib` (`Apps/NowPlaying`, never linked into the host) and loads it
+  into `/usr/bin/perl` as an XSUB, which prints one JSON line. This is a known workaround,
+  not an API: if Apple closes it, `nowPlaying` is `nil` and tiles show volume alone. Without
+  the bundled helper (tests, command line) the reader asks MediaRemote directly.
 - Tiles: Play / Pause shows the title and artist and swaps between play and pause; volume tiles
   show the level or "Muted".
 

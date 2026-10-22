@@ -73,8 +73,8 @@ struct StreamScreen: View {
             }
     }
 
-    /// The few things used all the time stay out; the rest live in More, like a media
-    /// player's controls. Hidden, it shrinks to one button.
+    /// The two things used all the time stay out; the rest (paste included) live in More,
+    /// like a media player's controls. Hidden, it shrinks to one button.
     private func controls(isLandscape: Bool) -> some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
@@ -83,21 +83,6 @@ struct StreamScreen: View {
                         keyboardShown.toggle()
                     }
                     control("Shortcuts", "square.grid.2x2.fill") { showingShortcuts = true }
-                    if shareClipboard {
-                        // The system paste button reads the clipboard without iOS's
-                        // "Allow Paste" prompt, because the tap itself is the consent.
-                        PasteButton(supportedContentTypes: [.plainText, .image]) { providers in
-                            Task { @MainActor in
-                                if let item = await ClipboardItem(providers) { controller.sendClipboard(item) }
-                            }
-                        }
-                        .labelStyle(.iconOnly)
-                        .buttonBorderShape(.circle)
-                        .tint(Color(white: 0.2))
-                        .foregroundStyle(.white)
-                        .controlSize(.large)
-                        .accessibilityLabel("Paste to Mac")
-                    }
                     moreMenu(isLandscape: isLandscape)
                 } else {
                     control("Show Controls", "slider.horizontal.3") {
@@ -111,6 +96,17 @@ struct StreamScreen: View {
 
     private func moreMenu(isLandscape: Bool) -> some View {
         Menu {
+            if shareClipboard {
+                Section {
+                    // The system paste button reads the clipboard without iOS's "Allow Paste"
+                    // prompt (the tap is the consent), and in a menu it looks like any item.
+                    PasteButton(supportedContentTypes: [.plainText, .image]) { providers in
+                        Task { @MainActor in
+                            if let item = await ClipboardItem(providers) { controller.sendClipboard(item) }
+                        }
+                    }
+                }
+            }
             Section {
                 Button(isLandscape ? "Portrait" : "Landscape",
                        systemImage: isLandscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate") {

@@ -7,6 +7,7 @@ enum SettingsKey {
     static let defaultMac = "defaultMac"
     static let startInLandscape = "startInLandscape"
     static let showStreamInfo = "showStreamInfo"
+    static let streamAudio = "streamAudio"
     static let haptics = "haptics"
 }
 
@@ -16,6 +17,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
     @AppStorage(SettingsKey.startInLandscape) private var startInLandscape = false
     @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
+    @AppStorage(SettingsKey.streamAudio) private var streamAudio = true
     @AppStorage(SettingsKey.haptics) private var haptics = true
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
@@ -42,6 +44,10 @@ struct SettingsView: View {
                 }
 
                 Section("Streaming") {
+                    Toggle(isOn: $streamAudio) {
+                        SettingsLabel("Play Mac Audio", symbol: "speaker.wave.2.fill", color: .blue)
+                    }
+                    .onChange(of: streamAudio) { _, enabled in controller.audioEnabled = enabled }
                     Toggle(isOn: $startInLandscape) {
                         SettingsLabel("Start in Landscape", symbol: "rectangle.landscape.rotate", color: .orange)
                     }

@@ -1,8 +1,8 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 2
+public let protocolVersion: UInt16 = 3
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
-public let alpn = "pocketdesk/1"
+public let alpn = "pocketdesk/3"
 
 /// Bonjour service type advertised by the host on the local network.
 public let bonjourServiceType = "_pocketdesk._udp"
@@ -20,6 +20,7 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// `nil` streams the whole display.
     case selectSource(windowID: UInt32?)
     case streamConfig(StreamConfig)
+    case setAudioEnabled(Bool)
     case requestKeyframe
     /// Committed text (IME, dictation, paste). Single keystrokes go over the input channel.
     case insertText(String)
@@ -61,12 +62,14 @@ public struct Hello: Codable, Sendable, Equatable {
     public var deviceName: String
     /// Client screen in points + scale, so the host can pick a matching stream size.
     public var viewport: Viewport
+    public var audioEnabled: Bool
     public var mode: Mode
 
-    public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport, mode: Mode = .stream) {
+    public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport, mode: Mode = .stream, audioEnabled: Bool = true) {
         self.version = version
         self.deviceName = deviceName
         self.viewport = viewport
+        self.audioEnabled = audioEnabled
         self.mode = mode
     }
 }

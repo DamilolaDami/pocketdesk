@@ -13,6 +13,15 @@ public final class SessionController {
     public var viewport = Viewport(width: 402, height: 874, scale: 3)
     public var deviceName = "iPhone"
 
+    public var audioEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "streamAudio") as? Bool ?? true }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "streamAudio")
+            display.setAudioEnabled(newValue)
+            connection?.send(.setAudioEnabled(newValue))
+        }
+    }
+
     private let identityLabel: String
     private let trustStoreURL: URL
     private var trustStore: TrustStore
@@ -142,7 +151,7 @@ public final class SessionController {
         let connection = ClientConnection(
             identity: identity,
             request: .init(endpoint: host.endpoint, hostFingerprint: hostFingerprint, invite: invite,
-                           deviceName: deviceName, viewport: viewport),
+                           deviceName: deviceName, viewport: viewport, audioEnabled: audioEnabled),
             display: display
         ) { [weak self] event in
             Task { @MainActor in self?.handle(event) }

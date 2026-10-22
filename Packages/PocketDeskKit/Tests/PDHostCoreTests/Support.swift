@@ -56,6 +56,8 @@ actor SyntheticFrameSource: FrameSource {
     let displaySize = (width: 1920, height: 1080)
     let window = WindowInfo(id: 42, appName: "Notes", bundleID: "com.apple.Notes", title: "Shopping", width: 800, height: 600)
     private var task: Task<Void, Never>?
+    private(set) var audioConfigurations: [(Bool, UInt32)] = []
+    func configureAudio(enabled: Bool, generation: UInt32) { audioConfigurations.append((enabled, generation)) }
     private(set) var startedSources: [CaptureSource] = []
 
     func displays() -> [DisplayInfo] { [DisplayInfo(id: 1, width: displaySize.width, height: displaySize.height)] }

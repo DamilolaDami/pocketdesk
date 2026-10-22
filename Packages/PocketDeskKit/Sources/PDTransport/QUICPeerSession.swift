@@ -9,6 +9,7 @@ import Synchronization
 /// - control: bidirectional stream opened by the client, `ControlMessage` as JSON via `Coder`
 /// - input:   QUIC datagrams, `InputEvent` binary
 /// - video:   unidirectional stream opened by the host, `VideoFrameHeader` + payload
+/// - audio:   separate unidirectional stream, `AudioFrameHeader` + raw AAC-LC
 ///
 /// The connection's lifetime is structured: it lives while the listener's or
 /// `QUICClient.connect`'s handler runs. `close()` stops this session's readers.
@@ -21,6 +22,9 @@ public final class QUICPeerSession: PeerSession {
     public let inputEvents: AsyncThrowingStream<InputEvent, any Error>
     public let videoFrames: AsyncThrowingStream<(VideoFrameHeader, [UInt8]), any Error>
 
+    public let audioFrames: AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>
+    private let audioOut: QUIC.Stream<QUICStream>?
+
     private let control: ControlStream
     private let datagrams: QUIC.Datagrams<QUICDatagram>
     /// Host only.
@@ -29,10 +33,12 @@ public final class QUICPeerSession: PeerSession {
     private let finishAll: @Sendable () -> Void
 
     private init(peer: Fingerprint, control: ControlStream, datagrams: QUIC.Datagrams<QUICDatagram>,
-                 videoOut: QUIC.Stream<QUICStream>?, channels: Channels, readers: [Task<Void, Never>]) {
+                 videoOut: QUIC.Stream<QUICStream>?, audioOut: QUIC.Stream<QUICStream>?, channels: Channels, readers: [Task<Void, Never>]) {
         self.peer = peer
         self.control = control
         self.datagrams = datagrams
+        self.audioOut = audioOut
+        self.audioFrames = channels.audio.stream
         self.videoOut = videoOut
         self.controlMessages = channels.control.stream
         self.inputEvents = channels.input.stream
@@ -99,7 +105,17 @@ public final class QUICPeerSession: PeerSession {
             throw error
         }
 
-        return QUICPeerSession(peer: peer, control: control, datagrams: datagrams, videoOut: videoOut,
+        let audioOut: QUIC.Stream<QUICStream>
+        do {
+            audioOut = try await connection.openStream(directionality: .unidirectional)
+            try await videoOut.send([UInt8(0)])
+            try await audioOut.send([UInt8(1)])
+        } catch {
+            await stop([controlReader, inputReader])
+            throw error
+        }
+
+        return QUICPeerSession(peer: peer, control: control, datagrams: datagrams, videoOut: videoOut, audioOut: audioOut,
                                channels: channels, readers: [controlReader, inputReader])
     }
 
@@ -122,15 +138,26 @@ public final class QUICPeerSession: PeerSession {
         let videoReader = Task {
             do {
                 try await connection.inboundStreams { stream in
+                    let tag = try await stream.receive(exactly: 1).content
+                    guard let kind = tag.first, kind <= 1 else { throw WireError.unknownTag }
                     while true {
+                        if kind == 1 {
+                            let bytes = try await stream.receive(exactly: AudioFrameHeader.encodedSize).content
+                            let header = try AudioFrameHeader(decoding: bytes)
+                            let payload = try await stream.receive(exactly: Int(header.payloadLength)).content
+                            channels.audio.continuation.yield((header, [UInt8](payload)))
+                            continue
+                        }
                         let headerBytes = try await stream.receive(exactly: VideoFrameHeader.encodedSize).content
                         let header = try VideoFrameHeader(decoding: headerBytes)
                         let payload = try await stream.receive(exactly: Int(header.payloadLength)).content
                         channels.video.continuation.yield((header, [UInt8](payload)))
                     }
                 }
+                channels.audio.continuation.finish()
                 channels.video.continuation.finish()
             } catch {
+                channels.audio.continuation.finish(throwing: error)
                 channels.video.continuation.finish(throwing: error)
             }
         }
@@ -142,7 +169,7 @@ public final class QUICPeerSession: PeerSession {
             throw error
         }
 
-        return QUICPeerSession(peer: host, control: control, datagrams: datagrams, videoOut: nil,
+        return QUICPeerSession(peer: host, control: control, datagrams: datagrams, videoOut: nil, audioOut: nil,
                                channels: channels, readers: [controlReader, videoReader])
     }
 
@@ -167,6 +194,17 @@ public final class QUICPeerSession: PeerSession {
         try await videoOut.send(bytes)
     }
 
+    public func send(audio header: AudioFrameHeader, payload: [UInt8]) async throws {
+        guard let audioOut else { throw TransportError.wrongRole }
+        guard payload.count == Int(header.payloadLength), payload.count <= AudioFrameHeader.maxPayloadLength else {
+            throw WireError.invalidValue
+        }
+        var bytes: [UInt8] = []
+        header.encode(into: &bytes)
+        bytes.append(contentsOf: payload)
+        try await audioOut.send(bytes)
+    }
+
     /// Cancels setup-time readers and waits for them, for when `accept`/`open` fails partway.
     private static func stop(_ readers: [Task<Void, Never>]) async {
         for reader in readers { reader.cancel() }
@@ -187,8 +225,9 @@ public final class QUICPeerSession: PeerSession {
     }
 }
 
-/// The three inbound channels, created before the readers that feed them.
+/// The four inbound channels, created before the readers that feed them.
 private struct Channels: Sendable {
+    let audio = AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>.makeStream(bufferingPolicy: .bufferingNewest(8))
     let control = AsyncThrowingStream<ControlMessage, any Error>.makeStream()
     let input = AsyncThrowingStream<InputEvent, any Error>.makeStream(bufferingPolicy: .bufferingNewest(64))
     // Unbounded on purpose: every delta frame references the one before it, so dropping any
@@ -197,7 +236,8 @@ private struct Channels: Sendable {
     let video = AsyncThrowingStream<(VideoFrameHeader, [UInt8]), any Error>.makeStream(bufferingPolicy: .unbounded)
 
     var finish: @Sendable () -> Void {
-        { [control, input, video] in
+        { [control, input, video, audio] in
+            audio.continuation.finish()
             control.continuation.finish()
             input.continuation.finish()
             video.continuation.finish()

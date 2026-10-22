@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Network
 import PDProtocol
@@ -41,14 +42,16 @@ public actor ClientConnection {
         public var invite: PairingInvite?
         public var deviceName: String
         public var viewport: Viewport
+        public var audioEnabled: Bool
 
         public init(endpoint: NWEndpoint, hostFingerprint: Fingerprint, invite: PairingInvite?,
-                    deviceName: String, viewport: Viewport) {
+                    deviceName: String, viewport: Viewport, audioEnabled: Bool = true) {
             self.endpoint = endpoint
             self.hostFingerprint = hostFingerprint
             self.invite = invite
             self.deviceName = deviceName
             self.viewport = viewport
+            self.audioEnabled = audioEnabled
         }
     }
 
@@ -80,9 +83,11 @@ public actor ClientConnection {
 
     /// Runs until the connection ends; always finishes with `.ended`.
     public func run() async {
+        let playbackID = display.beginSession(audioEnabled: request.audioEnabled)
+        defer { display.endSession(playbackID) }
         do {
             try await QUICClient.connect(to: request.endpoint, identity: identity, host: request.hostFingerprint) { session in
-                try await self.drive(session)
+                try await self.drive(session, playbackID: playbackID)
             }
             onEvent(.ended(reason: nil))
         } catch is CancellationError {
@@ -94,11 +99,22 @@ public actor ClientConnection {
         outbox.continuation.finish()
     }
 
-    private func drive(_ session: QUICPeerSession) async throws {
+    private func drive(_ session: QUICPeerSession, playbackID: UUID) async throws {
+        guard display.isCurrentSession(playbackID) else { throw CancellationError() }
+        #if os(iOS)
+        let audioSession = AVAudioSession.sharedInstance()
+        try audioSession.setCategory(.playback, mode: .moviePlayback)
+        try audioSession.setActive(true)
+        defer {
+            if display.isCurrentSession(playbackID) {
+                try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+            }
+        }
+        #endif
         if let invite = request.invite {
             try await pair(session, invite: invite)
         }
-        try await session.send(.hello(Hello(deviceName: request.deviceName, viewport: request.viewport)))
+        try await session.send(.hello(Hello(deviceName: request.deviceName, viewport: request.viewport, audioEnabled: request.audioEnabled)))
 
         let display = display
         let inputs = inputs.stream
@@ -108,7 +124,7 @@ public actor ClientConnection {
         // keep the stated reason so it wins over "connection reset".
         let hostReason = HostReason()
         do {
-            try await stream(session, display: display, inputs: inputs, outbox: outbox, onEvent: onEvent, hostReason: hostReason)
+            try await stream(session, display: display, inputs: inputs, outbox: outbox, onEvent: onEvent, hostReason: hostReason, playbackID: playbackID)
         } catch {
             if let reason = hostReason.value { throw ClientError.hostEnded(reason) }
             throw error
@@ -118,7 +134,7 @@ public actor ClientConnection {
     private nonisolated func stream(_ session: QUICPeerSession, display: VideoDisplay,
                                     inputs: AsyncStream<InputEvent>, outbox: AsyncStream<ControlMessage>,
                                     onEvent: @escaping @Sendable (ClientEvent) -> Void,
-                                    hostReason: HostReason) async throws {
+                                    hostReason: HostReason, playbackID: UUID) async throws {
         // Whichever channel ends first ends the session.
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
@@ -131,7 +147,7 @@ public actor ClientConnection {
                         hostReason.value = reason
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
-                    case .helloAck, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
+                    case .setAudioEnabled, .helloAck, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .run, .listApps, .apps, .requestAppIcons, .appIcon:
                         continue
                     }
@@ -139,9 +155,14 @@ public actor ClientConnection {
             }
             group.addTask {
                 for try await (header, payload) in session.videoFrames {
-                    if display.enqueue(header: header, payload: payload) {
+                    if display.enqueue(header: header, payload: payload, sessionID: playbackID) {
                         try await session.send(.requestKeyframe)
                     }
+                }
+            }
+            group.addTask {
+                for try await (header, payload) in session.audioFrames {
+                    try display.enqueueAudio(header: header, payload: payload, sessionID: playbackID)
                 }
             }
             group.addTask {

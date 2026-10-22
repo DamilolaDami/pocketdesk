@@ -23,7 +23,7 @@ struct QUICSessionTests {
         DeviceIdentity.delete(label: phoneIdentity.label)
     }
 
-    @Test func allThreeChannelsFlowBetweenPinnedPeers() async throws {
+    @Test func allFourChannelsFlowBetweenPinnedPeers() async throws {
         defer { removeIdentities() }
         let phone = phoneIdentity.fingerprint
         let listener = try QUICHostListener(identity: hostIdentity, advertise: nil) { $0 == phone }
@@ -38,6 +38,8 @@ struct QUICSessionTests {
                     try await session.send(.helloAck(HelloAck(hostName: "Test Host", displays: [])))
                     let header = VideoFrameHeader(frameID: 1, captureTimeMicros: 99, flags: .keyframe,
                                                   payloadLength: 3, sourceGeneration: 0)
+                    // Send audio first: dispatch must use tags, not stream arrival order.
+                    try await session.send(audio: AudioFrameHeader(captureTimeMicros: 99, sourceGeneration: 0, payloadLength: 2), payload: [4, 5])
                     try await session.send(frame: header, payload: [1, 2, 3])
                     for try await event in session.inputEvents {
                         await received.record(event)
@@ -62,6 +64,11 @@ struct QUICSessionTests {
             #expect(frame.0.frameID == 1)
             #expect(frame.0.flags.contains(.keyframe))
             #expect(frame.1 == [1, 2, 3])
+
+            var audio = session.audioFrames.makeAsyncIterator()
+            let packet = try #require(try await audio.next())
+            #expect(packet.0.captureTimeMicros == frame.0.captureTimeMicros)
+            #expect(packet.1 == [4, 5])
 
             // Datagrams are unreliable: resend until the host has one.
             for _ in 0..<50 where await received.events.isEmpty {

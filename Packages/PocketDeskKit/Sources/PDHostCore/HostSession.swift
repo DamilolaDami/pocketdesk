@@ -56,6 +56,8 @@ public actor HostSession {
     private let catalog: any AppCatalogSource
     private let onEvent: @Sendable (Event) -> Void
 
+    private var audioEnabled = true
+    private var currentSource: CaptureSource?
     private var viewport = Viewport(width: 390, height: 844, scale: 3)
     private var encoder: HEVCEncoder?
     private var pumpTasks: [Task<Void, Never>] = []
@@ -118,6 +120,7 @@ public actor HostSession {
             await finish(with: .bye(reason: "Unsupported protocol version \(hello.version)"))
             return
         }
+        audioEnabled = hello.audioEnabled
         viewport = hello.viewport
         if hello.mode == .catalog {
             // A quick question from the shortcut editor: no picture, no input, no "connected".
@@ -151,6 +154,11 @@ public actor HostSession {
 
         while let message = try await messages.next() {
             switch message {
+            case .setAudioEnabled(let enabled):
+                if enabled != audioEnabled {
+                    audioEnabled = enabled
+                    try await startStreaming(currentSource)
+                }
             case .requestKeyframe:
                 encoder?.requestKeyframe()
             case .listWindows:
@@ -227,6 +235,7 @@ public actor HostSession {
 
     private func startStreaming(_ source: CaptureSource?) async throws {
         await stopPump()
+        currentSource = source
         let resolved = try await frameSource.resolve(source)
         let size = StreamSizing.fit(sourceWidth: resolved.pixelWidth, sourceHeight: resolved.pixelHeight, into: viewport)
         let config = StreamConfig(codec: .hevc, width: size.width, height: size.height, fps: configuration.fps,
@@ -243,11 +252,25 @@ public actor HostSession {
 
         // The phone learns the new size before the first frame of the new generation.
         try await session.send(.streamConfig(config))
+        await frameSource.configureAudio(enabled: audioEnabled, generation: generation)
         let frames = try await frameSource.start(resolved, width: config.width, height: config.height, fps: config.fps)
         onEvent(.streaming(peer: peer, config: config, window: resolved.window))
 
+        let audioFrames = await frameSource.audioFrames()
         let generation = generation
         pumpTasks = [
+            Task {
+                do {
+                    for try await (header, payload) in audioFrames {
+                        guard !Task.isCancelled else { return }
+                        try await self.session.send(audio: header, payload: payload)
+                    }
+                } catch {
+                    if !Task.isCancelled {
+                        try? await self.session.send(.actionFailed("Mac audio stopped: \(error.localizedDescription)"))
+                    }
+                }
+            },
             Task { await self.pumpCapture(frames, into: encoder) },
             Task { await self.pumpEncoded(from: encoder, generation: generation) },
             Task { await self.refineStillFrames(into: encoder) },

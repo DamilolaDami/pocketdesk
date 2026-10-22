@@ -46,13 +46,14 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/1`, three logical channels:
+One QUIC connection per session, ALPN `pocketdesk/3`, four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
 | control | bidirectional stream, opened by the phone | `ControlMessage` as JSON via `Coder` | Reliable, ordered, easy to evolve |
 | input | datagrams (max frame 1200 B) | `InputEvent`, ≤11 bytes binary | Lost pointer moves are superseded by the next one, so no retransmit lag |
-| video | unidirectional stream, opened by the Mac | `VideoFrameHeader` (21 B) + payload | Reliable, but the host drops frames *before* encoding under backpressure |
+| video | unidirectional stream, opened by the Mac; initial byte `0` | `VideoFrameHeader` (21 B) + payload | Reliable, but the host drops frames *before* encoding under backpressure |
+| audio | independent unidirectional stream, opened by the Mac; initial byte `1` | `AudioFrameHeader` (16 B) + raw AAC-LC packet | Timestamped audio cannot block video delivery |
 
 Discovery: Bonjour `_pocketdesk._udp` on the LAN, TXT record `id=<hostID>`, `v=<protocolVersion>`.
 Off-LAN (phase 2): the relay brokers a direct path and only forwards traffic as a fallback.
@@ -61,6 +62,9 @@ Connection lifetime is structured (that's how the new Network API works): a conn
 while `QUICHostListener.run`'s handler or `QUICClient.connect`'s body runs. `connect` fails
 on `.failed` or if not ready within its timeout. Otherwise a rejected handshake sits in
 `.waiting` forever.
+
+Media streams carry an explicit kind byte; stream arrival order is unspecified. Protocol v3
+uses a new ALPN so older peers cannot interpret the changed media framing.
 
 ### Session flow
 
@@ -109,6 +113,43 @@ phone, and refreshed at most every five minutes.
 5. **Decode/render** (phone, `FrameAssembler` + `VideoDisplay`): hand `CMSampleBuffer`s to `AVSampleBufferDisplayLayer` (hardware
    decode, display-synced, no Metal work for v1). Move to `VTDecompressionSession` + Metal
    only if we need custom compositing (cursor overlay, zoom lens).
+
+## Audio pipeline (protocol v3)
+
+- `Hello.audioEnabled` carries the persisted phone preference. Settings → Streaming →
+  **Play Mac Audio** sends `setAudioEnabled` during an active connection. The host restarts
+  the current capture source with a new generation and keyframe. Catalog sessions never
+  capture audio. The microphone and this host process's own audio are excluded.
+- ScreenCaptureKit captures 48 kHz stereo PCM with video's host monotonic timestamps.
+  `AACEncoder`, confined to the capture queue, converts to 128 kbps AAC-LC. Partial PCM
+  survives callbacks; packet timestamps advance by 1024 samples without rounding drift.
+  Timestamps subtract the encoder's reported leading priming frames (44 ms on Apple's
+  AAC encoder), so decoded content aligns with video. Capture discontinuities reset the converter. Capture and receive queues hold at most eight
+  packets and shed old audio under pressure. Raw AAC packets are independently framed and
+  limited to 8192 bytes before allocation on the receiver.
+- `AudioAssembler` builds compressed audio sample buffers. `VideoDisplay` owns an
+  `AVSampleBufferAudioRenderer` and an `AVSampleBufferRenderSynchronizer` shared with the
+  view's video renderer. The first media timestamp anchors to the local clock with 120 ms
+  of startup headroom. With audio enabled, video uses timestamps instead of
+  `DisplayImmediately`; with audio disabled, video remains immediate. The iOS playback
+  audio session is activated only for a streaming connection and deactivated on exit.
+- Source generations reject old audio; disconnect flushes both renderers and their clock.
+  Mac speaker muting is not implemented; the Mac continues playing locally.
+
+### Audio verification
+
+Automated coverage includes real PCM → AAC → PCM conversion, packet timestamp spacing,
+malformed wire lengths, actual four-channel QUIC delivery, and toggling audio while a
+window remains selected. Simulator builds verify API and UI integration. They do not
+establish the physical lip-sync acceptance target.
+
+To verify issue #7 on devices, run both updated apps, pair, and play a local test clip
+with simultaneous flashes and clicks (then dialogue). Record the phone screen and speaker
+at high frame rate; measure flash versus click over the start and after several minutes.
+Require an absolute offset of about 50 ms or less. Repeat for display/window capture,
+source switching, audio off/on, disconnect/reconnect, and wired/Bluetooth output changes.
+Confirm disabling audio silences the phone and disabling it before connecting avoids Mac
+audio capture. Confirm the microphone is never captured.
 
 ## State management
 

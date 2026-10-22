@@ -51,7 +51,16 @@ public protocol FrameSource: Sendable {
     func resolve(_ source: CaptureSource?) async throws -> ResolvedSource
     /// Starts (or restarts) capture. The stream ends when capture stops.
     func start(_ source: ResolvedSource, width: Int, height: Int, fps: Int) async throws -> AsyncStream<CapturedFrame>
+    func configureAudio(enabled: Bool, generation: UInt32) async
+    func audioFrames() async -> AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>
     func stop() async
+}
+
+public extension FrameSource {
+    func configureAudio(enabled: Bool, generation: UInt32) async {}
+    func audioFrames() async -> AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error> {
+        AsyncThrowingStream { $0.finish() }
+    }
 }
 
 /// Where injected input goes. `InputInjector` in the app; a recorder in tests.

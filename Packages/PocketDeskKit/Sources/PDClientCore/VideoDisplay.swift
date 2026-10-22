@@ -12,13 +12,91 @@ public final class VideoDisplay: @unchecked Sendable {
     private var layer: AVSampleBufferDisplayLayer?
     private var assembler = FrameAssembler()
     private var keyframeRequested = false
+    private let synchronizer = AVSampleBufferRenderSynchronizer()
+    private let audioRenderer = AVSampleBufferAudioRenderer()
+    private var clockStarted = false
+    private var generation: UInt32?
+    private var audioEnabled = true
+    private var sessionID: UUID?
 
-    public init() {}
+    public init() {
+        synchronizer.delaysRateChangeUntilHasSufficientMediaData = false
+        synchronizer.addRenderer(audioRenderer)
+    }
+
+    /// Called at connection boundaries so old host timestamps and queued sound cannot leak.
+    func beginSession(audioEnabled: Bool) -> UUID {
+        lock.withLock {
+            resetLocked()
+            let id = UUID()
+            sessionID = id
+            self.audioEnabled = audioEnabled
+            audioRenderer.isMuted = !audioEnabled
+            return id
+        }
+    }
+
+    func isCurrentSession(_ id: UUID) -> Bool { lock.withLock { sessionID == id } }
+
+    func endSession(_ id: UUID) {
+        lock.withLock {
+            // A cancelled connection may finish after its replacement has begun.
+            guard sessionID == id else { return }
+            resetLocked()
+            sessionID = nil
+        }
+    }
+
+    private func resetLocked() {
+        audioRenderer.flush()
+        layer?.sampleBufferRenderer.flush()
+        synchronizer.setRate(0, time: .zero)
+        clockStarted = false
+        generation = nil
+        assembler = FrameAssembler()
+        keyframeRequested = false
+    }
+
+    public func setAudioEnabled(_ enabled: Bool) {
+        lock.withLock {
+            audioEnabled = enabled
+            audioRenderer.isMuted = !enabled
+            if !enabled { audioRenderer.flush() }
+        }
+    }
+
+    private func startClock(at time: CMTime) {
+        guard !clockStarted || synchronizer.rate == 0 else { return }
+        clockStarted = true
+        // Anchor remote timestamps to a local start; no wall-clock synchronization needed.
+        synchronizer.setRate(1, time: time, atHostTime: CMTimeAdd(CMClockGetTime(CMClockGetHostTimeClock()),
+                                                               CMTime(value: 120, timescale: 1000)))
+    }
+
+    public func enqueueAudio(header: AudioFrameHeader, payload: [UInt8], sessionID: UUID? = nil) throws {
+        try lock.withLock {
+            if let sessionID, self.sessionID != sessionID { return }
+            guard audioEnabled, generation == nil || generation == header.sourceGeneration else { return }
+            if generation == nil { generation = header.sourceGeneration }
+            let sample = try AudioAssembler.assemble(header: header, payload: payload)
+            startClock(at: sample.presentationTimeStamp)
+            // Never build an unbounded renderer queue after a network stall.
+            let lag = CMTimeSubtract(synchronizer.currentTime(), sample.presentationTimeStamp).seconds
+            if audioRenderer.status == .failed { audioRenderer.flush() }
+            guard lag < 0.05, audioRenderer.isReadyForMoreMediaData else { return }
+            audioRenderer.enqueue(sample)
+        }
+    }
 
     /// The stream view's layer, or `nil` when it goes away. A new layer needs a keyframe.
     public func attach(_ layer: AVSampleBufferDisplayLayer?) {
         lock.withLock {
+            guard self.layer !== layer else { return }
+            if let old = self.layer {
+                synchronizer.removeRenderer(old.sampleBufferRenderer, at: .invalid)
+            }
             self.layer = layer
+            if let layer { synchronizer.addRenderer(layer.sampleBufferRenderer) }
             assembler.requireKeyframe()
             keyframeRequested = false
         }
@@ -26,8 +104,9 @@ public final class VideoDisplay: @unchecked Sendable {
 
     /// Decodes and shows one frame. Returns `true` when the host should be asked for a
     /// keyframe (once per gap, not once per dropped frame).
-    public func enqueue(header: VideoFrameHeader, payload: [UInt8]) -> Bool {
+    public func enqueue(header: VideoFrameHeader, payload: [UInt8], sessionID: UUID? = nil) -> Bool {
         lock.withLock {
+            if let sessionID, self.sessionID != sessionID { return false }
             guard let renderer = layer?.sampleBufferRenderer else {
                 assembler.requireKeyframe()
                 return false
@@ -37,7 +116,12 @@ public final class VideoDisplay: @unchecked Sendable {
                 assembler.requireKeyframe()
             }
             do {
-                if let sample = try assembler.assemble(header: header, payload: payload) {
+                if let sample = try assembler.assemble(header: header, payload: payload, displayImmediately: !audioEnabled) {
+                    if generation != header.sourceGeneration {
+                        generation = header.sourceGeneration
+                        audioRenderer.flush()
+                    }
+                    if audioEnabled { startClock(at: sample.presentationTimeStamp) }
                     renderer.enqueue(sample)
                     if header.flags.contains(.keyframe) { keyframeRequested = false }
                     return false

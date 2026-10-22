@@ -20,7 +20,7 @@ public struct FrameAssembler {
     }
 
     /// `nil` means the frame was dropped (see `needsKeyframe`).
-    public mutating func assemble(header: VideoFrameHeader, payload: [UInt8]) throws(AssemblyError) -> CMSampleBuffer? {
+    public mutating func assemble(header: VideoFrameHeader, payload: [UInt8], displayImmediately: Bool = true) throws(AssemblyError) -> CMSampleBuffer? {
         if header.sourceGeneration != generation {
             generation = header.sourceGeneration
             needsKeyframe = true
@@ -50,7 +50,7 @@ public struct FrameAssembler {
 
         let sample = try Self.makeSample(slices, format: format,
                                          presentationTime: CMTime(value: CMTimeValue(header.captureTimeMicros), timescale: 1_000_000),
-                                         isKeyframe: isKeyframe)
+                                         isKeyframe: isKeyframe, displayImmediately: displayImmediately)
         if isKeyframe { needsKeyframe = false }
         return sample
     }
@@ -73,7 +73,7 @@ public struct FrameAssembler {
     }
 
     private static func makeSample(_ bytes: [UInt8], format: CMVideoFormatDescription, presentationTime: CMTime,
-                                   isKeyframe: Bool) throws(AssemblyError) -> CMSampleBuffer {
+                                   isKeyframe: Bool, displayImmediately: Bool) throws(AssemblyError) -> CMSampleBuffer {
         var block: CMBlockBuffer?
         var status = CMBlockBufferCreateWithMemoryBlock(
             allocator: nil, memoryBlock: nil, blockLength: bytes.count, blockAllocator: nil,
@@ -94,12 +94,12 @@ public struct FrameAssembler {
             sampleBufferOut: &sample)
         guard status == noErr, let sample else { throw .sampleBuffer(status) }
 
-        // Interactive stream: show each frame as soon as it's decoded, no timebase scheduling.
+        // Video-only sessions display immediately; audio sessions use the shared timebase.
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
            CFArrayGetCount(attachments) > 0 {
             let dictionary = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
             CFDictionarySetValue(dictionary, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
-                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+                                 Unmanaged.passUnretained(displayImmediately ? kCFBooleanTrue : kCFBooleanFalse).toOpaque())
             if !isKeyframe {
                 CFDictionarySetValue(dictionary, Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque(),
                                      Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())

@@ -134,6 +134,33 @@ final class HostServiceTests {
         #expect(try TrustStore.load(from: trustStoreURL).trusts(phoneFingerprint))
     }
 
+    @Test func audioPreferenceChangesRestartCurrentSourceWithNewGeneration() async throws {
+        var trust = TrustStore()
+        trust.pin(PairedPeer(fingerprint: phone.fingerprint, name: "Phone"))
+        try trust.save(to: trustStoreURL)
+        let port = try await startService()
+        try await connect(port: port) { session in
+            var control = session.controlMessages.makeAsyncIterator()
+            try await session.send(.hello(Hello(deviceName: "Phone", viewport: Viewport(width: 400, height: 800, scale: 1),
+                                               audioEnabled: false)))
+            guard case .helloAck? = try await control.next(),
+                  case .streamConfig? = try await control.next() else { Issue.record("missing handshake"); return }
+            try await session.send(.selectSource(windowID: 42))
+            guard case .streamConfig? = try await control.next() else { Issue.record("missing source config"); return }
+            try await session.send(.setAudioEnabled(true))
+            guard case .streamConfig? = try await control.next() else { Issue.record("missing audio restart config"); return }
+            try await session.send(.setAudioEnabled(false))
+            guard case .streamConfig? = try await control.next() else { Issue.record("missing mute config"); return }
+            // A ping orders this assertion after capture setup, which follows streamConfig.
+            try await session.send(.ping(42))
+            #expect(try await control.next() == .pong(42))
+            try await session.send(.bye(reason: "done"))
+        }
+        #expect(await frames.audioConfigurations.map { $0.0 } == [false, false, true, false])
+        #expect(await frames.audioConfigurations.map { $0.1 } == [1, 2, 3, 4])
+        #expect(await frames.startedSources == [.display(1), .window(42), .window(42), .window(42)])
+    }
+
     @Test func pairedPhoneReconnectsWithoutInvite() async throws {
         var store = TrustStore()
         store.pin(PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone"))

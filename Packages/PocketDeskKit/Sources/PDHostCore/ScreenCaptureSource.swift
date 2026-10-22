@@ -7,6 +7,17 @@ import PDProtocol
 
 /// `FrameSource` backed by ScreenCaptureKit. Needs the Screen Recording permission.
 public actor ScreenCaptureSource: FrameSource {
+    private var audioEnabled = false
+    private var generation: UInt32 = 0
+    private var audio = AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>.makeStream(bufferingPolicy: .bufferingNewest(8))
+
+    public func configureAudio(enabled: Bool, generation: UInt32) {
+        audioEnabled = enabled
+        self.generation = generation
+    }
+
+    public func audioFrames() -> AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error> { audio.stream }
+
     private var stream: SCStream?
     private var output: StreamOutput?
     private let sampleQueue = DispatchQueue(label: "com.pocketdesk.capture", qos: .userInteractive)
@@ -82,12 +93,19 @@ public actor ScreenCaptureSource: FrameSource {
         // factor in how crisp text looks on the phone.
         configuration.captureResolution = .best
         configuration.preservesAspectRatio = true
-        configuration.capturesAudio = false
+        configuration.capturesAudio = audioEnabled
+        configuration.sampleRate = 48_000
+        configuration.channelCount = 2
+        configuration.excludesCurrentProcessAudio = true
+        configuration.captureMicrophone = false
 
         let (frames, continuation) = AsyncStream<CapturedFrame>.makeStream(bufferingPolicy: .bufferingNewest(2))
-        let output = StreamOutput(continuation: continuation)
+        audio = AsyncThrowingStream.makeStream(bufferingPolicy: .bufferingNewest(8))
+        let output = try StreamOutput(continuation: continuation, audio: audio.continuation,
+                                      encoder: audioEnabled ? AACEncoder() : nil, generation: generation)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: output)
         try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
+        if audioEnabled { try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: sampleQueue) }
         try await stream.startCapture()
         self.stream = stream
         self.output = output
@@ -125,6 +143,7 @@ public actor ScreenCaptureSource: FrameSource {
 
 public enum CaptureError: Error, Sendable {
     case sourceNotFound
+    case audioEncoding
 }
 
 /// Receives sample buffers on the capture queue and forwards complete frames.
@@ -134,13 +153,31 @@ public enum CaptureError: Error, Sendable {
 private final class StreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private let continuation: AsyncStream<CapturedFrame>.Continuation
 
-    init(continuation: AsyncStream<CapturedFrame>.Continuation) {
+    private let audio: AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>.Continuation
+    private let encoder: AACEncoder?
+    private let generation: UInt32
+
+    init(continuation: AsyncStream<CapturedFrame>.Continuation,
+         audio: AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>.Continuation,
+         encoder: AACEncoder?, generation: UInt32) {
+        self.audio = audio
+        self.encoder = encoder
+        self.generation = generation
         self.continuation = continuation
     }
 
-    func finish() { continuation.finish() }
+    func finish() { continuation.finish(); audio.finish() }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        if type == .audio, sampleBuffer.isValid, let encoder {
+            do {
+                for (time, payload) in try encoder.encode(sampleBuffer) {
+                    audio.yield((AudioFrameHeader(captureTimeMicros: time, sourceGeneration: generation,
+                                                 payloadLength: UInt32(payload.count)), payload))
+                }
+            } catch { audio.finish(throwing: error) }
+            return
+        }
         guard type == .screen, sampleBuffer.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let rawStatus = attachments.first?[.status] as? Int,
@@ -153,6 +190,7 @@ private final class StreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @u
 
     func stream(_ stream: SCStream, didStopWithError error: any Error) {
         continuation.finish()
+        audio.finish(throwing: error)
     }
 }
 #endif

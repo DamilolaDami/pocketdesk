@@ -44,4 +44,15 @@ import Testing
         let data = try JSONEncoder().encode(message)
         #expect(try JSONDecoder().decode(ControlMessage.self, from: data) == message)
     }
+
+    @Test(arguments: [
+        MacAction.openURL("https://www.netflix.com"),
+        .openApp(bundleID: "com.apple.Music", name: "Music"),
+        .openApp(bundleID: nil, name: "Spotify"),
+        .keystroke(code: 0x31, modifiers: 0x100000),
+    ])
+    func actionsRoundTrip(_ action: MacAction) throws {
+        let data = try JSONEncoder().encode(ControlMessage.run(action))
+        #expect(try JSONDecoder().decode(ControlMessage.self, from: data) == .run(action))
+    }
 }

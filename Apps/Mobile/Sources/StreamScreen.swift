@@ -9,6 +9,9 @@ struct StreamScreen: View {
     let config: StreamConfig
     @State private var keyboardShown = false
     @State private var showingWindows = false
+    @State private var showingShortcuts = false
+    @AppStorage(SettingsKey.startInLandscape) private var startInLandscape = false
+    @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
     @State private var controlsExpanded = true
     @State private var showsStatus = true
     @Namespace private var glass
@@ -26,7 +29,7 @@ struct StreamScreen: View {
             .ignoresSafeArea()
             .background(.black)
             .overlay(alignment: .topLeading) {
-                if showsStatus {
+                if showsStatus && showStreamInfo {
                     StatusChip(hostName: hostName, config: config)
                         .padding(.leading, 16)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -35,6 +38,7 @@ struct StreamScreen: View {
             .overlay(alignment: .bottom) { controls(isLandscape: isLandscape).padding(.bottom, 10) }
             .persistentSystemOverlays(.hidden)
             .statusBarHidden()
+            .onAppear { if startInLandscape { rotate(toLandscape: true) } }
             .task {
                 // The chip confirms what you're looking at, then gets out of the way.
                 try? await Task.sleep(for: .seconds(3))
@@ -44,6 +48,10 @@ struct StreamScreen: View {
             .onDisappear { rotate(toLandscape: false) }
             .sheet(isPresented: $showingWindows) {
                 WindowPicker(controller: controller) { showingWindows = false }
+                    .presentationDetents([.medium, .large])
+            }
+            .sheet(isPresented: $showingShortcuts) {
+                ShortcutsSheet(controller: controller) { showingShortcuts = false }
                     .presentationDetents([.medium, .large])
             }
     }
@@ -59,6 +67,7 @@ struct StreamScreen: View {
                     control("Keyboard", keyboardShown ? "keyboard.chevron.compact.down.fill" : "keyboard") {
                         keyboardShown.toggle()
                     }
+                    control("Shortcuts", "square.grid.2x2.fill") { showingShortcuts = true }
                     control("Windows", "macwindow.on.rectangle") {
                         controller.refreshWindows()
                         showingWindows = true

@@ -59,5 +59,7 @@ public protocol InputSink: AnyObject, Sendable {
     func setSourceFrame(_ frame: CGRect)
     func inject(_ event: InputEvent)
     func insertText(_ text: String)
+    /// Runs a phone shortcut. Throws `MacActionError` with a reason worth showing on the phone.
+    func perform(_ action: MacAction) async throws
 }
 #endif

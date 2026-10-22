@@ -149,11 +149,17 @@ public actor HostSession {
                 }
             case .insertText(let text):
                 input.insertText(text)
+            case .run(let action):
+                do {
+                    try await input.perform(action)
+                } catch {
+                    try await session.send(.actionFailed(String(describing: error)))
+                }
             case .ping(let value):
                 try await session.send(.pong(value))
             case .bye:
                 return
-            case .hello, .helloAck, .pairRequest, .pairResult, .windows, .streamConfig, .pong:
+            case .hello, .helloAck, .pairRequest, .pairResult, .windows, .streamConfig, .pong, .actionFailed:
                 continue
             }
         }

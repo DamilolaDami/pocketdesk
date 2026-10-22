@@ -109,5 +109,14 @@ final class RecordingInputSink: InputSink, @unchecked Sendable {
     func setSourceFrame(_ frame: CGRect) { lock.withLock { _frames.append(frame) } }
     func inject(_ event: InputEvent) { lock.withLock { _events.append(event) } }
     func insertText(_ text: String) { lock.withLock { _text.append(text) } }
+
+    private var _actions: [MacAction] = []
+    var actions: [MacAction] { lock.withLock { _actions } }
+
+    /// Fails `openApp` for "Missing" so tests can check the error reaches the phone.
+    func perform(_ action: MacAction) async throws {
+        if case .openApp(_, "Missing") = action { throw MacActionError.appNotFound("Missing") }
+        lock.withLock { _actions.append(action) }
+    }
 }
 #endif

@@ -1,0 +1,89 @@
+import Foundation
+import PDClientCore
+import PDProtocol
+import Testing
+
+@Suite struct ShortcutLibraryTests {
+    private let netflix = Shortcut(name: "Netflix", symbol: "play.tv.fill", color: .red,
+                                   action: .openURL("https://www.netflix.com"))
+    private let music = Shortcut(name: "Music", symbol: "music.note", color: .pink,
+                                 action: .openApp(bundleID: "com.apple.Music", name: "Music"))
+    private let spotlight = Shortcut(name: "Spotlight", symbol: "magnifyingglass", color: .gray,
+                                     action: .keystroke(code: 0x31, modifiers: ShortcutPreset.command))
+
+    @Test func startsWithNetflixAndFriends() {
+        let names = ShortcutLibrary().shortcuts.map(\.name)
+        #expect(names.first == "Netflix")
+        #expect(names.count == 6)
+        #expect(Set(ShortcutLibrary().shortcuts.map(\.id)).count == 6)
+    }
+
+    @Test func saveAddsThenReplaces() {
+        var library = ShortcutLibrary(shortcuts: [netflix])
+        library.save(music)
+        var renamed = netflix
+        renamed.name = "Movies"
+        library.save(renamed)
+        #expect(library.shortcuts.map(\.name) == ["Movies", "Music"])
+    }
+
+    @Test func duplicateGoesRightAfterTheOriginal() {
+        var library = ShortcutLibrary(shortcuts: [netflix, music])
+        library.duplicate(netflix.id)
+        #expect(library.shortcuts.map(\.name) == ["Netflix", "Netflix", "Music"])
+        #expect(library.shortcuts[1].id != netflix.id)
+        #expect(library.shortcuts[1].action == netflix.action)
+    }
+
+    @Test func moveAndDelete() {
+        var library = ShortcutLibrary(shortcuts: [netflix, music, spotlight])
+        library.move(spotlight.id, to: netflix.id)
+        #expect(library.shortcuts.map(\.name) == ["Spotlight", "Netflix", "Music"])
+        library.move(spotlight.id, to: music.id)
+        #expect(library.shortcuts.map(\.name) == ["Netflix", "Music", "Spotlight"])
+        library.delete(music.id)
+        #expect(library.shortcuts.map(\.name) == ["Netflix", "Spotlight"])
+    }
+
+    @Test func persists() throws {
+        let url = URL.temporaryDirectory.appending(path: "pocketdesk-\(UUID())/shortcuts.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let library = ShortcutLibrary(shortcuts: [netflix, music, spotlight])
+        try library.save(to: url)
+        #expect(try ShortcutLibrary.load(from: url) == library)
+    }
+
+    @Test func summaries() {
+        #expect(netflix.action.summary == "netflix.com")
+        #expect(music.action.summary == "Opens Music")
+        #expect(spotlight.action.summary == "⌘Space")
+        #expect(MacAction.keystroke(code: 0x0C, modifiers: ShortcutPreset.command | ShortcutPreset.control).summary == "⌃⌘Q")
+    }
+
+    @Test func presetNamesAreUnique() {
+        #expect(Set(ShortcutPreset.all.map(\.id)).count == ShortcutPreset.all.count)
+    }
+}
+
+@Suite struct FaviconTests {
+    @Test func prefersTouchIconsThenLargestIcon() {
+        let html = """
+        <head>
+          <link rel="icon" href="/favicon-16.png" sizes="16x16">
+          <link rel='shortcut icon' href='https://cdn.example.com/fav.ico'>
+          <link href="/icon-192.png" rel="icon" sizes="192x192" />
+          <link rel="mask-icon" href="/safari.svg">
+          <link rel="icon" type="image/svg+xml" href="/icon">
+          <LINK REL="apple-touch-icon" HREF="touch.png">
+          <link rel="stylesheet" href="/app.css">
+        </head>
+        """
+        let urls = FaviconLoader.candidates(inHTML: html, baseURL: URL(string: "https://www.example.com/en/")!)
+        #expect(urls.map(\.absoluteString) == [
+            "https://www.example.com/en/touch.png",
+            "https://www.example.com/icon-192.png",
+            "https://www.example.com/favicon-16.png",
+            "https://cdn.example.com/fav.ico",
+        ])
+    }
+}

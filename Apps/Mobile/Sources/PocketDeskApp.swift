@@ -17,6 +17,7 @@ struct PocketDeskApp: App {
 struct RootView: View {
     let controller: SessionController
     @Environment(\.displayScale) private var displayScale
+    @AppStorage(SettingsKey.haptics) private var haptics = true
 
     private var state: SessionState { controller.store.state }
 
@@ -30,18 +31,30 @@ struct RootView: View {
                     controller.deviceName = UIDevice.current.name
                 }
         }
+        .overlay(alignment: .top) {
+            if let notice = controller.store.notice {
+                NoticeBanner(text: notice.text)
+                    .padding(.horizontal, 16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .task(id: notice.id) {
+                        try? await Task.sleep(for: .seconds(4))
+                        controller.store.dismiss(notice)
+                    }
+                    .onTapGesture { controller.store.dismiss(notice) }
+            }
+        }
         .animation(.smooth(duration: 0.35), value: phase)
-        .sensoryFeedback(.success, trigger: isStreaming) { _, streaming in streaming }
+        .animation(.bouncy, value: controller.store.notice)
+        .sensoryFeedback(trigger: isStreaming) { _, streaming in haptics && streaming ? .success : nil }
+        .sensoryFeedback(trigger: controller.store.notice) { _, notice in haptics && notice != nil ? .warning : nil }
         .task { controller.startDiscovery() }
     }
 
     @ViewBuilder private var content: some View {
         switch state {
-        case .idle:
-            // Discovery starts on appear; show the searching state rather than a blank screen.
-            HostListView(controller: controller, hosts: [])
-        case .discovering(let hosts):
-            HostListView(controller: controller, hosts: hosts)
+        case .idle, .discovering:
+            // Idle only lasts until discovery starts on appear.
+            MainTabs(controller: controller, hosts: hosts)
                 .transition(.opacity)
         case .pairing(let host, let code):
             NavigationStack {
@@ -61,6 +74,10 @@ struct RootView: View {
         }
     }
 
+    private var hosts: [DiscoveredHost] {
+        if case .discovering(let hosts) = state { hosts } else { [] }
+    }
+
     private var isStreaming: Bool {
         if case .streaming = state { true } else { false }
     }
@@ -68,12 +85,50 @@ struct RootView: View {
     /// Animates only between screens, not on every in-screen state change.
     private var phase: Int {
         switch state {
-        case .idle: 0
-        case .discovering: 1
+        case .idle, .discovering: 1
         case .pairing: 2
         case .connecting: 3
         case .streaming: 4
         case .failed: 5
         }
+    }
+}
+
+enum AppTab: String {
+    case macs, shortcuts, settings
+}
+
+/// Home: the tab bar. Pairing, connecting and streaming take over the whole screen.
+struct MainTabs: View {
+    let controller: SessionController
+    let hosts: [DiscoveredHost]
+    @SceneStorage("tab") private var tab = AppTab.macs
+
+    var body: some View {
+        TabView(selection: $tab) {
+            Tab("Macs", systemImage: "laptopcomputer", value: .macs) {
+                HostListView(controller: controller, hosts: hosts)
+            }
+            Tab("Shortcuts", systemImage: "square.grid.2x2.fill", value: .shortcuts) {
+                ShortcutsView(controller: controller)
+            }
+            Tab("Settings", systemImage: "gearshape.fill", value: .settings) {
+                SettingsView(controller: controller, hosts: hosts)
+            }
+        }
+        .tabBarMinimizeBehavior(.onScrollDown)
+    }
+}
+
+private struct NoticeBanner: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "exclamationmark.triangle.fill")
+            .font(.subheadline.weight(.medium))
+            .symbolRenderingMode(.multicolor)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .glassEffect(.regular, in: .capsule)
     }
 }

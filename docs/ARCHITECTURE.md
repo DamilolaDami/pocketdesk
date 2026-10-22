@@ -74,8 +74,15 @@ phone                                   Mac
   ◀───────────────────────  streamConfig(hevc, w, h, fps, kbps)
   ◀═══════════════════════  video: keyframe (VPS/SPS/PPS + slices), deltas…
   input datagrams  ════════════════════▶   CGEvent injection, mapped into the source's screen rect
-  listWindows / selectSource / requestKeyframe / insertText / ping / bye
+  listWindows / selectSource / requestKeyframe / insertText / run(MacAction) / ping / bye
+  ◀───────────────────────  actionFailed(reason)   (a shortcut the Mac couldn't run)
 ```
+
+**Shortcuts** (protocol v2): phone tiles that send `run(MacAction)`: open a URL, open an app
+(bundle ID, falling back to its name), or press one key combination. Tapping one while not
+streaming connects to the chosen Mac and sends it once the first `streamConfig` arrives. The
+library is a JSON file on the phone (`ShortcutLibrary`). Website tiles show the site's own
+icon, fetched from that site (never a favicon service) and cached.
 
 ## Video pipeline (latency budget target: < 60 ms glass-to-glass on LAN)
 
@@ -141,6 +148,8 @@ and pinning, never on obscurity.
 - **Every session**: QUIC/TLS 1.3 with mutual certificate authentication. Each side's
   validator accepts only the pinned fingerprint. The host's TLS gate admits unpinned phones
   only while an invite is open, and they still need the token.
+- **Shortcuts** grant nothing new: a paired phone can already click and type anything.
+  The host refuses `file:` URLs so a shortcut can't open local files by path.
 - **Host controls**: menu bar icon changes while connected; per-phone "Forget" (revoke).
 - **Relay** (phase 2) only ever sees ciphertext.
 

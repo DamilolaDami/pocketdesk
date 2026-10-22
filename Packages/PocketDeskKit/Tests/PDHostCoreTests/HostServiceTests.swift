@@ -100,6 +100,11 @@ final class HostServiceTests {
             }
             try await session.send(.insertText("héllo"))
 
+            // Shortcuts run in order; one that can't be done says why.
+            try await session.send(.run(.openURL("https://www.netflix.com")))
+            try await session.send(.run(.openApp(bundleID: nil, name: "Missing")))
+            #expect(try await control.next() == .actionFailed("Missing isn't installed on this Mac."))
+
             // Switch to a window: new config, new generation, keyframe first.
             try await session.send(.selectSource(windowID: 42))
             guard case .streamConfig(let windowConfig)? = try await control.next() else { Issue.record("expected streamConfig"); return }
@@ -122,6 +127,7 @@ final class HostServiceTests {
         #expect(await service.isTrusted(phoneFingerprint))
         #expect(input.events.first == .button(.left, isDown: true, x: 0.5, y: 0.5))
         #expect(input.text == ["héllo"])
+        #expect(input.actions == [.openURL("https://www.netflix.com")])
         #expect(input.sourceFrames.last == CGRect(x: 100, y: 50, width: 800, height: 600))
         #expect(await frames.startedSources == [.display(1), .window(42)])
         #expect(events.all.contains(.inviteChanged(nil))) // single use

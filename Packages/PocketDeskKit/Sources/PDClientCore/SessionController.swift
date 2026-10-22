@@ -24,12 +24,20 @@ public final class SessionController {
     private var connectionTask: Task<Void, Never>?
     /// The Mac last tapped, for "Try Again".
     public private(set) var lastHost: DiscoveredHost?
+    private let shortcutsURL: URL
+    private var library: ShortcutLibrary
+    /// A shortcut tapped while not connected: sent once the stream starts.
+    private var pendingAction: MacAction?
 
     public init(identityLabel: String = "com.pocketdesk.phone.identity",
-                trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json")) {
+                trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json"),
+                shortcutsURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/shortcuts.json")) {
         self.identityLabel = identityLabel
         self.trustStoreURL = trustStoreURL
         self.trustStore = (try? TrustStore.load(from: trustStoreURL)) ?? TrustStore()
+        self.shortcutsURL = shortcutsURL
+        self.library = (try? ShortcutLibrary.load(from: shortcutsURL)) ?? ShortcutLibrary()
+        store.update(shortcuts: library.shortcuts)
     }
 
     // MARK: Discovery
@@ -148,9 +156,16 @@ public final class SessionController {
             store.send(.pairingConfirmed)
         case .streamConfig(let config):
             store.send(.connected(config))
+            if let action = pendingAction {
+                pendingAction = nil
+                connection?.send(.run(action))
+            }
         case .windows(let windows):
             store.update(windows: windows)
+        case .notice(let text):
+            store.post(notice: text)
         case .ended(let reason):
+            pendingAction = nil
             connection = nil
             connectionTask = nil
             store.send(.disconnected(reason: reason))
@@ -190,6 +205,7 @@ public final class SessionController {
 
     /// Leaves the current Mac (or pairing attempt) and goes back to the list.
     public func disconnect() {
+        pendingAction = nil
         disconnectConnection()
         store.send(.cancel)
         startDiscovery()
@@ -201,6 +217,60 @@ public final class SessionController {
         trustStore.revoke(peer.fingerprint)
         try? trustStore.save(to: trustStoreURL)
         store.send(.hostsChanged(discoveredHosts()))
+    }
+
+    // MARK: Shortcuts
+
+    /// Paired Macs that are online now, which shortcuts can run on.
+    public var reachableMacs: [DiscoveredHost] {
+        discoveredHosts().filter { $0.isPaired && $0.isOnline }
+    }
+
+    /// Runs a shortcut on the Mac being streamed, or connects first (to `preferredHostID`, else
+    /// the last Mac used, else any paired Mac that's online) and runs it once the picture is up.
+    /// Returns `false`, with a notice posted, when there's no Mac to run it on.
+    @discardableResult
+    public func run(_ shortcut: Shortcut, preferredHostID: UUID? = nil) -> Bool {
+        if case .streaming = store.state, let connection {
+            connection.send(.run(shortcut.action))
+            return true
+        }
+        let macs = reachableMacs
+        guard let host = macs.first(where: { $0.hostID != nil && $0.hostID == preferredHostID })
+                ?? macs.first(where: { $0.hostID != nil && $0.hostID == lastHost?.hostID })
+                ?? macs.first else {
+            store.post(notice: "Open PocketDesk on a paired Mac to run “\(shortcut.name)”.")
+            return false
+        }
+        disconnectConnection()
+        store.send(.cancel)
+        store.send(.startDiscovery)
+        store.send(.hostsChanged(discoveredHosts()))
+        select(host)
+        pendingAction = shortcut.action
+        return true
+    }
+
+    public func save(_ shortcut: Shortcut) {
+        updateLibrary { $0.save(shortcut) }
+    }
+
+    public func delete(_ shortcut: Shortcut) {
+        updateLibrary { $0.delete(shortcut.id) }
+    }
+
+    public func duplicate(_ shortcut: Shortcut) {
+        updateLibrary { $0.duplicate(shortcut.id) }
+    }
+
+    public func move(_ shortcut: Shortcut.ID, to target: Shortcut.ID) {
+        updateLibrary { $0.move(shortcut, to: target) }
+    }
+
+    private func updateLibrary(_ change: (inout ShortcutLibrary) -> Void) {
+        change(&library)
+        try? library.save(to: shortcutsURL)
+        store.update(shortcuts: library.shortcuts)
     }
 
     private func disconnectConnection() {

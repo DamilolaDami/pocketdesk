@@ -1,5 +1,5 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 1
+public let protocolVersion: UInt16 = 2
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/1"
@@ -23,9 +23,24 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     case requestKeyframe
     /// Committed text (IME, dictation, paste). Single keystrokes go over the input channel.
     case insertText(String)
+    /// A shortcut from the phone: open a website or app, or press a key combination.
+    case run(MacAction)
+    /// Host → phone: a `run` that couldn't be done, in words for the person.
+    case actionFailed(String)
     case ping(UInt64)
     case pong(UInt64)
     case bye(reason: String)
+}
+
+/// Something a phone shortcut asks the Mac to do. A paired phone can already click and type
+/// anything, so these grant nothing new; they just save the taps.
+public enum MacAction: Codable, Sendable, Equatable, Hashable {
+    /// Any URL the Mac can open (`https:`, or an app's own scheme like `spotify:`).
+    case openURL(String)
+    /// Launches or brings forward an app. `name` is the fallback when no app has that bundle ID.
+    case openApp(bundleID: String?, name: String)
+    /// One key press with modifiers held: a macOS virtual key code and `CGEventFlags` bits.
+    case keystroke(code: UInt16, modifiers: UInt32)
 }
 
 public struct Hello: Codable, Sendable, Equatable {

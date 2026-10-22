@@ -83,6 +83,11 @@ final class ClientConnectionTests {
         for _ in 0..<100 where !events.all.contains(where: { if case .windows = $0 { true } else { false } }) {
             try await Task.sleep(for: .milliseconds(10))
         }
+        // A shortcut the Mac can't run comes back as a notice; the session carries on.
+        connection.send(.run(.openApp(bundleID: nil, name: "Missing")))
+        for _ in 0..<100 where !events.all.contains(where: { if case .notice = $0 { true } else { false } }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         connectionTask.cancel()
         await connectionTask.value
 
@@ -93,6 +98,7 @@ final class ClientConnectionTests {
                                                 hostID: invite.hostID, pairedAt: pairedAt(in: all)))))
         #expect(all.contains { if case .streamConfig(let config) = $0 { config.width == 1280 } else { false } })
         #expect(all.contains { if case .windows(let windows) = $0 { windows.count == 1 } else { false } })
+        #expect(all.contains(.notice("Missing isn't installed on this Mac.")))
         #expect(all.last == .ended(reason: nil))
         #expect(input.events.first == .pointerMove(x: 0.25, y: 0.75))
     }
@@ -167,6 +173,9 @@ final class SinkRecorder: InputSink, @unchecked Sendable {
     func setSourceFrame(_ frame: CGRect) {}
     func inject(_ event: InputEvent) { lock.withLock { _events.append(event) } }
     func insertText(_ text: String) {}
+    func perform(_ action: MacAction) async throws {
+        throw MacActionError.appNotFound("Missing")
+    }
 }
 
 final class ClientEvents: @unchecked Sendable {

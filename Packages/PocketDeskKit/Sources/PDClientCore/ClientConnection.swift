@@ -12,6 +12,8 @@ public enum ClientEvent: Sendable, Equatable {
     case paired(PairedPeer)
     case streamConfig(StreamConfig)
     case windows([WindowInfo])
+    /// Something to tell the person without ending the session (a shortcut that failed).
+    case notice(String)
     case ended(reason: String?)
 }
 
@@ -124,12 +126,13 @@ public actor ClientConnection {
                     switch message {
                     case .streamConfig(let config): onEvent(.streamConfig(config))
                     case .windows(let windows): onEvent(.windows(windows))
+                    case .actionFailed(let reason): onEvent(.notice(reason))
                     case .bye(let reason):
                         hostReason.value = reason
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
                     case .helloAck, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
-                         .requestKeyframe, .insertText:
+                         .requestKeyframe, .insertText, .run:
                         continue
                     }
                 }

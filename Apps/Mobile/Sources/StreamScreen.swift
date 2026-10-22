@@ -73,7 +73,7 @@ struct StreamScreen: View {
             }
     }
 
-    /// The two things used all the time stay out; the rest (paste included) live in More,
+    /// What's used all the time stays out; the rest (paste included) lives in More,
     /// like a media player's controls. Hidden, it shrinks to one button.
     private func controls(isLandscape: Bool) -> some View {
         GlassEffectContainer(spacing: 12) {
@@ -83,6 +83,11 @@ struct StreamScreen: View {
                         keyboardShown.toggle()
                     }
                     control("Shortcuts", "square.grid.2x2.fill") { showingShortcuts = true }
+                    control("Displays", "display.2") { showingDisplays = true }
+                    control("Windows", "macwindow.on.rectangle") {
+                        controller.refreshWindows()
+                        showingWindows = true
+                    }
                     moreMenu(isLandscape: isLandscape)
                 } else {
                     control("Show Controls", "slider.horizontal.3") {
@@ -111,11 +116,6 @@ struct StreamScreen: View {
                 Button(isLandscape ? "Portrait" : "Landscape",
                        systemImage: isLandscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate") {
                     rotate(toLandscape: !isLandscape)
-                }
-                Button("Displays", systemImage: "display.2") { showingDisplays = true }
-                Button("Windows", systemImage: "macwindow.on.rectangle") {
-                    controller.refreshWindows()
-                    showingWindows = true
                 }
             }
             Button("Hide Controls", systemImage: "chevron.down") {

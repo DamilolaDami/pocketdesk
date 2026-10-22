@@ -1,3 +1,4 @@
+import AppIntents
 import PDClientCore
 import SwiftUI
 
@@ -22,6 +23,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.streamAudio) private var streamAudio = true
     @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
     @AppStorage(SettingsKey.haptics) private var haptics = true
+    @State private var showingSiri = false
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
 
@@ -40,11 +42,28 @@ struct SettingsView: View {
                     } label: {
                         SettingsLabel("Run On", symbol: "laptopcomputer", color: Brand.accent)
                     }
+
                 } header: {
                     Text("Shortcuts")
                 } footer: {
                     Text("The Mac a shortcut connects to when you're not already streaming.")
                 }
+
+                Section {
+                    Button {
+                        showingSiri = true
+                    } label: {
+                        HStack {
+                            SettingsLabel("Siri & Shortcuts", symbol: "waveform", color: .purple)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                }
+
 
                 Section("Streaming") {
                     Toggle(isOn: $streamAudio) {
@@ -75,7 +94,8 @@ struct SettingsView: View {
                             MacGlyph(kind: mac.kind, size: 30, status: mac.glyphStatus)
                             Text(mac.name)
                             Spacer()
-                            StatusPill(text: mac.isOnline ? "Online" : "Offline", color: mac.isOnline ? Brand.online : .gray)
+                            Text(mac.isOnline ? "Online" : mac.canWake ? "Asleep" : "Offline")
+                                .foregroundStyle(.secondary)
                         }
                         .swipeActions {
                             Button("Forget", systemImage: "trash", role: .destructive) { forget(mac) }
@@ -111,6 +131,10 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background { AppBackground() }
             .navigationTitle("Settings")
+            .sheet(isPresented: $showingSiri) {
+                SiriSettingsSheet(shortcuts: controller.store.shortcuts)
+                    .presentationDetents([.medium, .large])
+            }
         }
     }
 
@@ -163,5 +187,49 @@ private struct AboutHeader: View {
             Text("Version \(version) · Open source").font(.subheadline).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// How to run shortcuts from outside the app: the phrase, and the way into the Shortcuts app.
+private struct SiriSettingsSheet: View {
+    let shortcuts: [Shortcut]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    if let first = shortcuts.first {
+                        SiriTipView(intent: RunShortcutIntent(shortcut: ShortcutEntity(first)))
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                    }
+                } footer: {
+                    Text("Works with any of your shortcuts, by name.")
+                }
+
+                Section {
+                    ShortcutsLink()
+                        .shortcutsLinkStyle(.automatic)
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                } footer: {
+                    Text("In the Shortcuts app you can give a shortcut your own phrase (like “Open Netflix on my Mac”), add it to the Home Screen, or run it from Control Center.")
+                }
+
+                Section("Also") {
+                    Label("Home Screen and Lock Screen widgets show your first shortcuts.", systemImage: "square.grid.2x2")
+                    Label("Add a Control Center control and pick which shortcut it runs.", systemImage: "switch.2")
+                }
+                .font(.subheadline)
+            }
+            .navigationTitle("Siri & Shortcuts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", systemImage: "checkmark") { dismiss() }
+                }
+            }
+        }
     }
 }

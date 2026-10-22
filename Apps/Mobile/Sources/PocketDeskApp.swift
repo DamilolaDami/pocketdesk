@@ -3,41 +3,62 @@ import SwiftUI
 
 @main
 struct PocketDeskApp: App {
-    @State private var session = SessionStore()
+    @State private var controller = SessionController()
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(session)
+            RootView(controller: controller)
+                .onOpenURL { url in try? controller.pair(using: url) }
         }
     }
 }
 
 struct RootView: View {
-    @Environment(SessionStore.self) private var session
+    let controller: SessionController
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        switch session.state {
-        case .idle, .failed:
+        GeometryReader { geometry in
+            content
+                .onAppear {
+                    let size = geometry.size
+                    controller.viewport = .init(width: min(size.width, size.height) == 0 ? 402 : size.width,
+                                                height: size.height == 0 ? 874 : size.height, scale: displayScale)
+                    controller.deviceName = UIDevice.current.name
+                }
+        }
+        .task { controller.startDiscovery() }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch controller.store.state {
+        case .idle:
+            ProgressView()
+        case .discovering(let hosts):
+            HostListView(controller: controller, hosts: hosts)
+        case .pairing(let host, let code):
+            NavigationStack {
+                PairingView(controller: controller, host: host, code: code)
+            }
+        case .connecting(let host):
             ContentUnavailableView {
-                Label("PocketDesk", systemImage: "desktopcomputer")
+                ProgressView().controlSize(.large)
             } description: {
-                Text("Open PocketDesk on your Mac, then find it here.")
+                Text("Connecting to \(host.name)…")
             } actions: {
-                Button("Find my Mac") { session.send(.startDiscovery) }
+                Button("Cancel") { controller.disconnect() }
+            }
+        case .streaming(_, let config, _):
+            StreamScreen(controller: controller, config: config)
+        case .failed(let message):
+            ContentUnavailableView {
+                Label("Disconnected", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("Back to Macs") { controller.disconnect() }
                     .buttonStyle(.glassProminent)
             }
-        case .discovering(let hosts):
-            List(hosts) { host in
-                Button(host.name) { session.send(.select(host)) }
-            }
-            .overlay { if hosts.isEmpty { ProgressView("Looking for Macs…") } }
-        case .pairing(_, let code):
-            Text(code.map { "Confirm code \($0) on your Mac" } ?? "Pairing…")
-        case .connecting(let host):
-            ProgressView("Connecting to \(host.name)…")
-        case .streaming:
-            Text("Stream view goes here")
         }
     }
 }

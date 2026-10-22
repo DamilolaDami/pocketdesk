@@ -36,6 +36,15 @@ import PDProtocol
         #expect(state == .failed(message: "Mac went to sleep"))
     }
 
+    @Test func laterConfigsUpdateTheStreamAndKeepTheSource() {
+        let window = WindowInfo(id: 1, appName: "Notes", bundleID: nil, title: "Todo", width: 800, height: 600)
+        let smaller = StreamConfig(codec: .hevc, width: 1600, height: 1200, fps: 60, bitrateKbps: 8_000)
+        let state = SessionState.streaming(host: newHost, config: config, source: nil)
+            .reduce(.sourceChanged(window))
+            .reduce(.connected(smaller))
+        #expect(state == .streaming(host: newHost, config: smaller, source: window))
+    }
+
     @Test func cancelAlwaysReturnsToIdle() {
         #expect(SessionState.connecting(host: newHost).reduce(.cancel) == .idle)
     }

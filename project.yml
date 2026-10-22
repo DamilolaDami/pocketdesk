@@ -54,6 +54,9 @@ targets:
         NSLocalNetworkUsageDescription: PocketDesk finds your Mac on the local network.
         NSBonjourServices: [_pocketdesk._udp]
         NSCameraUsageDescription: Scan the pairing code shown on your Mac.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.pocketdesk.pair
+            CFBundleURLSchemes: [pocketdesk]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.app

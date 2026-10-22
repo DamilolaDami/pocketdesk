@@ -17,7 +17,8 @@ PocketDesk: a macOS host and an iOS client for using your Mac from your phone. R
   touching `PDSecurity` or the TLS setup in `PDTransport`.
 
 ## Verify
-- `cd Packages/PocketDeskKit && swift build && swift test`. Tests touch the real login keychain
+- `cd Packages/PocketDeskKit && xcodebuild test -scheme PocketDeskKit-Package -destination 'platform=macOS' -derivedDataPath ../../.build/xcode`
+  (shares the apps' build tree; `swift test` also works but builds everything a second time). Tests touch the real login keychain
   (labels `com.pocketdesk.tests.*`, always deleted afterwards), use QUIC on 127.0.0.1 and
   Bonjour. Screen-capture tests run only if the process has Screen Recording permission.
 - `xcodegen && xcodebuild -scheme PocketDesk -destination 'generic/platform=iOS Simulator' build`

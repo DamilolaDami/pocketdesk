@@ -1,3 +1,4 @@
+import Foundation
 import PDProtocol
 
 /// The client's connection lifecycle as a pure state machine. `SessionStore` owns one and
@@ -6,6 +7,8 @@ import PDProtocol
 public enum SessionState: Sendable, Equatable {
     case idle
     case discovering(hosts: [DiscoveredHost])
+    /// `code == nil`: waiting for the QR scan or pasted link.
+    /// `code != nil`: connected, waiting for the person at the Mac to accept that code.
     case pairing(host: DiscoveredHost, code: String?)
     case connecting(host: DiscoveredHost)
     case streaming(host: DiscoveredHost, config: StreamConfig, source: WindowInfo?)
@@ -13,13 +16,17 @@ public enum SessionState: Sendable, Equatable {
 }
 
 public struct DiscoveredHost: Sendable, Equatable, Identifiable, Hashable {
+    /// Bonjour service identity.
     public var id: String
     public var name: String
+    /// From the TXT record; matches pairing invites and pinned hosts.
+    public var hostID: UUID?
     public var isPaired: Bool
 
-    public init(id: String, name: String, isPaired: Bool) {
+    public init(id: String, name: String, hostID: UUID? = nil, isPaired: Bool) {
         self.id = id
         self.name = name
+        self.hostID = hostID
         self.isPaired = isPaired
     }
 }
@@ -30,6 +37,7 @@ public enum SessionEvent: Sendable, Equatable {
     case select(DiscoveredHost)
     case pairingCode(String)
     case pairingConfirmed
+    /// The host sent a stream config: the first one starts streaming, later ones update it.
     case connected(StreamConfig)
     case sourceChanged(WindowInfo?)
     case disconnected(reason: String?)
@@ -61,6 +69,9 @@ extension SessionState {
 
         case (.connecting(let host), .connected(let config)):
             return .streaming(host: host, config: config, source: nil)
+
+        case (.streaming(let host, _, let source), .connected(let config)):
+            return .streaming(host: host, config: config, source: source)
 
         case (.streaming(let host, let config, _), .sourceChanged(let source)):
             return .streaming(host: host, config: config, source: source)

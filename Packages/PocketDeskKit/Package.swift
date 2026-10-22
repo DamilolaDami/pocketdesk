@@ -33,6 +33,7 @@ let package = Package(
         .testTarget(name: "PDSecurityTests", dependencies: ["PDSecurity"]),
         .testTarget(name: "PDTransportTests", dependencies: ["PDTransport"]),
         .testTarget(name: "PDHostCoreTests", dependencies: ["PDHostCore", "PDTransport"]),
-        .testTarget(name: "PDClientCoreTests", dependencies: ["PDClientCore"]),
+        // Uses the host's encoder to produce real HEVC for the client's assembler/decoder.
+        .testTarget(name: "PDClientCoreTests", dependencies: ["PDClientCore", "PDHostCore", "PDSecurity"]),
     ]
 )

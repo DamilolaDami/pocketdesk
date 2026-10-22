@@ -92,7 +92,7 @@ phone                                   Mac
    VideoToolbox emits. Keyframes start with VPS/SPS/PPS and set `.parameterSets`, enough for
    `CMVideoFormatDescriptionCreateFromHEVCParameterSets` on the phone. A source switch bumps
    `sourceGeneration` and sends `streamConfig` before the first frame.
-5. **Decode/render** (phone, next): hand `CMSampleBuffer`s to `AVSampleBufferDisplayLayer` (hardware
+5. **Decode/render** (phone, `FrameAssembler` + `VideoDisplay`): hand `CMSampleBuffer`s to `AVSampleBufferDisplayLayer` (hardware
    decode, display-synced, no Metal work for v1). Move to `VTDecompressionSession` + Metal
    only if we need custom compositing (cursor overlay, zoom lens).
 
@@ -102,14 +102,16 @@ The rule: **actors own side effects, `@Observable` models own UI state, pure red
 transitions.** No third-party architecture framework.
 
 - **Engines are actors** (`ScreenCaptureSource`, `HostSession`, `HostService`, and on the phone
-  the session/decoder engines). They talk over `AsyncStream`s and never touch the UI.
+  `ClientConnection`). They talk over `AsyncStream`s and never touch the UI.
   Hardware wrappers that VideoToolbox calls back on its own threads (`HEVCEncoder`) are
   lock-guarded classes.
 - **Seams for tests**: `PeerSession`, `FrameSource`, `InputSink` and `PairingAuthority` are
   protocols, so `HostSession` runs end to end in tests against synthetic frames.
 - **One `@MainActor @Observable` store per app** (`SessionStore` on the phone, `HostStore` on
   the Mac). Views read it and call `send(event)`. On the Mac, `HostService` emits `HostEvent`s
-  and `HostController` forwards them to the store.
+  and `HostController` forwards them to the store; on the phone, `SessionController` does the
+  same for `ClientConnection`'s `ClientEvent`s. UI → Mac input goes through an ordered
+  `AsyncStream`, never ad-hoc Tasks, so a button-down can't overtake its button-up.
 - **Transitions are pure** (`SessionState.reduce(_:)`, `HostState.reduce(_:)`): value in,
   value out, fully unit tested. The store applies the reducer and then starts or cancels engine tasks based
   on the new state.
@@ -166,7 +168,10 @@ and pinning, never on obscurity.
 1. **v0.1 – LAN mirror**:
    - Done on the Mac: QUIC transport, Bonjour, certificate pairing, capture, HEVC encode,
      input injection, window switching (protocol), menu bar app with pairing QR.
-   - Next on the phone: QR scanner, discovery UI, decode + render, touch → input.
+   - Done on the phone: Bonjour host list, pairing (VisionKit QR scan, paste link, or a
+     `pocketdesk://pair` URL), `FrameAssembler` → `AVSampleBufferDisplayLayer`, direct touch
+     (tap = click, long press = right-click, drag = click-drag, two fingers = scroll),
+     keyboard via `UIKeyInput`, window picker.
 2. **v0.2 – Window picker**: stream one window fitted to the phone, app switcher UI.
 3. **v0.3 – Thumb UI**: read the frontmost app's menus/toolbar via AX APIs and render them as
    native controls.

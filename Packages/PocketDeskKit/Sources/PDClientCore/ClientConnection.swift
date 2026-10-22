@@ -303,6 +303,36 @@ extension ClientConnection {
     }
 }
 
+extension ClientConnection {
+    /// Runs one action without streaming (Siri, the Shortcuts app, widgets). Throws with the
+    /// Mac's reason if it couldn't.
+    public static func perform(_ action: MacAction, endpoint: NWEndpoint, hostFingerprint: Fingerprint,
+                               identity: DeviceIdentity, deviceName: String) async throws {
+        try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+            var control = session.controlMessages.makeAsyncIterator()
+            try await session.send(.hello(Hello(deviceName: deviceName, viewport: Viewport(width: 0, height: 0, scale: 1),
+                                                mode: .catalog)))
+            switch try await control.next() {
+            case .helloAck: break
+            case .bye(let reason): throw ClientError.hostEnded(reason)
+            default: throw ClientError.unexpectedMessage
+            }
+            try await session.send(.run(action))
+            try await session.send(.bye(reason: "done"))
+            // The Mac answers only on failure, then hangs up after our bye.
+            var failure: String?
+            while let message = try? await control.next() {
+                switch message {
+                case .actionFailed(let reason): failure = reason
+                case .ping(let value): try? await session.send(.pong(value))
+                default: continue
+                }
+            }
+            if let failure { throw ClientError.hostEnded(failure) }
+        }
+    }
+}
+
 /// The reason from the host's `bye`, shared between the session's channel tasks.
 private final class HostReason: Sendable {
     private let storage = Mutex<String?>(nil)

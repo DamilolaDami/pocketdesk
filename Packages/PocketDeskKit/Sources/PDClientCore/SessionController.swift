@@ -56,6 +56,8 @@ public final class SessionController {
     public private(set) var lastHost: DiscoveredHost?
     private let shortcutsURL: URL
     private var library: ShortcutLibrary
+    /// After the saved shortcuts change: the app refreshes widgets and Siri's phrases.
+    public var onShortcutsChanged: (() -> Void)?
     /// A shortcut tapped while not connected: sent once the stream starts.
     private var pendingAction: MacAction?
     private let cacheDirectory: URL
@@ -64,7 +66,7 @@ public final class SessionController {
 
     public init(identityLabel: String = "com.pocketdesk.phone.identity",
                 trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json"),
-                shortcutsURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/shortcuts.json"),
+                shortcutsURL: URL = ShortcutLibrary.sharedURL,
                 cacheDirectory: URL = URL.cachesDirectory.appending(path: "PocketDesk"),
                 displayPreferencesURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/displays.json"),
                 wakeBookURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/wake.json"),
@@ -520,6 +522,68 @@ public final class SessionController {
         change(&library)
         try? library.save(to: shortcutsURL)
         store.update(shortcuts: library.shortcuts)
+        onShortcutsChanged?()
+    }
+
+    // MARK: From outside the app
+
+    public enum BackgroundRunError: Error, CustomStringConvertible {
+        case noSuchShortcut
+        case noMac
+        case failed(String)
+
+        public var description: String {
+            switch self {
+            case .noSuchShortcut: "That shortcut isn't in PocketDesk any more."
+            case .noMac: "None of your Macs is reachable. Open PocketDesk on your Mac, or check it's awake."
+            case .failed(let reason): reason
+            }
+        }
+    }
+
+    /// Runs a saved shortcut for Siri, the Shortcuts app or a widget: through the stream if
+    /// one is up, otherwise over a short connection with no picture. Waits a few seconds for
+    /// the Mac to show up, waking it if this phone knows how. Returns the Mac's name.
+    public func runInBackground(_ id: Shortcut.ID, preferredHostID: UUID?) async throws(BackgroundRunError) -> String {
+        guard let shortcut = library.shortcuts.first(where: { $0.id == id }) else { throw .noSuchShortcut }
+        if case .streaming(let host, _, _) = store.state, let connection {
+            connection.send(.run(shortcut.action))
+            return host.name
+        }
+
+        startDiscovery()
+        var host = await waitForTarget(preferredHostID: preferredHostID, for: .seconds(4))
+        if host == nil, let sleeper = wakeCandidate(preferredHostID: preferredHostID),
+           let info = wakeBook[sleeper] {
+            for _ in 0..<3 { await Task.detached { WakeSender.wake(info) }.value }
+            host = await waitForTarget(preferredHostID: sleeper, for: .seconds(25))
+        }
+        guard let host, let hostID = host.hostID, let browsedHost = browsed[host.id],
+              let peer = trustStore.peer(hostID: hostID) else { throw .noMac }
+        do {
+            let identity = try DeviceIdentity.loadOrCreate(label: identityLabel)
+            try await ClientConnection.perform(shortcut.action, endpoint: browsedHost.endpoint,
+                                               hostFingerprint: peer.fingerprint, identity: identity,
+                                               deviceName: deviceName)
+        } catch {
+            throw .failed(ClientConnection.describe(error))
+        }
+        return host.name
+    }
+
+    private func waitForTarget(preferredHostID: UUID?, for timeout: Duration) async -> DiscoveredHost? {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if let host = shortcutTarget(preferredHostID: preferredHostID) { return host }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return nil
+    }
+
+    /// The paired Mac to wake for a shortcut: the preferred one, else any this phone can wake.
+    private func wakeCandidate(preferredHostID: UUID?) -> UUID? {
+        if let preferredHostID, wakeBook[preferredHostID] != nil { return preferredHostID }
+        return trustStore.peers.values.compactMap(\.hostID).first { wakeBook[$0] != nil }
     }
 
     private func disconnectConnection() {

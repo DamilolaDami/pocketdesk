@@ -3,14 +3,41 @@ import SwiftUI
 
 @main
 struct PocketDeskApp: App {
-    @State private var controller = SessionController()
+    @State private var controller = AppModel.controller
+    @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
+
+    init() {
+        PocketDeskShortcuts.updateAppShortcutParameters()
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView(controller: controller)
                 .tint(Brand.accent)
-                .onOpenURL { url in try? controller.pair(using: url) }
+                .onOpenURL { url in open(url) }
         }
+    }
+
+    /// Pairing links, and `pocketdesk://run?id=…` from widgets and Control Center: run the
+    /// shortcut, connecting (and showing the stream) first if needed.
+    private func open(_ url: URL) {
+        if let id = Shortcut.id(fromRunURL: url) {
+            guard let shortcut = controller.store.shortcuts.first(where: { $0.id == id }) else {
+                controller.store.post(notice: "That shortcut isn't in PocketDesk any more.")
+                return
+            }
+            let preferred = UUID(uuidString: defaultMacID)
+            // Opened cold from a widget, discovery has only just started: give it a moment.
+            controller.startDiscovery()
+            Task {
+                for _ in 0..<20 where controller.shortcutTarget(preferredHostID: preferred) == nil {
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+                controller.run(shortcut, preferredHostID: preferred)
+            }
+            return
+        }
+        try? controller.pair(using: url)
     }
 }
 

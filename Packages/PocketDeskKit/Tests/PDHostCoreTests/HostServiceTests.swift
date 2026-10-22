@@ -314,6 +314,23 @@ final class HostServiceTests {
         #expect(!events.all.contains { if case .sessionStarted = $0 { true } else { false } })
     }
 
+    /// Siri and widgets run shortcuts without streaming; asking first still applies.
+    @Test func askBeforeConnectingCoversShortcutsFromSiri() async throws {
+        try pinPhone()
+        let port = try await startService(askBeforeConnecting: true) { _ in false }
+        let input = input
+        try await connect(port: port) { session in
+            var control = PhoneControl(session)
+            try await session.send(.hello(Hello(deviceName: "Test iPhone", viewport: Viewport(width: 0, height: 0, scale: 1),
+                                                mode: .catalog)))
+            guard case .helloAck? = try await control.next() else { Issue.record("expected helloAck"); return }
+            try await session.send(.run(.openURL("https://www.netflix.com")))
+            #expect(try await control.next() == .actionFailed("The Mac didn't allow this."))
+            try await session.send(.bye(reason: "done"))
+        }
+        #expect(input.actions.isEmpty)
+    }
+
     @Test func askBeforeConnectingLetsTheMacSayYes() async throws {
         try pinPhone()
         let port = try await startService(askBeforeConnecting: true) { _ in true }

@@ -2,6 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Shortcuts live in the shared container so widgets and controls can show them. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.pocketdesk.app</string>
+	</array>
 	<!-- The phone's TLS identity lives in the Keychain; without an access group a build
 	     fails with "A required entitlement isn't present". -->
 	<key>keychain-access-groups</key>

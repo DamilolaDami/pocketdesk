@@ -67,6 +67,24 @@ public struct ShortcutLibrary: Codable, Sendable, Equatable {
         shortcuts.insert(shortcuts.remove(at: from), at: to)
     }
 
+    /// Where the app keeps its shortcuts: the App Group container, so the widget extension and
+    /// Siri see the same list. Falls back to the app's own folder when there's no group (tests,
+    /// unsigned builds), moving an older copy across the first time.
+    public static var sharedURL: URL {
+        let legacy = URL.applicationSupportDirectory.appending(path: "PocketDesk/shortcuts.json")
+        guard let group = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) else {
+            return legacy
+        }
+        let shared = group.appending(path: "shortcuts.json")
+        if !FileManager.default.fileExists(atPath: shared.path(percentEncoded: false)),
+           FileManager.default.fileExists(atPath: legacy.path(percentEncoded: false)) {
+            try? FileManager.default.copyItem(at: legacy, to: shared)
+        }
+        return shared
+    }
+
+    public static let appGroup = "group.com.pocketdesk.app"
+
     public static func load(from url: URL) throws -> ShortcutLibrary {
         try JSONDecoder().decode(ShortcutLibrary.self, from: Data(contentsOf: url))
     }

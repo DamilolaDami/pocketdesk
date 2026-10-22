@@ -178,12 +178,26 @@ public actor HostSession {
         audioEnabled = hello.audioEnabled
         viewport = hello.viewport
         if hello.mode == .catalog {
-            // A quick question from the shortcut editor: no picture, no input, no "connected".
+            // A quick question from the shortcut editor, or a shortcut run from Siri or a widget:
+            // no picture, no input, no "connected".
             try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: [],
                                                       wake: configuration.wake)))
+            var allowed: Bool?
             while let message = try await messages.next() {
                 switch message {
                 case .listApps, .requestAppIcons: try await answer(message)
+                case .run(let action):
+                    // Running something is using the Mac: "Ask Before Each Connection" applies.
+                    if allowed == nil { allowed = await pairing.allowSession(peer: peer, deviceName: hello.deviceName) }
+                    guard allowed == true else {
+                        try await session.send(.actionFailed("The Mac didn't allow this."))
+                        continue
+                    }
+                    do {
+                        try await input.perform(action)
+                    } catch {
+                        try await session.send(.actionFailed(String(describing: error)))
+                    }
                 case .bye: return
                 default: continue
                 }

@@ -136,6 +136,39 @@ final class ClientConnectionTests {
         #expect(events.all.last == .ended(reason: ClientError.pairingDeclined.description))
     }
 
+    /// Siri, the Shortcuts app and widgets: one action over a connection with no picture.
+    @Test func performsAShortcutWithoutStreaming() async throws {
+        try TrustStore(peers: [PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone")]).save(to: trustStoreURL)
+        let input = SinkRecorder()
+        let events = HostEvents()
+        let service = try HostService(
+            configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
+                                 trustStoreURL: trustStoreURL, advertise: false),
+            makeFrameSource: { MovingFrames() }, clipboard: FakeClipboard(), input: input
+        ) { events.append($0) }
+        let serviceTask = Task { try await service.run() }
+        defer { serviceTask.cancel() }
+        var port: UInt16?
+        for _ in 0..<200 where port == nil {
+            port = await service.port
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let endpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .init(rawValue: try #require(port))!)
+
+        try await ClientConnection.perform(.openURL("https://www.netflix.com"), endpoint: endpoint,
+                                           hostFingerprint: service.identity.fingerprint, identity: phone,
+                                           deviceName: "Test iPhone")
+        #expect(input.actions == [.openURL("https://www.netflix.com")])
+
+        await #expect(throws: ClientError.hostEnded("Missing isn't installed on this Mac.")) {
+            try await ClientConnection.perform(.openApp(bundleID: nil, name: "Missing"), endpoint: endpoint,
+                                               hostFingerprint: service.identity.fingerprint, identity: self.phone,
+                                               deviceName: "Test iPhone")
+        }
+        // Nothing was streamed, so the Mac never showed the phone as connected.
+        #expect(!events.all.contains { if case .sessionStarted = $0 { true } else { false } })
+    }
+
     @Test func catalogListsAppsAndIconsWithoutStreaming() async throws {
         // Already paired: the catalog is only for phones the Mac trusts.
         try TrustStore(peers: [PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone")]).save(to: trustStoreURL)
@@ -217,8 +250,12 @@ final class SinkRecorder: InputSink, @unchecked Sendable {
     func setSourceFrame(_ frame: CGRect) {}
     func inject(_ event: InputEvent) { lock.withLock { _events.append(event) } }
     func insertText(_ text: String) {}
+    private var _actions: [MacAction] = []
+    var actions: [MacAction] { lock.withLock { _actions } }
+    /// Fails `openApp` for "Missing" so tests can check the error reaches the phone.
     func perform(_ action: MacAction) async throws {
-        throw MacActionError.appNotFound("Missing")
+        if case .openApp(_, "Missing") = action { throw MacActionError.appNotFound("Missing") }
+        lock.withLock { _actions.append(action) }
     }
 }
 

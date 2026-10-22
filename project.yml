@@ -41,11 +41,12 @@ targets:
   PocketDesk:
     type: application
     platform: iOS
-    sources: [Apps/Mobile/Sources]
+    sources: [Apps/Mobile/Sources, Apps/Shared]
     scheme: {}
     dependencies:
       - package: PocketDeskKit
         product: PDClientCore
+      - target: PocketDeskWidgets
     info:
       path: Apps/Mobile/Info.plist
       properties:
@@ -65,3 +66,22 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.app
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_ENTITLEMENTS: Apps/Mobile/PocketDesk.entitlements
+
+  # Home Screen and Lock Screen widgets, and the Control Center control.
+  PocketDeskWidgets:
+    type: app-extension
+    platform: iOS
+    sources: [Apps/Widgets/Sources, Apps/Shared]
+    dependencies:
+      - package: PocketDeskKit
+        product: PDClientCore
+    info:
+      path: Apps/Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: PocketDesk
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.app.widgets
+        CODE_SIGN_ENTITLEMENTS: Apps/Widgets/PocketDeskWidgets.entitlements

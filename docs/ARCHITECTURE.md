@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/7`, four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/8`, four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -239,6 +239,22 @@ The person at the Mac always knows and controls who is using it:
   `PairingAuthority.allowSession`, shown as an approval with no code. Silence after the
   approval timeout is a no. A phone that has just been paired isn't asked a second time.
 - The menu bar icon changes while any phone is connected.
+
+## Shortcuts outside the app (protocol v8)
+
+- **Siri and the Shortcuts app:** `RunShortcutIntent` takes a `ShortcutEntity` and runs in the
+  app's process (`AppModel.controller`). The phrase is "Open Netflix on my Mac with PocketDesk";
+  App Shortcut phrases must name the app. If a stream is up, the action goes through it.
+  Otherwise `SessionController.runInBackground` waits up to 4 s for the Mac (25 s, with wake
+  packets, if it's asleep) and uses `ClientConnection.perform`: a catalog-mode connection
+  that sends one `run` and no picture. The Mac applies "Ask Before Each Connection" to it.
+- **Widgets and Control Center:** in the `PocketDeskWidgets` extension, Home Screen tiles, Lock
+  Screen accessories and a configurable control open `pocketdesk://run?id=…`, and the app
+  runs the shortcut and shows the stream. The extension can't hold a QUIC connection or the
+  phone's identity, so the app does the work.
+- **Sharing:** shortcuts live in the App Group `group.com.pocketdesk.app`
+  (`ShortcutLibrary.sharedURL`; an older copy is moved across once). When they change, the
+  app reloads widget timelines and controls, and calls `updateAppShortcutParameters()`.
 
 ## Clipboard (protocol v7)
 

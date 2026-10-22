@@ -1,8 +1,8 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 7
+public let protocolVersion: UInt16 = 8
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
-public let alpn = "pocketdesk/7"
+public let alpn = "pocketdesk/8"
 
 /// Bonjour service type advertised by the host on the local network.
 public let bonjourServiceType = "_pocketdesk._udp"
@@ -62,7 +62,8 @@ public struct Hello: Codable, Sendable, Equatable {
     public enum Mode: String, Codable, Sendable {
         /// Video, input and everything else.
         case stream
-        /// No video or input: just questions like `listApps`, then `bye`.
+        /// No video or input: just questions like `listApps`, or one `run` (Siri, widgets),
+        /// then `bye`.
         case catalog
     }
 

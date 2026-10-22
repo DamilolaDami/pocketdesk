@@ -7,7 +7,9 @@ import SwiftUI
 struct ShortcutsView: View {
     let controller: SessionController
     @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
-    @State private var draft: ShortcutDraft?
+    /// One sheet for both steps: swapping its item moves from the picks to the editor
+    /// (presenting a second sheet as the first closes is unreliable).
+    @State private var sheet: EditorSheet?
 
     private var shortcuts: [Shortcut] { controller.store.shortcuts }
 
@@ -17,9 +19,9 @@ struct ShortcutsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     TargetMacPill(mac: targetMac)
                     if shortcuts.isEmpty {
-                        EmptyShortcuts { draft = .new() }
+                        EmptyShortcuts { sheet = .picks }
                     } else {
-                        ShortcutGrid(controller: controller, shortcuts: shortcuts, edit: { draft = .editing($0) }) {
+                        ShortcutGrid(controller: controller, shortcuts: shortcuts, edit: { sheet = .editor(.editing($0)) }) {
                             controller.run($0, preferredHostID: UUID(uuidString: defaultMacID))
                         }
                     }
@@ -31,20 +33,38 @@ struct ShortcutsView: View {
             .navigationTitle("Shortcuts")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("New Shortcut", systemImage: "plus") { draft = .new() }
+                    Button("New Shortcut", systemImage: "plus") { sheet = .picks }
                 }
             }
             // Real icons for app tiles; also warms the editor's app list.
             .task { controller.loadApps(preferredHostID: UUID(uuidString: defaultMacID)) }
-            .sheet(item: $draft) { draft in
-                ShortcutEditor(controller: controller, draft: draft, save: controller.save,
-                               delete: draft.isNew ? nil : { controller.delete(draft.shortcut) })
+            .sheet(item: $sheet) { sheet in
+                switch sheet {
+                case .picks:
+                    QuickPicksSheet(controller: controller, pick: { self.sheet = .editor(.from($0)) },
+                                    startFromScratch: { self.sheet = .editor(.new()) })
+                case .editor(let draft):
+                    ShortcutEditor(controller: controller, draft: draft, save: controller.save,
+                                   delete: draft.isNew ? nil : { controller.delete(draft.shortcut) })
+                }
             }
         }
     }
 
     private var targetMac: DiscoveredHost? {
         controller.shortcutTarget(preferredHostID: UUID(uuidString: defaultMacID))
+    }
+}
+
+private enum EditorSheet: Identifiable {
+    case picks
+    case editor(ShortcutDraft)
+
+    var id: String {
+        switch self {
+        case .picks: "picks"
+        case .editor(let draft): draft.id.uuidString
+        }
     }
 }
 

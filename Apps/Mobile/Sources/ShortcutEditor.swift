@@ -11,12 +11,17 @@ struct ShortcutDraft: Identifiable {
         ShortcutDraft(shortcut: Shortcut(name: "", symbol: "bolt.fill", color: .blue, action: .openURL("")), isNew: true)
     }
 
+    /// A quick pick, filled in and ready to save or tweak.
+    static func from(_ preset: ShortcutPreset) -> ShortcutDraft {
+        ShortcutDraft(shortcut: preset.shortcut.copy(), isNew: true)
+    }
+
     static func editing(_ shortcut: Shortcut) -> ShortcutDraft {
         ShortcutDraft(shortcut: shortcut, isNew: false)
     }
 }
 
-/// Create or edit a shortcut: start from a quick pick or build one, with a live preview.
+/// Create or edit a shortcut, with a live preview. New ones usually start from a quick pick.
 struct ShortcutEditor: View {
     let controller: SessionController
     let isNew: Bool
@@ -76,11 +81,6 @@ struct ShortcutEditor: View {
                         .animation(.smooth, value: preview)
                 }
                 .listRowBackground(Color.clear)
-
-                if isNew {
-                    Section("Quick Picks") { quickPicks }
-                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-                }
 
                 Section("Name") {
                     TextField("Netflix", text: $shortcut.name)
@@ -142,21 +142,6 @@ struct ShortcutEditor: View {
     }
 
     // MARK: Sections
-
-    private var quickPicks: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(ShortcutPreset.all) { preset in
-                    QuickPickChip(preset: preset,
-                                  appIcon: preset.shortcut.appBundleID.flatMap { controller.store.appIcons[$0] }) {
-                        apply(preset)
-                    }
-                }
-            }
-            .padding(.horizontal, 20)
-        }
-        .scrollIndicators(.hidden)
-    }
 
     @ViewBuilder private var actionFields: some View {
         switch kind {
@@ -280,26 +265,6 @@ struct ShortcutEditor: View {
         !shortcut.name.trimmingCharacters(in: .whitespaces).isEmpty && action != nil
     }
 
-    private func apply(_ preset: ShortcutPreset) {
-        withAnimation(.smooth) {
-            let id = shortcut.id
-            shortcut = preset.shortcut
-            shortcut.id = id
-            switch preset.shortcut.action {
-            case .openURL(let url):
-                kind = .website
-                website = url.replacing(/^https?:\/\/(www\.)?/, with: "")
-            case .openApp(let bundleID, let name):
-                kind = .app
-                appName = name
-                appBundleID = bundleID
-            case .keystroke, .media:
-                kind = .control
-                keyPreset = preset.id
-            }
-        }
-    }
-
     /// An app from the Mac's list: named after it unless you've named the shortcut yourself.
     private func pick(_ app: MacApp) {
         let previousName = appName
@@ -329,56 +294,3 @@ struct ShortcutEditor: View {
     ]
 }
 
-/// A quick pick, with the site's favicon or the app's icon when there is one, like its tile.
-private struct QuickPickChip: View {
-    let preset: ShortcutPreset
-    var appIcon: Data?
-    let action: () -> Void
-    @State private var favicon: UIImage?
-
-    private var website: String? {
-        if case .openURL(let url) = preset.shortcut.action { url } else { nil }
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                icon.frame(width: 22, height: 22)
-                Text(preset.shortcut.name)
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.leading, 6)
-            .padding(.trailing, 12)
-            .padding(.vertical, 6)
-            .background(preset.shortcut.color.tint.gradient, in: .capsule)
-        }
-        .buttonStyle(.plain)
-        .task(id: website) {
-            guard let website, let data = await FaviconLoader.shared.icon(for: website) else { return }
-            withAnimation(.smooth) { favicon = UIImage(data: data) }
-        }
-    }
-
-    @ViewBuilder private var icon: some View {
-        if let bundleID = preset.shortcut.appBundleID, let appIcon,
-           let image = AppIconCache.image(for: bundleID, png: appIcon) {
-            Image(uiImage: image)
-                .resizable()
-                .interpolation(.high)
-                .padding(-2) // macOS icons carry a transparent margin
-        } else if let favicon {
-            Image(uiImage: favicon)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .padding(3)
-                .background(.white, in: .circle)
-        } else {
-            Image(systemName: preset.shortcut.symbol)
-                .font(.system(size: 13, weight: .semibold))
-                .frame(width: 22, height: 22)
-                .background(.white.opacity(0.22), in: .circle)
-        }
-    }
-}

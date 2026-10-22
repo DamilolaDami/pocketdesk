@@ -78,6 +78,10 @@ public actor ScreenCaptureSource: FrameSource {
         configuration.colorSpaceName = CGColorSpace.sRGB
         configuration.queueDepth = 4
         configuration.showsCursor = true
+        // Capture from the Retina backing store, not 1x points scaled up: the biggest single
+        // factor in how crisp text looks on the phone.
+        configuration.captureResolution = .best
+        configuration.preservesAspectRatio = true
         configuration.capturesAudio = false
 
         let (frames, continuation) = AsyncStream<CapturedFrame>.makeStream(bufferingPolicy: .bufferingNewest(2))

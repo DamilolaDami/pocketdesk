@@ -11,14 +11,20 @@ import PDProtocol
 
     @Test func landscapeDisplayFitsPhoneRotated() {
         // A MacBook Pro display is taller than the phone's 2622 × 1206 landscape box allows.
-        let size = StreamSizing.fit(sourceWidth: 3024, sourceHeight: 1964, into: iPhone)
+        let size = StreamSizing.fit(sourceWidth: 3024, sourceHeight: 1964, into: iPhone, zoomHeadroom: 1)
         #expect(size.height == 1206)
         #expect(size.width <= 2622)
         #expect(size.width % 2 == 0 && size.height % 2 == 0)
     }
 
+    @Test func zoomHeadroomStreamsSharperThanTheScreen() {
+        let size = StreamSizing.fit(sourceWidth: 3024, sourceHeight: 1964, into: iPhone)
+        #expect(size.height == 1808) // 1206 × 1.5, rounded down to even
+        #expect(size.width <= 3024)
+    }
+
     @Test func portraitWindowFitsPhonePortrait() {
-        let size = StreamSizing.fit(sourceWidth: 1600, sourceHeight: 3000, into: iPhone)
+        let size = StreamSizing.fit(sourceWidth: 1600, sourceHeight: 3000, into: iPhone, zoomHeadroom: 1)
         #expect(size.height <= 2622 && size.width <= 1206)
     }
 

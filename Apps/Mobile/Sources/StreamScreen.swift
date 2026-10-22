@@ -14,6 +14,13 @@ struct StreamScreen: View {
     @Namespace private var glass
 
     var body: some View {
+        GeometryReader { geometry in
+            stream(isLandscape: geometry.size.width > geometry.size.height)
+        }
+        .ignoresSafeArea()
+    }
+
+    private func stream(isLandscape: Bool) -> some View {
         StreamView(controller: controller, videoSize: CGSize(width: config.width, height: config.height),
                    keyboardShown: $keyboardShown)
             .ignoresSafeArea()
@@ -25,7 +32,7 @@ struct StreamScreen: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .overlay(alignment: .bottom) { controls.padding(.bottom, 10) }
+            .overlay(alignment: .bottom) { controls(isLandscape: isLandscape).padding(.bottom, 10) }
             .persistentSystemOverlays(.hidden)
             .statusBarHidden()
             .task {
@@ -39,10 +46,14 @@ struct StreamScreen: View {
             }
     }
 
-    private var controls: some View {
+    private func controls(isLandscape: Bool) -> some View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
                 if controlsExpanded {
+                    control(isLandscape ? "Portrait" : "Landscape",
+                            isLandscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate") {
+                        rotate(toLandscape: !isLandscape)
+                    }
                     control("Keyboard", keyboardShown ? "keyboard.chevron.compact.down.fill" : "keyboard") {
                         keyboardShown.toggle()
                     }
@@ -58,6 +69,13 @@ struct StreamScreen: View {
                 }
             }
         }
+    }
+
+    /// A Mac display fits a landscape phone far better; this flips without needing the
+    /// phone's rotation lock off.
+    private func rotate(toLandscape: Bool) {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: toLandscape ? .landscapeRight : .portrait))
     }
 
     private func control(_ title: String, _ symbol: String, tint: Color? = nil,

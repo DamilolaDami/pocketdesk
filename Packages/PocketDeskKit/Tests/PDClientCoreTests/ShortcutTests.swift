@@ -58,6 +58,9 @@ import Testing
         #expect(music.action.summary == "Opens Music")
         #expect(spotlight.action.summary == "⌘Space")
         #expect(MacAction.keystroke(code: 0x0C, modifiers: ShortcutPreset.command | ShortcutPreset.control).summary == "⌃⌘Q")
+        #expect(MacAction.media(.playPause).summary == "Play / Pause")
+        // Media keys are Mac controls in the editor.
+        #expect(ShortcutPreset.all.contains { $0.category == .controls && $0.shortcut.action == .media(.playPause) })
     }
 
     @Test func presetNamesAreUnique() {

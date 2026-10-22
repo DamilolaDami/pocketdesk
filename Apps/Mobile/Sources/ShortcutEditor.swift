@@ -55,7 +55,7 @@ struct ShortcutEditor: View {
             _website = State(initialValue: "")
             _appName = State(initialValue: name)
             _keyPreset = State(initialValue: controls[0].id)
-        case .keystroke:
+        case .keystroke, .media:
             _kind = State(initialValue: .control)
             _website = State(initialValue: "")
             _appName = State(initialValue: "")
@@ -197,7 +197,7 @@ struct ShortcutEditor: View {
         switch kind {
         case .website: "Opens in the Mac's default browser."
         case .app: "Opens the app, or brings it to the front if it's already running."
-        case .control: "Presses the key combination on the Mac."
+        case .control: "Presses the keys on the Mac. Play / Pause works on whatever is playing, like Netflix in Safari."
         }
     }
 
@@ -290,7 +290,7 @@ struct ShortcutEditor: View {
                 kind = .app
                 appName = name
                 appBundleID = bundleID
-            case .keystroke:
+            case .keystroke, .media:
                 kind = .control
                 keyPreset = preset.id
             }

@@ -147,6 +147,12 @@ public struct ShortcutPreset: Sendable, Identifiable {
         keys("Close Window", code: 0x0D, command, symbol: "xmark.square.fill", color: .orange),
         keys("Quit App", code: 0x0C, command, symbol: "power", color: .red),
         keys("Lock Mac", code: 0x0C, command | control, symbol: "lock.fill", color: .gray),
+        media("Play / Pause", .playPause, symbol: "playpause.fill", color: .red),
+        media("Next Track", .next, symbol: "forward.fill", color: .pink),
+        media("Previous Track", .previous, symbol: "backward.fill", color: .pink),
+        media("Volume Up", .volumeUp, symbol: "speaker.wave.3.fill", color: .blue),
+        media("Volume Down", .volumeDown, symbol: "speaker.wave.1.fill", color: .blue),
+        media("Mute", .mute, symbol: "speaker.slash.fill", color: .gray),
     ]
 
     private static func website(_ name: String, _ url: String, symbol: String, color: ShortcutColor) -> ShortcutPreset {
@@ -157,6 +163,10 @@ public struct ShortcutPreset: Sendable, Identifiable {
     private static func app(_ name: String, _ bundleID: String, symbol: String, color: ShortcutColor) -> ShortcutPreset {
         ShortcutPreset(category: .apps, shortcut: Shortcut(name: name, symbol: symbol, color: color,
                                                            action: .openApp(bundleID: bundleID, name: name)))
+    }
+
+    private static func media(_ name: String, _ key: MediaKey, symbol: String, color: ShortcutColor) -> ShortcutPreset {
+        ShortcutPreset(category: .controls, shortcut: Shortcut(name: name, symbol: symbol, color: color, action: .media(key)))
     }
 
     private static func keys(_ name: String, code: UInt16, _ modifiers: UInt32, symbol: String,
@@ -177,6 +187,15 @@ extension MacAction {
             return "Opens \(name)"
         case .keystroke(let code, let modifiers):
             return Self.keyName(code: code, modifiers: modifiers)
+        case .media(let key):
+            return switch key {
+            case .playPause: "Play / Pause"
+            case .next: "Next track"
+            case .previous: "Previous track"
+            case .volumeUp: "Volume up"
+            case .volumeDown: "Volume down"
+            case .mute: "Mute"
+            }
         }
     }
 

@@ -1,8 +1,8 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 8
+public let protocolVersion: UInt16 = 9
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
-public let alpn = "pocketdesk/8"
+public let alpn = "pocketdesk/9"
 
 /// Bonjour service type advertised by the host on the local network.
 public let bonjourServiceType = "_pocketdesk._udp"
@@ -56,6 +56,13 @@ public enum MacAction: Codable, Sendable, Equatable, Hashable {
     case openApp(bundleID: String?, name: String)
     /// One key press with modifiers held: a macOS virtual key code and `CGEventFlags` bits.
     case keystroke(code: UInt16, modifiers: UInt32)
+    /// A keyboard media key. Play/Pause controls whatever is playing (Netflix in Safari,
+    /// Music, YouTube), whichever app is in front.
+    case media(MediaKey)
+}
+
+public enum MediaKey: String, Codable, Sendable, Hashable, CaseIterable {
+    case playPause, next, previous, volumeUp, volumeDown, mute
 }
 
 public struct Hello: Codable, Sendable, Equatable {

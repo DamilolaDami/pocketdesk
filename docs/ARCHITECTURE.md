@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/8`, four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/9`, four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -87,6 +87,9 @@ phone                                   Mac
 streaming connects to the chosen Mac and sends it once the first `streamConfig` arrives. The
 library is a JSON file on the phone (`ShortcutLibrary`). Website tiles show the site's own
 icon, fetched from that site (never a favicon service) and cached.
+Media keys (protocol v9): `MacAction.media` (Play/Pause, next, previous, volume, mute) is
+posted as the keyboard's system-defined media-key events, so Play/Pause pauses whatever is
+playing (Netflix in Safari, Music, YouTube) whichever app is in front.
 
 **App catalog**: the editor's app picker opens a short `hello(mode: .catalog)` connection: no
 video, input or Screen Recording, and the Mac's menu doesn't show it as connected. The phone

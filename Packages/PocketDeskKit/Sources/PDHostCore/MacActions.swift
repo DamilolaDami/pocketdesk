@@ -47,6 +47,30 @@ extension InputInjector {
         case .keystroke(let code, let modifiers):
             inject(.key(code: code, isDown: true, modifiers: modifiers))
             inject(.key(code: code, isDown: false, modifiers: modifiers))
+
+        case .media(let key):
+            await Self.press(key)
+        }
+    }
+
+    /// Media keys aren't key codes: the keyboard sends them as system-defined events
+    /// (subtype 8, `NX_KEYTYPE_*` in the top half of `data1`), down then up.
+    @MainActor
+    static func press(_ key: MediaKey) {
+        let type: Int = switch key {
+        case .playPause: 16 // NX_KEYTYPE_PLAY
+        case .next: 17 // NX_KEYTYPE_NEXT
+        case .previous: 18 // NX_KEYTYPE_PREVIOUS
+        case .volumeUp: 0 // NX_KEYTYPE_SOUND_UP
+        case .volumeDown: 1 // NX_KEYTYPE_SOUND_DOWN
+        case .mute: 7 // NX_KEYTYPE_MUTE
+        }
+        for state in [0xA, 0xB] { // key down, key up
+            let event = NSEvent.otherEvent(with: .systemDefined, location: .zero,
+                                           modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(state << 8)),
+                                           timestamp: 0, windowNumber: 0, context: nil, subtype: 8,
+                                           data1: (type << 16) | (state << 8), data2: -1)
+            event?.cgEvent?.post(tap: .cghidEventTap)
         }
     }
 

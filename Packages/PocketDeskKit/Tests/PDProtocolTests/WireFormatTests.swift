@@ -50,6 +50,8 @@ import Testing
         .openApp(bundleID: "com.apple.Music", name: "Music"),
         .openApp(bundleID: nil, name: "Spotify"),
         .keystroke(code: 0x31, modifiers: 0x100000),
+        .media(.playPause),
+        .media(.volumeDown),
     ])
     func actionsRoundTrip(_ action: MacAction) throws {
         let data = try JSONEncoder().encode(ControlMessage.run(action))

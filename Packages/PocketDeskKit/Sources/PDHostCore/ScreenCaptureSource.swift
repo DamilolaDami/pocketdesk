@@ -1,0 +1,151 @@
+#if os(macOS)
+import CoreGraphics
+import CoreMedia
+import Foundation
+import PDProtocol
+@preconcurrency import ScreenCaptureKit
+
+/// `FrameSource` backed by ScreenCaptureKit. Needs the Screen Recording permission.
+public actor ScreenCaptureSource: FrameSource {
+    private var stream: SCStream?
+    private var output: StreamOutput?
+    private let sampleQueue = DispatchQueue(label: "com.pocketdesk.capture", qos: .userInteractive)
+
+    public init() {}
+
+    public func displays() async throws -> [DisplayInfo] {
+        try await SCShareableContent.current.displays.map { display in
+            let (width, height) = Self.pixelSize(of: display.displayID)
+            return DisplayInfo(id: display.displayID, width: width, height: height)
+        }
+    }
+
+    public func windows() async throws -> [WindowInfo] {
+        let ownBundleID = Bundle.main.bundleIdentifier
+        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+        return content.windows
+            .filter { window in
+                window.windowLayer == 0 && window.isOnScreen && window.frame.width >= 80 && window.frame.height >= 60
+                    && window.owningApplication != nil
+                    && window.owningApplication?.bundleIdentifier != ownBundleID
+            }
+            .map(Self.info(for:))
+    }
+
+    public func resolve(_ source: CaptureSource?) async throws -> ResolvedSource {
+        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+        switch source {
+        case nil:
+            guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first
+            else { throw CaptureError.sourceNotFound }
+            return Self.resolved(display)
+        case .display(let id):
+            guard let display = content.displays.first(where: { $0.displayID == id }) else { throw CaptureError.sourceNotFound }
+            return Self.resolved(display)
+        case .window(let id):
+            guard let window = content.windows.first(where: { $0.windowID == id }) else { throw CaptureError.sourceNotFound }
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            let scale = Double(filter.pointPixelScale)
+            return ResolvedSource(source: .window(id),
+                                  pixelWidth: Int(window.frame.width * scale), pixelHeight: Int(window.frame.height * scale),
+                                  screenFrame: window.frame, window: Self.info(for: window))
+        }
+    }
+
+    public func start(_ source: ResolvedSource, width: Int, height: Int, fps: Int) async throws -> AsyncStream<CapturedFrame> {
+        await stop()
+        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+        let filter: SCContentFilter
+        switch source.source {
+        case .display(let id):
+            guard let display = content.displays.first(where: { $0.displayID == id }) else { throw CaptureError.sourceNotFound }
+            // Leave our own UI (menu bar extra, pairing window) out of the stream.
+            let ownApps = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
+            filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
+        case .window(let id):
+            guard let window = content.windows.first(where: { $0.windowID == id }) else { throw CaptureError.sourceNotFound }
+            filter = SCContentFilter(desktopIndependentWindow: window)
+        }
+
+        let configuration = SCStreamConfiguration()
+        configuration.width = width
+        configuration.height = height
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+        // NV12 is what the hardware encoder consumes natively; no conversion pass.
+        configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        configuration.queueDepth = 4
+        configuration.showsCursor = true
+        configuration.capturesAudio = false
+
+        let (frames, continuation) = AsyncStream<CapturedFrame>.makeStream(bufferingPolicy: .bufferingNewest(2))
+        let output = StreamOutput(continuation: continuation)
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: output)
+        try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
+        try await stream.startCapture()
+        self.stream = stream
+        self.output = output
+        return frames
+    }
+
+    public func stop() async {
+        if let stream { try? await stream.stopCapture() }
+        output?.finish()
+        stream = nil
+        output = nil
+    }
+
+    private static func resolved(_ display: SCDisplay) -> ResolvedSource {
+        let (width, height) = pixelSize(of: display.displayID)
+        return ResolvedSource(source: .display(display.displayID), pixelWidth: width, pixelHeight: height,
+                              screenFrame: CGDisplayBounds(display.displayID))
+    }
+
+    private static func pixelSize(of displayID: CGDirectDisplayID) -> (Int, Int) {
+        guard let mode = CGDisplayCopyDisplayMode(displayID) else {
+            return (Int(CGDisplayPixelsWide(displayID)), Int(CGDisplayPixelsHigh(displayID)))
+        }
+        return (mode.pixelWidth, mode.pixelHeight)
+    }
+
+    private static func info(for window: SCWindow) -> WindowInfo {
+        WindowInfo(id: window.windowID,
+                   appName: window.owningApplication?.applicationName ?? "",
+                   bundleID: window.owningApplication?.bundleIdentifier,
+                   title: window.title ?? "",
+                   width: Int(window.frame.width), height: Int(window.frame.height))
+    }
+}
+
+public enum CaptureError: Error, Sendable {
+    case sourceNotFound
+}
+
+/// Receives sample buffers on the capture queue and forwards complete frames.
+///
+/// `@unchecked Sendable`: only touched from ScreenCaptureKit's sample queue after setup;
+/// the continuation itself is thread-safe.
+private final class StreamOutput: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    private let continuation: AsyncStream<CapturedFrame>.Continuation
+
+    init(continuation: AsyncStream<CapturedFrame>.Continuation) {
+        self.continuation = continuation
+    }
+
+    func finish() { continuation.finish() }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen, sampleBuffer.isValid,
+              let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let rawStatus = attachments.first?[.status] as? Int,
+              SCFrameStatus(rawValue: rawStatus) == .complete,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer)
+        else { return }
+        continuation.yield(CapturedFrame(pixelBuffer: pixelBuffer,
+                                         presentationTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer)))
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: any Error) {
+        continuation.finish()
+    }
+}
+#endif

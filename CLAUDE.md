@@ -12,7 +12,12 @@ PocketDesk: a macOS host and an iOS client for using your Mac from your phone. R
 - Swift 6 strict concurrency, with no `@unchecked Sendable` unless there's a comment on why.
 - Tests use Swift Testing (`import Testing`), not XCTest.
 - Never commit the generated `.xcodeproj`. Edit `project.yml`.
+- Open source: nothing secret in the repo (no team IDs, keys, certificates). Security must
+  hold with the code public. Read the Security section of `docs/ARCHITECTURE.md` before
+  touching `PDSecurity` or the TLS setup in `PDTransport`.
 
 ## Verify
-- `cd Packages/PocketDeskKit && swift build && swift test`
+- `cd Packages/PocketDeskKit && swift build && swift test`. Tests touch the real login keychain
+  (labels `com.pocketdesk.tests.*`, always deleted afterwards), use QUIC on 127.0.0.1 and
+  Bonjour. Screen-capture tests run only if the process has Screen Recording permission.
 - `xcodegen && xcodebuild -scheme PocketDesk -destination 'generic/platform=iOS Simulator' build`

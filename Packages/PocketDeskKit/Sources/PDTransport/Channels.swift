@@ -1,8 +1,9 @@
+import Network
 import PDProtocol
 
 /// One connected peer, as three logical channels over a single QUIC connection:
 ///
-/// - control: reliable ordered stream of `ControlMessage` (Codable over TLV framing)
+/// - control: reliable ordered stream of `ControlMessage` (JSON via Network's `Coder`)
 /// - input:   QUIC datagrams of `InputEvent` (unreliable, latest-wins pointer moves)
 /// - video:   reliable stream of `VideoFrameHeader` + payload, host → client
 ///
@@ -23,4 +24,11 @@ public protocol PeerSession: Sendable {
 
 public enum TransportError: Error, Sendable {
     case closed
+    case connectionFailed(NWError)
+    /// The connection wasn't ready in time (unreachable host, or a rejected handshake).
+    case timedOut
+    /// The TLS handshake finished without a peer certificate we could fingerprint.
+    case unauthenticatedPeer
+    /// e.g. sending video from the client side.
+    case wrongRole
 }

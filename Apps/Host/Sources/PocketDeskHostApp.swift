@@ -1,23 +1,28 @@
 import PDHostCore
 import SwiftUI
 
-/// Menu bar app (LSUIElement). Lives in the menu bar, launches at login via SMAppService.
+/// Menu bar app (LSUIElement): status, pairing, connected and paired phones.
 @main
 struct PocketDeskHostApp: App {
-    @State private var permissions = HostPermissions.current()
+    @State private var controller: HostController
 
     var body: some Scene {
-        MenuBarExtra("PocketDesk", systemImage: "iphone.and.arrow.forward") {
-            if permissions.allGranted {
-                Text("Ready for connections")
-            } else {
-                Button("Grant permissions…") {
-                    HostPermissions.request()
-                    permissions = .current()
-                }
-            }
-            Divider()
-            Button("Quit PocketDesk") { NSApplication.shared.terminate(nil) }
+        MenuBarExtra {
+            MenuContent(controller: controller)
+        } label: {
+            Image(systemName: controller.store.state.connected.isEmpty ? "iphone" : "iphone.radiowaves.left.and.right")
         }
+        .menuBarExtraStyle(.window)
+
+        Window("Pair a Phone", id: PairingWindow.id) {
+            PairingWindow(controller: controller)
+        }
+        .windowResizability(.contentSize)
+    }
+
+    init() {
+        let controller = HostController()
+        _controller = State(initialValue: controller)
+        controller.start()
     }
 }

@@ -11,6 +11,10 @@ public let bonjourServiceType = "_pocketdesk._udp"
 public enum ControlMessage: Codable, Sendable, Equatable {
     case hello(Hello)
     case helloAck(HelloAck)
+    /// First message from an unpaired phone: the token from the scanned QR invite.
+    case pairRequest(PairRequest)
+    /// Host's answer once the person at the Mac accepts or rejects the verification code.
+    case pairResult(accepted: Bool)
     case listWindows
     case windows([WindowInfo])
     /// `nil` streams the whole display.
@@ -34,6 +38,16 @@ public struct Hello: Codable, Sendable, Equatable {
         self.version = version
         self.deviceName = deviceName
         self.viewport = viewport
+    }
+}
+
+public struct PairRequest: Codable, Sendable, Equatable {
+    public var token: [UInt8]
+    public var deviceName: String
+
+    public init(token: [UInt8], deviceName: String) {
+        self.token = token
+        self.deviceName = deviceName
     }
 }
 

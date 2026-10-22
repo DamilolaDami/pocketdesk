@@ -40,6 +40,8 @@ struct StreamScreen: View {
                 try? await Task.sleep(for: .seconds(3))
                 withAnimation(.smooth) { showsStatus = false }
             }
+            // The other screens are designed for portrait; don't leave the phone stuck sideways.
+            .onDisappear { rotate(toLandscape: false) }
             .sheet(isPresented: $showingWindows) {
                 WindowPicker(controller: controller) { showingWindows = false }
                     .presentationDetents([.medium, .large])

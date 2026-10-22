@@ -4,6 +4,7 @@ import OSLog
 import PDProtocol
 import PDSecurity
 import PDTransport
+import Synchronization
 
 /// A phone waiting for the person at the Mac to confirm its verification code.
 public struct PairingApproval: Sendable, Equatable, Identifiable {
@@ -189,18 +190,22 @@ public actor HostService: PairingAuthority {
 
     private func serve(_ session: QUICPeerSession) async throws {
         let peer = session.peer
+        // Catalog sessions never say "connected", so they mustn't say "ended" either: that
+        // would hide the same phone's live stream from the menu.
+        let started = StartedFlag()
         let hostSession = HostSession(
             session: session, peer: peer, configuration: .init(hostName: configuration.hostName),
             frameSource: makeFrameSource(), input: input, pairing: self
-        ) { [onEvent] event in
+        ) { [onEvent, started] event in
             switch event {
             case .connected(let peer, let deviceName):
+                started.set()
                 onEvent(.sessionStarted(peer: peer, deviceName: deviceName))
             case .streaming(let peer, let config, let window):
                 onEvent(.sessionStreaming(peer: peer, config: config, window: window))
             }
         }
-        defer { onEvent(.sessionEnded(peer: peer)) }
+        defer { if started.isSet { onEvent(.sessionEnded(peer: peer)) } }
         do {
             try await hostSession.run()
         } catch {
@@ -210,5 +215,12 @@ public actor HostService: PairingAuthority {
     }
 
     private static let log = Logger(subsystem: "com.pocketdesk.host", category: "session")
+}
+
+/// Set once from a session's event callback, read when it ends.
+private final class StartedFlag: Sendable {
+    private let storage = Mutex(false)
+    var isSet: Bool { storage.withLock { $0 } }
+    func set() { storage.withLock { $0 = true } }
 }
 #endif

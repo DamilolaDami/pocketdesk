@@ -56,10 +56,10 @@ extension InputInjector {
             return url
         }
         let folders = ["/Applications", "/System/Applications", "/System/Applications/Utilities",
-                       URL.homeDirectory.appending(path: "Applications").path()]
+                       URL.homeDirectory.appending(path: "Applications").path(percentEncoded: false)]
         return folders
             .map { URL(filePath: $0).appending(path: "\(name).app") }
-            .first { FileManager.default.fileExists(atPath: $0.path()) }
+            .first { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
     }
 }
 #endif

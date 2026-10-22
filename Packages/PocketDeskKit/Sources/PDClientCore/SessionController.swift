@@ -28,10 +28,15 @@ public final class SessionController {
     private var library: ShortcutLibrary
     /// A shortcut tapped while not connected: sent once the stream starts.
     private var pendingAction: MacAction?
+    private let cacheDirectory: URL
+    private var catalogTask: Task<Void, Never>?
+    private var catalogFetchedAt: [UUID: ContinuousClock.Instant] = [:]
 
     public init(identityLabel: String = "com.pocketdesk.phone.identity",
                 trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json"),
-                shortcutsURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/shortcuts.json")) {
+                shortcutsURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/shortcuts.json"),
+                cacheDirectory: URL = URL.cachesDirectory.appending(path: "PocketDesk")) {
+        self.cacheDirectory = cacheDirectory
         self.identityLabel = identityLabel
         self.trustStoreURL = trustStoreURL
         self.trustStore = (try? TrustStore.load(from: trustStoreURL)) ?? TrustStore()
@@ -235,10 +240,7 @@ public final class SessionController {
             connection.send(.run(shortcut.action))
             return true
         }
-        let macs = reachableMacs
-        guard let host = macs.first(where: { $0.hostID != nil && $0.hostID == preferredHostID })
-                ?? macs.first(where: { $0.hostID != nil && $0.hostID == lastHost?.hostID })
-                ?? macs.first else {
+        guard let host = shortcutTarget(preferredHostID: preferredHostID) else {
             store.post(notice: "Open PocketDesk on a paired Mac to run “\(shortcut.name)”.")
             return false
         }
@@ -250,6 +252,101 @@ public final class SessionController {
         pendingAction = shortcut.action
         return true
     }
+
+    /// Where shortcuts run when not streaming: `preferredHostID`, else the last Mac used, else
+    /// any paired Mac that's online.
+    public func shortcutTarget(preferredHostID: UUID?) -> DiscoveredHost? {
+        let macs = reachableMacs
+        return macs.first { $0.hostID != nil && $0.hostID == preferredHostID }
+            ?? macs.first { $0.hostID != nil && $0.hostID == lastHost?.hostID }
+            ?? macs.first
+    }
+
+    // MARK: The Mac's apps
+
+    /// Shows the target Mac's apps (cached ones straight away), then refreshes them and fetches
+    /// missing icons over a short catalog connection, at most every few minutes unless `force`.
+    public func loadApps(preferredHostID: UUID?, force: Bool = false) {
+        loadCachedIcons(for: library.shortcuts.compactMap(\.appBundleID))
+        guard let host = shortcutTarget(preferredHostID: preferredHostID), let hostID = host.hostID,
+              let browsedHost = browsed[host.id], let peer = trustStore.peer(hostID: hostID) else {
+            store.update(catalogStatus: .unavailable)
+            return
+        }
+        let cached = (try? JSONDecoder().decode([MacApp].self, from: Data(contentsOf: appsURL(hostID)))) ?? []
+        store.update(macApps: cached)
+        loadCachedIcons(for: cached.map(\.bundleID))
+
+        if !force, let fetched = catalogFetchedAt[hostID], fetched.duration(to: .now) < .seconds(300) { return }
+        guard catalogTask == nil else { return }
+        let identity: DeviceIdentity
+        do {
+            identity = try DeviceIdentity.loadOrCreate(label: identityLabel)
+        } catch {
+            store.update(catalogStatus: .failed("Couldn't load this phone's identity."))
+            return
+        }
+        if cached.isEmpty { store.update(catalogStatus: .loading) }
+        let haveIcons = Set(store.appIcons.keys)
+        // Shortcut tiles too, in case an app lives outside the usual folders.
+        let shortcutApps = library.shortcuts.compactMap(\.appBundleID)
+        let updates = ClientConnection.catalog(endpoint: browsedHost.endpoint, hostFingerprint: peer.fingerprint,
+                                               identity: identity, deviceName: deviceName) { apps in
+            var wanted: [String] = []
+            for id in apps.map(\.bundleID) + shortcutApps where !haveIcons.contains(id) && !wanted.contains(id) {
+                wanted.append(id)
+            }
+            return wanted
+        }
+        catalogTask = Task { [weak self] in
+            do {
+                for try await update in updates {
+                    self?.receive(update, hostID: hostID)
+                }
+                self?.catalogFetchedAt[hostID] = .now
+                self?.store.update(catalogStatus: .loaded)
+            } catch {
+                guard let self else { return }
+                self.store.update(catalogStatus: self.store.macApps.isEmpty
+                                  ? .failed(ClientConnection.describe(error)) : .loaded)
+            }
+            self?.catalogTask = nil
+        }
+    }
+
+    private func receive(_ update: CatalogUpdate, hostID: UUID) {
+        switch update {
+        case .apps(let apps):
+            store.update(macApps: apps)
+            try? FileManager.default.createDirectory(at: appsURL(hostID).deletingLastPathComponent(),
+                                                     withIntermediateDirectories: true)
+            try? JSONEncoder().encode(apps).write(to: appsURL(hostID), options: .atomic)
+        case .icon(let bundleID, let png?):
+            store.add(icon: png, for: bundleID)
+            try? FileManager.default.createDirectory(at: iconURL(bundleID).deletingLastPathComponent(),
+                                                     withIntermediateDirectories: true)
+            try? png.write(to: iconURL(bundleID), options: .atomic)
+        case .icon(_, nil):
+            break
+        }
+    }
+
+    private func loadCachedIcons(for bundleIDs: [String]) {
+        for bundleID in bundleIDs where store.appIcons[bundleID] == nil {
+            if let png = try? Data(contentsOf: iconURL(bundleID)) { store.add(icon: png, for: bundleID) }
+        }
+    }
+
+    private func appsURL(_ hostID: UUID) -> URL {
+        cacheDirectory.appending(path: "apps/\(hostID.uuidString).json")
+    }
+
+    private func iconURL(_ bundleID: String) -> URL {
+        // Bundle IDs are reverse-DNS; keep only filename-safe characters anyway.
+        cacheDirectory.appending(path: "app-icons/\(bundleID.filter { $0.isLetter || $0.isNumber || ".-_".contains($0) }).png")
+    }
+
+    // MARK: Library
 
     public func save(_ shortcut: Shortcut) {
         updateLibrary { $0.save(shortcut) }

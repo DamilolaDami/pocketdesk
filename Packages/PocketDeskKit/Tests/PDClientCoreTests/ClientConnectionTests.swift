@@ -135,6 +135,49 @@ final class ClientConnectionTests {
         #expect(events.all.last == .ended(reason: ClientError.pairingDeclined.description))
     }
 
+    @Test func catalogListsAppsAndIconsWithoutStreaming() async throws {
+        // Already paired: the catalog is only for phones the Mac trusts.
+        try TrustStore(peers: [PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone")]).save(to: trustStoreURL)
+        let events = HostEvents()
+        let service = try HostService(
+            configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
+                                 trustStoreURL: trustStoreURL, advertise: false),
+            makeFrameSource: { MovingFrames() }, input: SinkRecorder()
+        ) { events.append($0) }
+        let serviceTask = Task { try await service.run() }
+        defer { serviceTask.cancel() }
+        var port: UInt16?
+        for _ in 0..<200 where port == nil {
+            port = await service.port
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        var updates: [CatalogUpdate] = []
+        for try await update in ClientConnection.catalog(
+            endpoint: .hostPort(host: "127.0.0.1", port: .init(rawValue: try #require(port))!),
+            hostFingerprint: service.identity.fingerprint, identity: phone, deviceName: "Test iPhone",
+            iconsWanted: { apps in Array(apps.prefix(1).map(\.bundleID)) + ["com.example.not-installed"] }
+        ) {
+            updates.append(update)
+        }
+
+        guard case .apps(let apps) = updates.first else { Issue.record("expected apps first"); return }
+        #expect(!apps.isEmpty) // /System/Applications is always there
+        #expect(apps.contains { $0.name == "Activity Monitor" }) // Finder's name, not "Activity%20Monitor"
+        #expect(apps.contains { $0.bundleID == "com.apple.Safari" }) // a symlink into the system cryptex
+        // Names with spaces resolve when a shortcut opens an app by name.
+        #expect(InputInjector.application(bundleID: nil, name: "Activity Monitor") != nil)
+        #expect(apps.map(\.name) == apps.map(\.name).sorted { $0.localizedStandardCompare($1) == .orderedAscending })
+        guard updates.count == 3, case .icon(let id, let png?) = updates[1],
+              case .icon("com.example.not-installed", nil) = updates[2] else {
+            Issue.record("expected one icon and one miss, got \(updates.dropFirst())"); return
+        }
+        #expect(id == apps[0].bundleID)
+        #expect(png.starts(with: [0x89, 0x50, 0x4E, 0x47])) // PNG
+        // No picture was involved, so the Mac never showed the phone as connected.
+        #expect(!events.all.contains { if case .sessionStarted = $0 { true } else { false } })
+    }
+
     private func pairedAt(in events: [ClientEvent]) -> Date {
         for event in events { if case .paired(let peer) = event { return peer.pairedAt } }
         return .distantPast
@@ -176,6 +219,13 @@ final class SinkRecorder: InputSink, @unchecked Sendable {
     func perform(_ action: MacAction) async throws {
         throw MacActionError.appNotFound("Missing")
     }
+}
+
+final class HostEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [HostEvent] = []
+    var all: [HostEvent] { lock.withLock { events } }
+    func append(_ event: HostEvent) { lock.withLock { events.append(event) } }
 }
 
 final class ClientEvents: @unchecked Sendable {

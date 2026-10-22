@@ -16,6 +16,11 @@ public final class SessionStore {
     public private(set) var shortcuts: [Shortcut] = []
     /// A message to show briefly over whatever screen is up (e.g. a shortcut that failed).
     public private(set) var notice: Notice?
+    /// The apps on the Mac shortcuts run on, for the editor. Cached per Mac.
+    public private(set) var macApps: [MacApp] = []
+    /// PNG app icons by bundle ID: the editor's list and app shortcut tiles.
+    public private(set) var appIcons: [String: Data] = [:]
+    public private(set) var catalogStatus = CatalogStatus.idle
 
     public init() {}
 
@@ -33,6 +38,18 @@ public final class SessionStore {
 
     public func update(shortcuts: [Shortcut]) {
         self.shortcuts = shortcuts
+    }
+
+    public func update(macApps: [MacApp]) {
+        self.macApps = macApps
+    }
+
+    public func add(icon png: Data, for bundleID: String) {
+        appIcons[bundleID] = png
+    }
+
+    public func update(catalogStatus: CatalogStatus) {
+        self.catalogStatus = catalogStatus
     }
 
     public func post(notice text: String) {
@@ -55,4 +72,13 @@ public struct StreamStats: Sendable, Equatable {
     public var bitrateKbps: Double = 0
 
     public init() {}
+}
+
+public enum CatalogStatus: Sendable, Equatable {
+    case idle
+    case loading
+    case loaded
+    /// No paired Mac is online to ask.
+    case unavailable
+    case failed(String)
 }

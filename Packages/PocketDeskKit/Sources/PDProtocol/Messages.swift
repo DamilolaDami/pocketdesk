@@ -27,6 +27,12 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     case run(MacAction)
     /// Host → phone: a `run` that couldn't be done, in words for the person.
     case actionFailed(String)
+    /// The Mac's installed apps, for picking one in the shortcut editor.
+    case listApps
+    case apps([MacApp])
+    /// Icons for these bundle IDs; the host answers with one `appIcon` per ID, in order.
+    case requestAppIcons([String])
+    case appIcon(AppIcon)
     case ping(UInt64)
     case pong(UInt64)
     case bye(reason: String)
@@ -44,15 +50,46 @@ public enum MacAction: Codable, Sendable, Equatable, Hashable {
 }
 
 public struct Hello: Codable, Sendable, Equatable {
+    public enum Mode: String, Codable, Sendable {
+        /// Video, input and everything else.
+        case stream
+        /// No video or input: just questions like `listApps`, then `bye`.
+        case catalog
+    }
+
     public var version: UInt16
     public var deviceName: String
     /// Client screen in points + scale, so the host can pick a matching stream size.
     public var viewport: Viewport
+    public var mode: Mode
 
-    public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport) {
+    public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport, mode: Mode = .stream) {
         self.version = version
         self.deviceName = deviceName
         self.viewport = viewport
+        self.mode = mode
+    }
+}
+
+public struct MacApp: Codable, Sendable, Equatable, Hashable, Identifiable {
+    public var name: String
+    public var bundleID: String
+    public var id: String { bundleID }
+
+    public init(name: String, bundleID: String) {
+        self.name = name
+        self.bundleID = bundleID
+    }
+}
+
+public struct AppIcon: Codable, Sendable, Equatable {
+    public var bundleID: String
+    /// Base64 PNG (compact in JSON), or `nil` if the Mac has no such app.
+    public var png: String?
+
+    public init(bundleID: String, png: String?) {
+        self.bundleID = bundleID
+        self.png = png
     }
 }
 

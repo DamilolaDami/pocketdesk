@@ -84,6 +84,13 @@ streaming connects to the chosen Mac and sends it once the first `streamConfig` 
 library is a JSON file on the phone (`ShortcutLibrary`). Website tiles show the site's own
 icon, fetched from that site (never a favicon service) and cached.
 
+**App catalog**: the editor's app picker opens a short `hello(mode: .catalog)` connection: no
+video, input or Screen Recording, and the Mac's menu doesn't show it as connected. The phone
+sends `listApps` (apps in the usual folders, named as Finder shows them), then
+`requestAppIcons` for the bundle IDs whose icons it hasn't cached. The Mac answers each with
+an `appIcon` holding a 128 px PNG. The app list (per Mac) and the icons are cached on the
+phone, and refreshed at most every five minutes.
+
 ## Video pipeline (latency budget target: < 60 ms glass-to-glass on LAN)
 
 1. **Capture** (`ScreenCaptureSource`): `SCStream` of a display (our own windows excluded)

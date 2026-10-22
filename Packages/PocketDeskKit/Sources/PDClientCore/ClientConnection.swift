@@ -132,7 +132,7 @@ public actor ClientConnection {
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
                     case .helloAck, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
-                         .requestKeyframe, .insertText, .run:
+                         .requestKeyframe, .insertText, .run, .listApps, .apps, .requestAppIcons, .appIcon:
                         continue
                     }
                 }
@@ -173,13 +173,72 @@ public actor ClientConnection {
         }
     }
 
-    private static func describe(_ error: any Error) -> String {
+    static func describe(_ error: any Error) -> String {
         switch error {
         case let error as ClientError: error.description
         case TransportError.timedOut: "Couldn't reach the Mac. Is PocketDesk running on it?"
         case TransportError.connectionFailed(let error): "Connection failed: \(error.localizedDescription)"
         case TransportError.closed: "The Mac closed the connection."
         default: error.localizedDescription
+        }
+    }
+}
+
+/// What a catalog connection reports, as it arrives.
+public enum CatalogUpdate: Sendable, Equatable {
+    case apps([MacApp])
+    /// `png == nil`: the Mac has no icon for it (or no such app).
+    case icon(bundleID: String, png: Data?)
+}
+
+extension ClientConnection {
+    /// A short connection with no video: lists the Mac's apps, then fetches icons for the
+    /// bundle IDs `iconsWanted` picks from that list. Doesn't need Screen Recording on the Mac.
+    public static func catalog(endpoint: NWEndpoint, hostFingerprint: Fingerprint, identity: DeviceIdentity,
+                               deviceName: String,
+                               iconsWanted: @escaping @Sendable ([MacApp]) -> [String]) -> AsyncThrowingStream<CatalogUpdate, any Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+                        var control = session.controlMessages.makeAsyncIterator()
+                        /// The next message that isn't housekeeping; a `bye` ends the fetch with its reason.
+                        func next() async throws -> ControlMessage {
+                            while let message = try await control.next() {
+                                switch message {
+                                case .bye(let reason): throw ClientError.hostEnded(reason)
+                                case .ping(let value): try await session.send(.pong(value))
+                                default: return message
+                                }
+                            }
+                            throw TransportError.closed
+                        }
+
+                        try await session.send(.hello(Hello(deviceName: deviceName, viewport: Viewport(width: 0, height: 0, scale: 1),
+                                                            mode: .catalog)))
+                        guard case .helloAck = try await next() else { throw ClientError.unexpectedMessage }
+                        try await session.send(.listApps)
+                        guard case .apps(let apps) = try await next() else { throw ClientError.unexpectedMessage }
+                        continuation.yield(.apps(apps))
+
+                        let wanted = iconsWanted(apps)
+                        if !wanted.isEmpty {
+                            try await session.send(.requestAppIcons(wanted))
+                            for _ in wanted {
+                                guard case .appIcon(let icon) = try await next() else { throw ClientError.unexpectedMessage }
+                                continuation.yield(.icon(bundleID: icon.bundleID, png: icon.png.flatMap { Data(base64Encoded: $0) }))
+                            }
+                        }
+                        try await session.send(.bye(reason: "done"))
+                        // Let the Mac hang up first; closing now could discard the bye unsent.
+                        while (try? await control.next()) != nil {}
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 }

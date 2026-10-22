@@ -55,4 +55,17 @@ import Testing
         let data = try JSONEncoder().encode(ControlMessage.run(action))
         #expect(try JSONDecoder().decode(ControlMessage.self, from: data) == .run(action))
     }
+
+    @Test func catalogMessagesRoundTrip() throws {
+        let messages: [ControlMessage] = [
+            .hello(Hello(deviceName: "iPhone", viewport: Viewport(width: 1, height: 1, scale: 1), mode: .catalog)),
+            .apps([MacApp(name: "Music", bundleID: "com.apple.Music")]),
+            .requestAppIcons(["com.apple.Music"]),
+            .appIcon(AppIcon(bundleID: "com.apple.Music", png: "iVBORw0KGgo=")),
+        ]
+        for message in messages {
+            let data = try JSONEncoder().encode(message)
+            #expect(try JSONDecoder().decode(ControlMessage.self, from: data) == message)
+        }
+    }
 }

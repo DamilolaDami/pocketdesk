@@ -18,6 +18,11 @@ public struct Shortcut: Codable, Sendable, Equatable, Hashable, Identifiable {
         self.action = action
     }
 
+    /// The Mac app this opens, if it opens one by bundle ID (for its icon).
+    public var appBundleID: String? {
+        if case .openApp(let bundleID, _) = action { bundleID } else { nil }
+    }
+
     /// The same shortcut under a new identity, for "Duplicate" and for adding a preset twice.
     public func copy() -> Shortcut {
         Shortcut(name: name, symbol: symbol, color: color, action: action)

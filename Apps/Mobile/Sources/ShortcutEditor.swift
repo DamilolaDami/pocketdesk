@@ -18,6 +18,7 @@ struct ShortcutDraft: Identifiable {
 
 /// Create or edit a shortcut: start from a quick pick or build one, with a live preview.
 struct ShortcutEditor: View {
+    let controller: SessionController
     let isNew: Bool
     let save: (Shortcut) -> Void
     let delete: (() -> Void)?
@@ -27,14 +28,18 @@ struct ShortcutEditor: View {
     @State private var kind: Kind
     @State private var website: String
     @State private var appName: String
+    /// Set when picked from the Mac's list or a popular app; typed names go by name.
+    @State private var appBundleID: String?
     @State private var keyPreset: String
 
     private enum Kind: String, CaseIterable {
         case website = "Website", app = "App", control = "Mac Control"
     }
 
-    init(draft: ShortcutDraft, save: @escaping (Shortcut) -> Void, delete: (() -> Void)?) {
+    init(controller: SessionController, draft: ShortcutDraft, save: @escaping (Shortcut) -> Void, delete: (() -> Void)?) {
+        self.controller = controller
         isNew = draft.isNew
+        _appBundleID = State(initialValue: draft.shortcut.appBundleID)
         self.save = save
         self.delete = delete
         _shortcut = State(initialValue: draft.shortcut)
@@ -63,7 +68,8 @@ struct ShortcutEditor: View {
         NavigationStack {
             Form {
                 Section {
-                    ShortcutTile(shortcut: preview)
+                    ShortcutTile(shortcut: preview,
+                                 appIcon: preview.appBundleID.flatMap { controller.store.appIcons[$0] })
                         .frame(width: 180)
                         .frame(maxWidth: .infinity)
                         .allowsHitTesting(false)
@@ -158,16 +164,25 @@ struct ShortcutEditor: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         case .app:
-            TextField("App name, as on the Mac", text: $appName)
-                .textInputAutocapitalization(.words)
-                .autocorrectionDisabled()
-            Menu {
-                ForEach(appPresets) { preset in
-                    Button(preset.shortcut.name, systemImage: preset.shortcut.symbol) { apply(preset) }
-                }
+            NavigationLink {
+                MacAppPicker(controller: controller, selected: appBundleID) { pick($0) }
             } label: {
-                Label("Choose a Popular App", systemImage: "square.grid.3x3.fill")
+                HStack(spacing: 12) {
+                    if let appBundleID {
+                        AppIconImage(bundleID: appBundleID, png: controller.store.appIcons[appBundleID], size: 30)
+                    } else {
+                        Image(systemName: "square.grid.3x3.fill").foregroundStyle(Brand.accent).frame(width: 30)
+                    }
+                    Text(appName.isEmpty ? "Choose an App" : appName)
+                        .foregroundStyle(appName.isEmpty ? Brand.accent : .primary)
+                }
             }
+            TextField("Or type its name", text: Binding(get: { appBundleID == nil ? appName : "" }, set: { name in
+                appName = name
+                appBundleID = nil
+            }))
+            .textInputAutocapitalization(.words)
+            .autocorrectionDisabled()
         case .control:
             Picker("Press", selection: $keyPreset) {
                 ForEach(controlPresets) { preset in
@@ -250,10 +265,8 @@ struct ShortcutEditor: View {
             Self.url(from: website).map(MacAction.openURL)
         case .app:
             appName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : .openApp(
-                // A popular app keeps its bundle ID (robust to renamed apps); others go by name.
-                bundleID: appPresets.first { $0.shortcut.name == appName }.flatMap { preset in
-                    if case .openApp(let id, _) = preset.shortcut.action { id } else { nil }
-                },
+                // A picked app keeps its bundle ID (robust to renamed apps); typed ones go by name.
+                bundleID: appBundleID ?? appPresets.first { $0.shortcut.name == appName }?.shortcut.appBundleID,
                 name: appName.trimmingCharacters(in: .whitespaces))
         case .control:
             controlPresets.first { $0.id == keyPreset }?.shortcut.action
@@ -273,14 +286,24 @@ struct ShortcutEditor: View {
             case .openURL(let url):
                 kind = .website
                 website = url.replacing(/^https?:\/\/(www\.)?/, with: "")
-            case .openApp(_, let name):
+            case .openApp(let bundleID, let name):
                 kind = .app
                 appName = name
+                appBundleID = bundleID
             case .keystroke:
                 kind = .control
                 keyPreset = preset.id
             }
         }
+    }
+
+    /// An app from the Mac's list: named after it unless you've named the shortcut yourself.
+    private func pick(_ app: MacApp) {
+        let previousName = appName
+        appName = app.name
+        appBundleID = app.bundleID
+        if shortcut.name.isEmpty || shortcut.name == previousName { shortcut.name = app.name }
+        if shortcut.symbol == "bolt.fill" { shortcut.symbol = "app.fill" }
     }
 
     /// "netflix.com" → "https://netflix.com"; full URLs and app schemes ("spotify:") pass through.

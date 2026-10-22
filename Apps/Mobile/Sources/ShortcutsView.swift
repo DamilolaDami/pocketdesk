@@ -34,19 +34,17 @@ struct ShortcutsView: View {
                     Button("New Shortcut", systemImage: "plus") { draft = .new() }
                 }
             }
+            // Real icons for app tiles; also warms the editor's app list.
+            .task { controller.loadApps(preferredHostID: UUID(uuidString: defaultMacID)) }
             .sheet(item: $draft) { draft in
-                ShortcutEditor(draft: draft, save: controller.save,
+                ShortcutEditor(controller: controller, draft: draft, save: controller.save,
                                delete: draft.isNew ? nil : { controller.delete(draft.shortcut) })
             }
         }
     }
 
-    /// Where a tap would run: the Mac chosen in Settings, else the last one used, else any.
     private var targetMac: DiscoveredHost? {
-        let macs = controller.reachableMacs
-        return macs.first { $0.hostID?.uuidString == defaultMacID }
-            ?? macs.first { $0.hostID != nil && $0.hostID == controller.lastHost?.hostID }
-            ?? macs.first
+        controller.shortcutTarget(preferredHostID: UUID(uuidString: defaultMacID))
     }
 }
 
@@ -61,7 +59,8 @@ struct ShortcutGrid: View {
     var body: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             ForEach(shortcuts) { shortcut in
-                ShortcutTile(shortcut: shortcut, edit: edit.map { edit in { edit(shortcut) } }) {
+                ShortcutTile(shortcut: shortcut, appIcon: shortcut.appBundleID.flatMap { controller.store.appIcons[$0] },
+                             edit: edit.map { edit in { edit(shortcut) } }) {
                     tapped += 1
                     run(shortcut)
                 }
@@ -87,6 +86,8 @@ struct ShortcutGrid: View {
 
 struct ShortcutTile: View {
     let shortcut: Shortcut
+    /// The Mac app's own icon (PNG), for app shortcuts.
+    var appIcon: Data?
     var edit: (() -> Void)?
     var run: () -> Void = {}
     @State private var favicon: UIImage?
@@ -139,9 +140,19 @@ struct ShortcutTile: View {
 }
 
 extension ShortcutTile {
-    /// The site's own icon on a white chip, like a home screen icon; otherwise the symbol.
+    /// The app's or site's own icon (sites on a white chip, like a home screen icon);
+    /// otherwise the symbol.
     @ViewBuilder fileprivate var icon: some View {
-        if let favicon {
+        if let bundleID = shortcut.appBundleID, let appIcon,
+           let image = AppIconCache.image(for: bundleID, png: appIcon) {
+            Image(uiImage: image)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 44, height: 44)
+                .padding(-3) // macOS icons carry a transparent margin
+                .shadow(color: .black.opacity(0.2), radius: 3, y: 1)
+                .transition(.scale.combined(with: .opacity))
+        } else if let favicon {
             Image(uiImage: favicon)
                 .resizable()
                 .interpolation(.high)

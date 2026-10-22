@@ -53,6 +53,7 @@ public actor HostSession {
     private let frameSource: any FrameSource
     private let input: any InputSink
     private let pairing: any PairingAuthority
+    private let catalog: any AppCatalogSource
     private let onEvent: @Sendable (Event) -> Void
 
     private var viewport = Viewport(width: 390, height: 844, scale: 3)
@@ -70,7 +71,9 @@ public actor HostSession {
 
     public init(session: any PeerSession, peer: Fingerprint, configuration: Configuration,
                 frameSource: any FrameSource, input: any InputSink, pairing: any PairingAuthority,
+                catalog: any AppCatalogSource = InstalledApps(),
                 onEvent: @escaping @Sendable (Event) -> Void = { _ in }) {
+        self.catalog = catalog
         self.session = session
         self.peer = peer
         self.configuration = configuration
@@ -116,6 +119,18 @@ public actor HostSession {
             return
         }
         viewport = hello.viewport
+        if hello.mode == .catalog {
+            // A quick question from the shortcut editor: no picture, no input, no "connected".
+            try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: [])))
+            while let message = try await messages.next() {
+                switch message {
+                case .listApps, .requestAppIcons: try await answer(message)
+                case .bye: return
+                default: continue
+                }
+            }
+            return
+        }
         onEvent(.connected(peer: peer, deviceName: hello.deviceName))
         do {
             // Listing displays already needs Screen Recording, so it's inside the goodbye path.
@@ -155,13 +170,30 @@ public actor HostSession {
                 } catch {
                     try await session.send(.actionFailed(String(describing: error)))
                 }
+            case .listApps, .requestAppIcons:
+                try await answer(message)
             case .ping(let value):
                 try await session.send(.pong(value))
             case .bye:
                 return
-            case .hello, .helloAck, .pairRequest, .pairResult, .windows, .streamConfig, .pong, .actionFailed:
+            case .hello, .helloAck, .pairRequest, .pairResult, .windows, .streamConfig, .pong, .actionFailed,
+                 .apps, .appIcon:
                 continue
             }
+        }
+    }
+
+    private func answer(_ question: ControlMessage) async throws {
+        switch question {
+        case .listApps:
+            try await session.send(.apps(await catalog.apps()))
+        case .requestAppIcons(let bundleIDs):
+            for bundleID in bundleIDs.prefix(1000) {
+                let png = await catalog.iconPNG(bundleID: bundleID)
+                try await session.send(.appIcon(AppIcon(bundleID: bundleID, png: png?.base64EncodedString())))
+            }
+        default:
+            break
         }
     }
 

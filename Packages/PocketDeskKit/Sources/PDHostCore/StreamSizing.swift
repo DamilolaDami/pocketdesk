@@ -25,6 +25,12 @@ public enum StreamSizing {
         return (even(Double(sourceWidth) * scale), even(Double(sourceHeight) * scale))
     }
 
+    /// A fitted size shrunk for a weak link, still even in both dimensions.
+    public static func scale(_ size: (width: Int, height: Int), by factor: Double) -> (width: Int, height: Int) {
+        guard factor < 1 else { return size }
+        return (even(Double(size.width) * factor), even(Double(size.height) * factor))
+    }
+
     /// Bitrate heuristic for screen content: ~0.15 bits per pixel per frame, clamped. Text needs
     /// far more than camera video at the same size, and this is a LAN link.
     public static func bitrateKbps(width: Int, height: Int, fps: Int) -> Int {

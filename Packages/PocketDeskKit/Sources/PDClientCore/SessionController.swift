@@ -197,6 +197,8 @@ public final class SessionController {
                 pendingAction = nil
                 connection?.send(.run(action))
             }
+        case .linkQuality(let quality):
+            store.update(link: quality)
         case .windows(let windows):
             store.update(windows: windows)
         case .notice(let text):

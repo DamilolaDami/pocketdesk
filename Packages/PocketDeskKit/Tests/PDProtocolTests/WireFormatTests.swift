@@ -75,6 +75,8 @@ import Testing
             .apps([MacApp(name: "Music", bundleID: "com.apple.Music")]),
             .requestAppIcons(["com.apple.Music"]),
             .appIcon(AppIcon(bundleID: "com.apple.Music", png: "iVBORw0KGgo=")),
+            .linkQuality(LinkQuality(isWeak: true, bitrateKbps: 2_400, fps: 30, roundTripMillis: 95)),
+            .linkQuality(LinkQuality(isWeak: false, bitrateKbps: 18_000, fps: 60)),
         ]
         for message in messages {
             let data = try JSONEncoder().encode(message)

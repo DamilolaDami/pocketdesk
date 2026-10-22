@@ -23,23 +23,21 @@ public final class QUICPeerSession: PeerSession {
     public let videoFrames: AsyncThrowingStream<(VideoFrameHeader, [UInt8]), any Error>
 
     public let audioFrames: AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>
-    private let audioOut: QUIC.Stream<QUICStream>?
 
     private let control: ControlStream
     private let datagrams: QUIC.Datagrams<QUICDatagram>
-    /// Host only.
-    private let videoOut: QUIC.Stream<QUICStream>?
+    /// Host only: video (tag 0) and audio (tag 1), opened on first use.
+    private let outbound: OutboundStreams?
     private let readers: Mutex<[Task<Void, Never>]>
     private let finishAll: @Sendable () -> Void
 
     private init(peer: Fingerprint, control: ControlStream, datagrams: QUIC.Datagrams<QUICDatagram>,
-                 videoOut: QUIC.Stream<QUICStream>?, audioOut: QUIC.Stream<QUICStream>?, channels: Channels, readers: [Task<Void, Never>]) {
+                 outbound: OutboundStreams?, channels: Channels, readers: [Task<Void, Never>]) {
         self.peer = peer
         self.control = control
         self.datagrams = datagrams
-        self.audioOut = audioOut
         self.audioFrames = channels.audio.stream
-        self.videoOut = videoOut
+        self.outbound = outbound
         self.controlMessages = channels.control.stream
         self.inputEvents = channels.input.stream
         self.videoFrames = channels.video.stream
@@ -99,23 +97,16 @@ public final class QUICPeerSession: PeerSession {
                 channels.input.continuation.finish(throwing: error)
             }
         }
-        let videoOut: QUIC.Stream<QUICStream>
-        do { videoOut = try await connection.openStream(directionality: .unidirectional) } catch {
-            await stop([controlReader, inputReader])
-            throw error
+        // Not opened yet: a phone that's turned away, or only asks for the app list, never
+        // gets media streams. Streams arriving at a phone as the host hangs up trip a
+        // Network.framework trap there.
+        let outbound = OutboundStreams { tag in
+            let stream = try await connection.openStream(directionality: .unidirectional)
+            try await stream.send([tag])
+            return stream
         }
 
-        let audioOut: QUIC.Stream<QUICStream>
-        do {
-            audioOut = try await connection.openStream(directionality: .unidirectional)
-            try await videoOut.send([UInt8(0)])
-            try await audioOut.send([UInt8(1)])
-        } catch {
-            await stop([controlReader, inputReader])
-            throw error
-        }
-
-        return QUICPeerSession(peer: peer, control: control, datagrams: datagrams, videoOut: videoOut, audioOut: audioOut,
+        return QUICPeerSession(peer: peer, control: control, datagrams: datagrams, outbound: outbound,
                                channels: channels, readers: [controlReader, inputReader])
     }
 
@@ -169,7 +160,7 @@ public final class QUICPeerSession: PeerSession {
             throw error
         }
 
-        return QUICPeerSession(peer: host, control: control, datagrams: datagrams, videoOut: nil, audioOut: nil,
+        return QUICPeerSession(peer: host, control: control, datagrams: datagrams, outbound: nil,
                                channels: channels, readers: [controlReader, videoReader])
     }
 
@@ -186,23 +177,23 @@ public final class QUICPeerSession: PeerSession {
     /// Completes when QUIC has accepted the frame, which is the backpressure signal the
     /// host uses to drop frames instead of queueing them.
     public func send(frame header: VideoFrameHeader, payload: [UInt8]) async throws {
-        guard let videoOut else { throw TransportError.wrongRole }
+        guard let outbound else { throw TransportError.wrongRole }
         var bytes: [UInt8] = []
         bytes.reserveCapacity(VideoFrameHeader.encodedSize + payload.count)
         header.encode(into: &bytes)
         bytes.append(contentsOf: payload)
-        try await videoOut.send(bytes)
+        try await outbound.stream(tag: 0).send(bytes)
     }
 
     public func send(audio header: AudioFrameHeader, payload: [UInt8]) async throws {
-        guard let audioOut else { throw TransportError.wrongRole }
+        guard let outbound else { throw TransportError.wrongRole }
         guard payload.count == Int(header.payloadLength), payload.count <= AudioFrameHeader.maxPayloadLength else {
             throw WireError.invalidValue
         }
         var bytes: [UInt8] = []
         header.encode(into: &bytes)
         bytes.append(contentsOf: payload)
-        try await audioOut.send(bytes)
+        try await outbound.stream(tag: 1).send(bytes)
     }
 
     /// Cancels setup-time readers and waits for them, for when `accept`/`open` fails partway.
@@ -222,6 +213,39 @@ public final class QUICPeerSession: PeerSession {
         for task in tasks { task.cancel() }
         finishAll()
         for task in tasks { await task.value }
+        await outbound?.close()
+    }
+}
+
+/// The host's unidirectional media streams, each opened (and tagged) the first time it's
+/// sent on. Concurrent first sends share one open.
+private final class OutboundStreams: Sendable {
+    typealias Stream = QUIC.Stream<QUICStream>
+    private let open: @Sendable (UInt8) async throws -> Stream
+    private let streams = Mutex<[UInt8: Task<Stream, any Error>]>([:])
+
+    init(open: @escaping @Sendable (UInt8) async throws -> Stream) {
+        self.open = open
+    }
+
+    func stream(tag: UInt8) async throws -> Stream {
+        let open = open
+        let opening = streams.withLock { streams in
+            if let opening = streams[tag] { return opening }
+            let opening = Task { try await open(tag) }
+            streams[tag] = opening
+            return opening
+        }
+        return try await opening.value
+    }
+
+    /// Drops the streams so none outlives the connection's scope.
+    func close() async {
+        let openings = streams.withLock { streams in
+            defer { streams = [:] }
+            return Array(streams.values)
+        }
+        for opening in openings { _ = await opening.result }
     }
 }
 

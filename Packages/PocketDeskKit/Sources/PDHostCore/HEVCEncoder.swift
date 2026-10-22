@@ -9,6 +9,11 @@ public struct EncodedFrame: Sendable {
     public var payload: [UInt8]
     public var isKeyframe: Bool
     public var presentationTimeMicros: UInt64
+
+    /// The encoder skipped this frame (it may, at low bitrates) or failed it. Not sent; it
+    /// only tells the pump the frame is no longer in flight.
+    public var isDropped: Bool { payload.isEmpty }
+    static let dropped = EncodedFrame(payload: [], isKeyframe: false, presentationTimeMicros: 0)
 }
 
 /// Hardware HEVC encoder tuned for interactive screen streaming: real-time, no frame
@@ -83,6 +88,12 @@ public final class HEVCEncoder: @unchecked Sendable {
         keyframeLock.withLock { forceNextKeyframe = true }
     }
 
+    /// Retargets rate control mid-stream, without a keyframe (network adaptation).
+    public func setRate(bitrateKbps: Int, fps: Int) {
+        _ = VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrateKbps * 1_000 as CFNumber)
+        _ = VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
+    }
+
     public func encode(_ pixelBuffer: CVPixelBuffer, presentationTime: CMTime) {
         let forceKeyframe = keyframeLock.withLock {
             defer { forceNextKeyframe = false }
@@ -96,7 +107,10 @@ public final class HEVCEncoder: @unchecked Sendable {
             session, imageBuffer: pixelBuffer, presentationTimeStamp: presentationTime,
             duration: .invalid, frameProperties: frameProperties, infoFlagsOut: nil
         ) { status, _, sampleBuffer in
-            guard status == noErr, let sampleBuffer, let frame = Self.package(sampleBuffer) else { return }
+            guard status == noErr, let sampleBuffer, let frame = Self.package(sampleBuffer) else {
+                continuation.yield(.dropped)
+                return
+            }
             continuation.yield(frame)
         }
     }

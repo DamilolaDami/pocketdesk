@@ -46,14 +46,14 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/4`, four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/5`, four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
 | control | bidirectional stream, opened by the phone | `ControlMessage` as JSON via `Coder` | Reliable, ordered, easy to evolve |
 | input | datagrams (max frame 1200 B) | `InputEvent`, ≤11 bytes binary | Lost pointer moves are superseded by the next one, so no retransmit lag |
-| video | unidirectional stream, opened by the Mac; initial byte `0` | `VideoFrameHeader` (21 B) + payload | Reliable, but the host drops frames *before* encoding under backpressure |
-| audio | independent unidirectional stream, opened by the Mac; initial byte `1` | `AudioFrameHeader` (16 B) + raw AAC-LC packet | Timestamped audio cannot block video delivery |
+| video | unidirectional stream, opened by the Mac on its first frame; initial byte `0` | `VideoFrameHeader` (21 B) + payload | Reliable, but the host drops frames *before* encoding under backpressure |
+| audio | independent unidirectional stream, opened by the Mac on its first packet; initial byte `1` | `AudioFrameHeader` (16 B) + raw AAC-LC packet | Timestamped audio cannot block video delivery |
 
 Discovery: Bonjour `_pocketdesk._udp` on the LAN, TXT record `id=<hostID>`, `v=<protocolVersion>`.
 Off-LAN (phase 2): the relay brokers a direct path and only forwards traffic as a fallback.
@@ -113,6 +113,21 @@ phone, and refreshed at most every five minutes.
 5. **Decode/render** (phone, `FrameAssembler` + `VideoDisplay`): hand `CMSampleBuffer`s to `AVSampleBufferDisplayLayer` (hardware
    decode, display-synced, no Metal work for v1). Move to `VTDecompressionSession` + Metal
    only if we need custom compositing (cursor overlay, zoom lens).
+
+## Link adaptation (protocol v5)
+
+`HostSession` refits the stream to the network every 500 ms (`RateController`, a pure value
+with tests). Signals: frames dropped at the in-flight gate, how long QUIC takes to accept a
+frame, and round trips from the host's own `ping`s, compared with the best seen. On trouble it
+steps down a ladder at once: bitrate (70%, 50%), then 30 fps, then about the phone's own
+resolution (2/3 of the zoom-headroom size), then 20 fps. It steps back up only after a quiet
+stretch that doubles each time a step up fails within ~5 s, so a link at its limit doesn't flap.
+Bitrate and frame rate change in place (`HEVCEncoder.setRate`, frames skipped before encoding);
+resolution restarts the stream, and the window after any restart is ignored because it opens
+with a keyframe burst. A still screen sends nothing and so never counts as a quiet window.
+Each change goes to the phone as `linkQuality`; from the second rung down the phone shows a
+"Weak connection" pill. Frames the encoder skips at low bitrates come back as dropped
+`EncodedFrame`s so they free their in-flight slot.
 
 ## Display selection (protocol v4)
 

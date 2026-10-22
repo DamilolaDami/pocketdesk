@@ -73,7 +73,7 @@ final class HostServiceTests {
         let input = input
 
         try await connect(port: port) { session in
-            var control = session.controlMessages.makeAsyncIterator()
+            var control = PhoneControl(session)
             try await session.send(.pairRequest(PairRequest(token: [UInt8](invite.token), deviceName: "Test iPhone")))
             #expect(try await control.next() == .pairResult(accepted: true))
 
@@ -140,7 +140,7 @@ final class HostServiceTests {
         try trust.save(to: trustStoreURL)
         let port = try await startService()
         try await connect(port: port) { session in
-            var control = session.controlMessages.makeAsyncIterator()
+            var control = PhoneControl(session)
             try await session.send(.hello(Hello(deviceName: "Phone", viewport: Viewport(width: 400, height: 800, scale: 1),
                                                audioEnabled: false)))
             guard case .helloAck? = try await control.next(),
@@ -168,7 +168,7 @@ final class HostServiceTests {
         let port = try await startService()
         let input = input
         try await connect(port: port) { session in
-            var control = session.controlMessages.makeAsyncIterator()
+            var control = PhoneControl(session)
             var video = session.videoFrames.makeAsyncIterator()
             try await session.send(.hello(Hello(deviceName: "Phone", viewport: Viewport(width: 2560, height: 1440, scale: 1),
                                                preferredDisplayID: "external")))
@@ -222,7 +222,7 @@ final class HostServiceTests {
         try trust.save(to: trustStoreURL)
         let port = try await startService()
         try await connect(port: port) { session in
-            var control = session.controlMessages.makeAsyncIterator()
+            var control = PhoneControl(session)
             try await session.send(.hello(Hello(deviceName: "Phone", viewport: Viewport(width: 400, height: 800, scale: 1),
                                                preferredDisplayID: "unplugged")))
             guard case .helloAck? = try await control.next(),
@@ -241,7 +241,7 @@ final class HostServiceTests {
 
         try await connect(port: port) { session in
             try await session.send(.hello(Hello(deviceName: "Test iPhone", viewport: Viewport(width: 402, height: 874, scale: 3))))
-            var control = session.controlMessages.makeAsyncIterator()
+            var control = PhoneControl(session)
             guard case .helloAck? = try await control.next() else { Issue.record("expected helloAck"); return }
             try await session.send(.bye(reason: "done"))
         }

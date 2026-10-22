@@ -13,6 +13,8 @@ public final class SessionStore {
     public private(set) var displaySelection = DisplaySelection()
     /// Latest round-trip and decode stats, updated off the hot path at most a few times a second.
     public private(set) var stats = StreamStats()
+    /// How the Mac has fitted the stream to the network; nil until it first adapts.
+    public private(set) var link: LinkQuality?
     /// Saved shortcuts, in display order. Persisted by `SessionController`.
     public private(set) var shortcuts: [Shortcut] = []
     /// A message to show briefly over whatever screen is up (e.g. a shortcut that failed).
@@ -31,6 +33,7 @@ public final class SessionStore {
         case .connected(let config): displaySelection = displaySelection.reduce(.streaming(config.displayID))
         case .cancel, .disconnected, .select:
             displaySelection = displaySelection.reduce(.reset)
+            link = nil
         default: break
         }
     }
@@ -45,6 +48,10 @@ public final class SessionStore {
 
     public func update(stats: StreamStats) {
         self.stats = stats
+    }
+
+    public func update(link: LinkQuality) {
+        self.link = link
     }
 
     public func update(shortcuts: [Shortcut]) {

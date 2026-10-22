@@ -27,12 +27,16 @@ public actor HostSession {
         public var maxFramesInFlight: Int
         /// Re-encodes of the last frame once the screen goes still (see `refineStillFrame`).
         public var refineFrames: Int
+        /// How often the link is measured and the stream refitted (see `RateController`).
+        public var adaptInterval: Duration
 
-        public init(hostName: String, fps: Int = 60, maxFramesInFlight: Int = 2, refineFrames: Int = 8) {
+        public init(hostName: String, fps: Int = 60, maxFramesInFlight: Int = 2, refineFrames: Int = 8,
+                    adaptInterval: Duration = .milliseconds(500)) {
             self.hostName = hostName
             self.fps = fps
             self.maxFramesInFlight = maxFramesInFlight
             self.refineFrames = refineFrames
+            self.adaptInterval = adaptInterval
         }
     }
 
@@ -71,6 +75,24 @@ public actor HostSession {
     private var lastCaptureAt = ContinuousClock.now
     private var refinesLeft = 0
     public private(set) var stats = Stats()
+
+    // Link adaptation. Bitrate and frame rate change in place; resolution restarts the stream.
+    private var rate = RateController()
+    private var adaptTask: Task<Void, Never>?
+    /// Stream restarts, one at a time: the message loop and adaptation can both ask for one.
+    private var streamChange: Task<Void, any Error>?
+    /// What the current stream size gets at full quality.
+    private var fullBitrateKbps = 0
+    private var lastSubmitAt = ContinuousClock.now
+    private var sendTime = Duration.zero
+    private var sends = 0
+    private let clockEpoch = ContinuousClock.now
+    private var pendingPing: (value: UInt64, sentAt: ContinuousClock.Instant)?
+    private var roundTrip: Duration?
+    private var smoothedRoundTrip: Duration?
+    /// A restart opens with a keyframe burst that isn't the link's fault: skip that window.
+    private var settling = false
+    static let minBitrateKbps = 800
 
     public init(session: any PeerSession, peer: Fingerprint, configuration: Configuration,
                 frameSource: any FrameSource, input: any InputSink, pairing: any PairingAuthority,
@@ -153,6 +175,7 @@ public actor HostSession {
             throw error
         }
 
+        adaptTask = Task { await self.adaptToLink() }
         // Owned by the actor so `stopStreaming` can wait for it: tasks holding the session must
         // not outlive the connection.
         inputTask = Task { [session, input] in
@@ -199,10 +222,17 @@ public actor HostSession {
                 try await answer(message)
             case .ping(let value):
                 try await session.send(.pong(value))
+            case .pong(let value):
+                if let pendingPing, pendingPing.value == value {
+                    let sample = ContinuousClock.now - pendingPing.sentAt
+                    roundTrip = max(roundTrip ?? .zero, sample)
+                    smoothedRoundTrip = smoothedRoundTrip.map { $0 * 0.8 + sample * 0.2 } ?? sample
+                    self.pendingPing = nil
+                }
             case .bye:
                 return
-            case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .pong, .actionFailed,
-                 .apps, .appIcon:
+            case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
+                 .actionFailed, .apps, .appIcon:
                 continue
             }
         }
@@ -250,14 +280,27 @@ public actor HostSession {
         }
     }
 
-    private func startStreaming(_ source: CaptureSource?) async throws {
+    /// `keepingSource` restarts whatever is streaming when the restart actually runs (link
+    /// adaptation must not undo a display switch queued ahead of it).
+    private func startStreaming(_ source: CaptureSource?, keepingSource: Bool = false) async throws {
+        let previous = streamChange
+        let change = Task {
+            _ = await previous?.result
+            try await self.restartStreaming(keepingSource ? self.currentSource : source)
+        }
+        streamChange = change
+        try await change.value
+    }
+
+    private func restartStreaming(_ source: CaptureSource?) async throws {
         let resolved = try await frameSource.resolve(source)
-        let size = StreamSizing.fit(sourceWidth: resolved.pixelWidth, sourceHeight: resolved.pixelHeight, into: viewport)
+        let full = StreamSizing.fit(sourceWidth: resolved.pixelWidth, sourceHeight: resolved.pixelHeight, into: viewport)
+        let size = StreamSizing.scale(full, by: rate.step.scale)
         let displayID: UInt32?
         if case .display(let id) = resolved.source { displayID = id } else { displayID = nil }
-        let config = StreamConfig(codec: .hevc, width: size.width, height: size.height, fps: configuration.fps,
-                                  bitrateKbps: StreamSizing.bitrateKbps(width: size.width, height: size.height,
-                                                                        fps: configuration.fps), displayID: displayID)
+        fullBitrateKbps = StreamSizing.bitrateKbps(width: full.width, height: full.height, fps: configuration.fps)
+        let config = StreamConfig(codec: .hevc, width: size.width, height: size.height, fps: streamFPS,
+                                  bitrateKbps: streamBitrateKbps, displayID: displayID)
         let encoder = try HEVCEncoder(width: config.width, height: config.height, fps: config.fps,
                                       bitrateKbps: config.bitrateKbps)
         await stopPump()
@@ -275,6 +318,7 @@ public actor HostSession {
         await frameSource.configureAudio(enabled: audioEnabled, generation: generation)
         let frames = try await frameSource.start(resolved, width: config.width, height: config.height, fps: config.fps)
         onEvent(.streaming(peer: peer, config: config, window: resolved.window))
+        settling = true
 
         let audioFrames = await frameSource.audioFrames()
         let generation = generation
@@ -303,6 +347,9 @@ public actor HostSession {
             lastFrame = frame
             lastCaptureAt = .now
             refinesLeft = configuration.refineFrames
+            // Capture runs at the session's rate; a lower link-fitted rate skips frames here.
+            // A skipped last frame still reaches the phone through `refineStillFrames`.
+            if ContinuousClock.now - lastSubmitAt < .seconds(1) / streamFPS * 0.8 { continue }
             submit(frame.pixelBuffer, presentationTime: frame.presentationTime, to: encoder)
         }
     }
@@ -329,27 +376,90 @@ public actor HostSession {
         }
         if framesInFlight >= configuration.maxFramesInFlight { framesInFlight = 0 }
         framesInFlight += 1
+        lastSubmitAt = .now
         encoder.encode(pixelBuffer, presentationTime: presentationTime)
     }
 
     private func pumpEncoded(from encoder: HEVCEncoder, generation: UInt32) async {
         for await frame in encoder.frames {
             guard !Task.isCancelled else { return }
+            if frame.isDropped {
+                framesInFlight = max(0, framesInFlight - 1)
+                continue
+            }
             var flags: VideoFrameHeader.Flags = []
             if frame.isKeyframe { flags.formUnion([.keyframe, .parameterSets]) }
             let header = VideoFrameHeader(frameID: nextFrameID, captureTimeMicros: frame.presentationTimeMicros,
                                           flags: flags, payloadLength: UInt32(frame.payload.count),
                                           sourceGeneration: generation)
             nextFrameID &+= 1
+            let started = ContinuousClock.now
             do {
                 try await session.send(frame: header, payload: frame.payload)
             } catch {
                 return
             }
+            sendTime += .now - started
+            sends += 1
             framesInFlight = max(0, framesInFlight - 1)
             lastFrameAccepted = .now
             stats.framesSent += 1
             stats.bytesSent += frame.payload.count
+        }
+    }
+
+    // MARK: Fitting the stream to the link
+
+    private var streamFPS: Int { min(configuration.fps, rate.step.fps) }
+
+    private var streamBitrateKbps: Int {
+        max(Self.minBitrateKbps, Int(Double(fullBitrateKbps) * rate.step.bitrate))
+    }
+
+    /// Measures the link every `adaptInterval` and refits the stream when `RateController`
+    /// moves. Round trips ride the control stream, so they include any queue there.
+    private func adaptToLink() async {
+        var last = stats
+        while !Task.isCancelled {
+            if pendingPing == nil {
+                let value = UInt64((ContinuousClock.now - clockEpoch) / .nanoseconds(1))
+                pendingPing = (value, .now)
+                try? await session.send(.ping(value))
+            }
+            try? await Task.sleep(for: configuration.adaptInterval)
+            guard !Task.isCancelled else { return }
+
+            // A pong that hasn't come back is at least as slow as the wait so far.
+            if let pendingPing, ContinuousClock.now - pendingPing.sentAt > configuration.adaptInterval {
+                roundTrip = max(roundTrip ?? .zero, ContinuousClock.now - pendingPing.sentAt)
+            }
+            let sample = RateController.Sample(
+                framesSent: stats.framesSent - last.framesSent, framesDropped: stats.framesDropped - last.framesDropped,
+                averageSendTime: sends > 0 ? sendTime / sends : nil, roundTrip: roundTrip)
+            last = stats
+            sendTime = .zero
+            sends = 0
+            roundTrip = nil
+            if settling {
+                settling = false
+                continue
+            }
+
+            let previous = rate.step
+            guard rate.update(sample) else { continue }
+            if rate.step.scale != previous.scale {
+                do {
+                    try await startStreaming(nil, keepingSource: true)
+                } catch {
+                    await finish(with: .bye(reason: Self.describeStreamingFailure(error)))
+                    return
+                }
+            } else {
+                encoder?.setRate(bitrateKbps: streamBitrateKbps, fps: streamFPS)
+            }
+            let roundTripMillis = smoothedRoundTrip.map { Int($0 / .milliseconds(1)) }
+            try? await session.send(.linkQuality(LinkQuality(isWeak: rate.isWeak, bitrateKbps: streamBitrateKbps,
+                                                             fps: streamFPS, roundTripMillis: roundTripMillis)))
         }
     }
 
@@ -363,6 +473,11 @@ public actor HostSession {
 
     /// Ends everything this session started and waits for it, before the connection closes.
     private func stopStreaming() async {
+        if let adaptTask {
+            adaptTask.cancel()
+            await adaptTask.value
+            self.adaptTask = nil
+        }
         if let inputTask {
             inputTask.cancel()
             await inputTask.value

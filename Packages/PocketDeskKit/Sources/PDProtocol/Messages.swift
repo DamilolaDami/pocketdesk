@@ -1,8 +1,8 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 4
+public let protocolVersion: UInt16 = 5
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
-public let alpn = "pocketdesk/4"
+public let alpn = "pocketdesk/5"
 
 /// Bonjour service type advertised by the host on the local network.
 public let bonjourServiceType = "_pocketdesk._udp"
@@ -23,6 +23,8 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// `nil` streams the whole display.
     case selectSource(windowID: UInt32?)
     case streamConfig(StreamConfig)
+    /// Host → phone: the stream was fitted to the link (sent whenever that changes).
+    case linkQuality(LinkQuality)
     case setAudioEnabled(Bool)
     case requestKeyframe
     /// Committed text (IME, dictation, paste). Single keystrokes go over the input channel.
@@ -191,5 +193,21 @@ public struct StreamConfig: Codable, Sendable, Equatable {
         self.fps = fps
         self.displayID = displayID
         self.bitrateKbps = bitrateKbps
+    }
+}
+
+/// How the host has fitted the stream to the network right now.
+public struct LinkQuality: Codable, Sendable, Equatable {
+    /// The picture is visibly reduced to keep up with a weak connection.
+    public var isWeak: Bool
+    public var bitrateKbps: Int
+    public var fps: Int
+    public var roundTripMillis: Int?
+
+    public init(isWeak: Bool, bitrateKbps: Int, fps: Int, roundTripMillis: Int? = nil) {
+        self.isWeak = isWeak
+        self.bitrateKbps = bitrateKbps
+        self.fps = fps
+        self.roundTripMillis = roundTripMillis
     }
 }

@@ -31,11 +31,20 @@ struct StreamScreen: View {
             .background(.black)
             .overlay(alignment: .topLeading) {
                 if showsStatus && showStreamInfo {
-                    StatusChip(hostName: hostName, config: config)
+                    StatusChip(hostName: hostName, config: config, link: controller.store.link)
                         .padding(.leading, 16)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
+            .overlay(alignment: .top) {
+                // Shown whatever the stream-info setting: it explains a softer picture.
+                if controller.store.link?.isWeak == true {
+                    WeakConnectionPill()
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.smooth, value: controller.store.link?.isWeak)
             .overlay(alignment: .bottom) { controls(isLandscape: isLandscape).padding(.bottom, 10) }
             .persistentSystemOverlays(.hidden)
             .statusBarHidden()
@@ -116,15 +125,28 @@ struct StreamScreen: View {
     }
 }
 
+private struct WeakConnectionPill: View {
+    var body: some View {
+        Label("Weak connection", systemImage: "wifi.exclamationmark")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .glassEffect(.regular, in: .capsule)
+            .accessibilityHint("The picture is reduced to keep up with the network.")
+    }
+}
+
 private struct StatusChip: View {
     let hostName: String
     let config: StreamConfig
+    let link: LinkQuality?
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle().fill(Brand.online).frame(width: 8, height: 8)
+            Circle().fill(link?.isWeak == true ? Color.orange : Brand.online).frame(width: 8, height: 8)
             Text(hostName).font(.footnote.weight(.semibold)).lineLimit(1)
-            Text("\(config.width)×\(config.height) · \(config.fps) fps")
+            Text("\(config.width)×\(config.height) · \(link?.fps ?? config.fps) fps")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }

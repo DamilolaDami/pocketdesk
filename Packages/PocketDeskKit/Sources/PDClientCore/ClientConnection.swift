@@ -13,6 +13,7 @@ public enum ClientEvent: Sendable, Equatable {
     case paired(PairedPeer)
     case displays([DisplayInfo])
     case streamConfig(StreamConfig)
+    case linkQuality(LinkQuality)
     case windows([WindowInfo])
     /// Something to tell the person without ending the session (a shortcut that failed).
     case notice(String)
@@ -146,6 +147,7 @@ public actor ClientConnection {
                     case .helloAck(let ack): onEvent(.displays(ack.displays))
                     case .displays(let displays): onEvent(.displays(displays))
                     case .streamConfig(let config): onEvent(.streamConfig(config))
+                    case .linkQuality(let quality): onEvent(.linkQuality(quality))
                     case .windows(let windows): onEvent(.windows(windows))
                     case .actionFailed(let reason): onEvent(.notice(reason))
                     case .bye(let reason):

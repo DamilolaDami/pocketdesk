@@ -5,6 +5,7 @@ import CoreMedia
 import CoreVideo
 import Foundation
 import PDProtocol
+import PDTransport
 @testable import PDHostCore
 
 /// NV12 frame filled with a flat luma value, the format ScreenCaptureKit hands us.
@@ -18,6 +19,18 @@ func makePixelBuffer(width: Int, height: Int, luma: UInt8) -> CVPixelBuffer {
         let base = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, plane)!
         let bytes = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, plane) * CVPixelBufferGetHeightOfPlane(pixelBuffer, plane)
         memset(base, Int32(plane == 0 ? luma : 128), bytes)
+    }
+    CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+    return pixelBuffer
+}
+
+/// NV12 frame of random pixels.
+func makeNoiseBuffer(width: Int, height: Int) -> CVPixelBuffer {
+    let pixelBuffer = makePixelBuffer(width: width, height: height, luma: 0)
+    CVPixelBufferLockBaseAddress(pixelBuffer, [])
+    for plane in 0..<CVPixelBufferGetPlaneCount(pixelBuffer) {
+        let bytes = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, plane) * CVPixelBufferGetHeightOfPlane(pixelBuffer, plane)
+        arc4random_buf(CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, plane)!, bytes)
     }
     CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
     return pixelBuffer
@@ -54,6 +67,10 @@ extension Array where Element == [UInt8] {
 /// `FrameSource` that emits flat frames with a changing luma at ~30 fps.
 actor SyntheticFrameSource: FrameSource {
     let displaySize = (width: 1920, height: 1080)
+    /// Random pixels instead of flat frames: incompressible, so the encoder fills its bitrate.
+    private(set) var noisy: Bool
+    init(noisy: Bool = false) { self.noisy = noisy }
+    func setNoisy(_ noisy: Bool) { self.noisy = noisy }
     let window = WindowInfo(id: 42, appName: "Notes", bundleID: "com.apple.Notes", title: "Shopping", width: 800, height: 600)
     private var task: Task<Void, Never>?
     private(set) var audioConfigurations: [(Bool, UInt32)] = []
@@ -89,7 +106,8 @@ actor SyntheticFrameSource: FrameSource {
         task = Task {
             var frame: Int64 = 0
             while !Task.isCancelled {
-                let buffer = makePixelBuffer(width: width, height: height, luma: UInt8(truncatingIfNeeded: frame * 8))
+                let buffer = noisy ? makeNoiseBuffer(width: width, height: height)
+                    : makePixelBuffer(width: width, height: height, luma: UInt8(truncatingIfNeeded: frame * 8))
                 continuation.yield(CapturedFrame(pixelBuffer: buffer, presentationTime: CMTime(value: frame, timescale: 30)))
                 frame += 1
                 try? await Task.sleep(for: .milliseconds(33))
@@ -102,6 +120,29 @@ actor SyntheticFrameSource: FrameSource {
     func stop() {
         task?.cancel()
         task = nil
+    }
+}
+
+/// The phone's end of the control stream: answers the host's link pings and skips link
+/// reports, so tests see only the replies they asked for.
+struct PhoneControl {
+    let session: any PeerSession
+    var messages: AsyncThrowingStream<ControlMessage, any Error>.AsyncIterator
+
+    init(_ session: any PeerSession) {
+        self.session = session
+        messages = session.controlMessages.makeAsyncIterator()
+    }
+
+    mutating func next() async throws -> ControlMessage? {
+        while let message = try await messages.next() {
+            switch message {
+            case .ping(let value): try await session.send(.pong(value))
+            case .linkQuality: continue
+            default: return message
+            }
+        }
+        return nil
     }
 }
 

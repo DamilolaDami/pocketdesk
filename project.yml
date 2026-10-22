@@ -1,0 +1,60 @@
+# XcodeGen spec. Generate the project with `xcodegen` (the .xcodeproj is gitignored).
+name: PocketDesk
+options:
+  bundleIdPrefix: com.pocketdesk
+  deploymentTarget:
+    iOS: "26.0"
+    macOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  PocketDeskKit:
+    path: Packages/PocketDeskKit
+
+targets:
+  PocketDeskHost:
+    type: application
+    platform: macOS
+    sources: [Apps/Host/Sources]
+    scheme: {}
+    dependencies:
+      - package: PocketDeskKit
+        product: PDHostCore
+    info:
+      path: Apps/Host/Info.plist
+      properties:
+        CFBundleDisplayName: PocketDesk
+        LSUIElement: true
+        NSLocalNetworkUsageDescription: PocketDesk uses your local network so your phone can connect to this Mac.
+        NSBonjourServices: [_pocketdesk._udp]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.host
+        # Input injection (CGEvent) needs a non-sandboxed app: ship notarized via Developer ID.
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
+
+  PocketDesk:
+    type: application
+    platform: iOS
+    sources: [Apps/Mobile/Sources]
+    scheme: {}
+    dependencies:
+      - package: PocketDeskKit
+        product: PDClientCore
+    info:
+      path: Apps/Mobile/Info.plist
+      properties:
+        CFBundleDisplayName: PocketDesk
+        UILaunchScreen: {}
+        NSLocalNetworkUsageDescription: PocketDesk finds your Mac on the local network.
+        NSBonjourServices: [_pocketdesk._udp]
+        NSCameraUsageDescription: Scan the pairing code shown on your Mac.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.app
+        TARGETED_DEVICE_FAMILY: "1,2"

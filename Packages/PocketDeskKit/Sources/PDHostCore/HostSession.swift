@@ -58,6 +58,7 @@ public actor HostSession {
 
     private var audioEnabled = true
     private var currentSource: CaptureSource?
+    private var selectedDisplayID: UInt32?
     private var viewport = Viewport(width: 390, height: 844, scale: 3)
     private var encoder: HEVCEncoder?
     private var pumpTasks: [Task<Void, Never>] = []
@@ -139,7 +140,13 @@ public actor HostSession {
             // Listing displays already needs Screen Recording, so it's inside the goodbye path.
             let displays = try await frameSource.displays()
             try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: displays)))
-            try await startStreaming(nil)
+            let preferred = hello.preferredDisplayID.flatMap { saved in displays.first { $0.persistentID == saved }?.id }
+            do {
+                try await startStreaming(preferred.map(CaptureSource.display))
+            } catch CaptureError.sourceNotFound where preferred != nil {
+                // The saved monitor may disappear between enumeration and capture.
+                try await startStreaming(nil)
+            }
         } catch {
             // Tell the phone why instead of just dropping the connection.
             await finish(with: .bye(reason: Self.describeStreamingFailure(error)))
@@ -161,11 +168,21 @@ public actor HostSession {
                 }
             case .requestKeyframe:
                 encoder?.requestKeyframe()
+            case .listDisplays:
+                try await session.send(.displays(try await frameSource.displays()))
+            case .selectDisplay(let id):
+                // Resolve before stopping the current pump: a stale picker must not end it.
+                do {
+                    try await startStreaming(.display(id))
+                } catch CaptureError.sourceNotFound {
+                    try await session.send(.displays(try await frameSource.displays()))
+                    try await session.send(.actionFailed("That display is no longer connected. Choose another display."))
+                }
             case .listWindows:
                 try await session.send(.windows(try await frameSource.windows()))
             case .selectSource(let windowID):
                 do {
-                    try await startStreaming(windowID.map(CaptureSource.window))
+                    try await startStreaming(windowID.map(CaptureSource.window) ?? selectedDisplayID.map(CaptureSource.display))
                 } catch {
                     await finish(with: .bye(reason: Self.describeStreamingFailure(error)))
                     throw error
@@ -184,7 +201,7 @@ public actor HostSession {
                 try await session.send(.pong(value))
             case .bye:
                 return
-            case .hello, .helloAck, .pairRequest, .pairResult, .windows, .streamConfig, .pong, .actionFailed,
+            case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .pong, .actionFailed,
                  .apps, .appIcon:
                 continue
             }
@@ -234,15 +251,18 @@ public actor HostSession {
     }
 
     private func startStreaming(_ source: CaptureSource?) async throws {
-        await stopPump()
-        currentSource = source
         let resolved = try await frameSource.resolve(source)
         let size = StreamSizing.fit(sourceWidth: resolved.pixelWidth, sourceHeight: resolved.pixelHeight, into: viewport)
+        let displayID: UInt32?
+        if case .display(let id) = resolved.source { displayID = id } else { displayID = nil }
         let config = StreamConfig(codec: .hevc, width: size.width, height: size.height, fps: configuration.fps,
                                   bitrateKbps: StreamSizing.bitrateKbps(width: size.width, height: size.height,
-                                                                        fps: configuration.fps))
+                                                                        fps: configuration.fps), displayID: displayID)
         let encoder = try HEVCEncoder(width: config.width, height: config.height, fps: config.fps,
                                       bitrateKbps: config.bitrateKbps)
+        await stopPump()
+        currentSource = resolved.source
+        if let displayID { selectedDisplayID = displayID }
         generation &+= 1
         framesInFlight = 0
         lastFrame = nil

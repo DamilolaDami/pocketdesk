@@ -97,6 +97,7 @@ final class ClientConnectionTests {
         #expect(all.contains(.paired(PairedPeer(fingerprint: invite.hostFingerprint, name: "Test Mac",
                                                 hostID: invite.hostID, pairedAt: pairedAt(in: all)))))
         #expect(all.contains { if case .streamConfig(let config) = $0 { config.width == 1280 } else { false } })
+        #expect(all.contains(.displays([DisplayInfo(id: 1, width: 1280, height: 720)])))
         #expect(all.contains { if case .windows(let windows) = $0 { windows.count == 1 } else { false } })
         #expect(all.contains(.notice("Missing isn't installed on this Mac.")))
         #expect(all.last == .ended(reason: nil))

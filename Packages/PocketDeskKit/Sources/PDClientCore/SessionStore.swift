@@ -10,6 +10,7 @@ public final class SessionStore {
     public private(set) var state: SessionState = .idle
     /// The Mac's windows, from the last `listWindows`. Not part of the state machine.
     public private(set) var windows: [WindowInfo] = []
+    public private(set) var displaySelection = DisplaySelection()
     /// Latest round-trip and decode stats, updated off the hot path at most a few times a second.
     public private(set) var stats = StreamStats()
     /// Saved shortcuts, in display order. Persisted by `SessionController`.
@@ -26,6 +27,16 @@ public final class SessionStore {
 
     public func send(_ event: SessionEvent) {
         state = state.reduce(event)
+        switch event {
+        case .connected(let config): displaySelection = displaySelection.reduce(.streaming(config.displayID))
+        case .cancel, .disconnected, .select:
+            displaySelection = displaySelection.reduce(.reset)
+        default: break
+        }
+    }
+
+    public func update(displays: [DisplayInfo]) {
+        displaySelection = displaySelection.reduce(.available(displays))
     }
 
     public func update(windows: [WindowInfo]) {

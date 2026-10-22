@@ -113,6 +113,29 @@ struct ScreenCaptureSourceTests {
         #expect(CVPixelBufferGetPixelFormatType(frame.pixelBuffer) == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange)
     }
 
+    @Test func capturesEveryConnectedDisplayByItsOwnID() async throws {
+        let source = ScreenCaptureSource()
+        let displays = try await source.displays()
+        #expect(!displays.isEmpty)
+        #expect(Set(displays.map(\.persistentID)).count == displays.count)
+        do {
+            for display in displays {
+                let resolved = try await source.resolve(.display(display.id))
+                #expect(resolved.source == .display(display.id))
+                #expect(resolved.pixelWidth == display.width && resolved.pixelHeight == display.height)
+                let frames = try await source.start(resolved, width: 640, height: 360, fps: 30)
+                var iterator = frames.makeAsyncIterator()
+                let frame = try #require(await iterator.next())
+                #expect(CVPixelBufferGetWidth(frame.pixelBuffer) == 640)
+                await source.stop()
+            }
+        } catch {
+            await source.stop()
+            throw error
+        }
+        print("ScreenCaptureKit verified capture of \(displays.count) connected display(s).")
+    }
+
     @Test func listsOnScreenWindows() async throws {
         let windows = try await ScreenCaptureSource().windows()
         #expect(windows.allSatisfy { $0.width >= 80 && $0.height >= 60 })

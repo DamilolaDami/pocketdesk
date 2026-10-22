@@ -9,6 +9,7 @@ struct StreamScreen: View {
     let config: StreamConfig
     @State private var keyboardShown = false
     @State private var showingWindows = false
+    @State private var showingDisplays = false
     @State private var showingShortcuts = false
     @AppStorage(SettingsKey.startInLandscape) private var startInLandscape = false
     @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
@@ -46,6 +47,10 @@ struct StreamScreen: View {
             }
             // The other screens are designed for portrait; don't leave the phone stuck sideways.
             .onDisappear { rotate(toLandscape: false) }
+            .sheet(isPresented: $showingDisplays) {
+                DisplayPicker(controller: controller) { showingDisplays = false }
+                    .presentationDetents([.medium, .large])
+            }
             .sheet(isPresented: $showingWindows) {
                 WindowPicker(controller: controller) { showingWindows = false }
                     .presentationDetents([.medium, .large])
@@ -58,27 +63,34 @@ struct StreamScreen: View {
 
     private func controls(isLandscape: Bool) -> some View {
         GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 10) {
-                if controlsExpanded {
-                    control(isLandscape ? "Portrait" : "Landscape",
-                            isLandscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate") {
-                        rotate(toLandscape: !isLandscape)
+            ScrollView(.horizontal) {
+                HStack(spacing: 10) {
+                    if controlsExpanded {
+                        control(isLandscape ? "Portrait" : "Landscape",
+                                isLandscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate") {
+                            rotate(toLandscape: !isLandscape)
+                        }
+                        control("Keyboard", keyboardShown ? "keyboard.chevron.compact.down.fill" : "keyboard") {
+                            keyboardShown.toggle()
+                        }
+                        control("Shortcuts", "square.grid.2x2.fill") { showingShortcuts = true }
+                        control("Displays", "display.2") { showingDisplays = true }
+                        control("Windows", "macwindow.on.rectangle") {
+                            controller.refreshWindows()
+                            showingWindows = true
+                        }
+                        control("Disconnect", "xmark", tint: .red) { controller.disconnect() }
                     }
-                    control("Keyboard", keyboardShown ? "keyboard.chevron.compact.down.fill" : "keyboard") {
-                        keyboardShown.toggle()
+                    control(controlsExpanded ? "Hide Controls" : "Show Controls",
+                            controlsExpanded ? "chevron.down" : "slider.horizontal.3") {
+                        withAnimation(.bouncy) { controlsExpanded.toggle() }
                     }
-                    control("Shortcuts", "square.grid.2x2.fill") { showingShortcuts = true }
-                    control("Windows", "macwindow.on.rectangle") {
-                        controller.refreshWindows()
-                        showingWindows = true
-                    }
-                    control("Disconnect", "xmark", tint: .red) { controller.disconnect() }
                 }
-                control(controlsExpanded ? "Hide Controls" : "Show Controls",
-                        controlsExpanded ? "chevron.down" : "slider.horizontal.3") {
-                    withAnimation(.bouncy) { controlsExpanded.toggle() }
-                }
+                .padding(.horizontal, 12)
             }
+            .scrollIndicators(.hidden)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: controlsExpanded ? 450 : 72)
         }
     }
 
@@ -135,7 +147,7 @@ struct WindowPicker: View {
                         controller.selectSource(nil)
                         dismiss()
                     } label: {
-                        Label("Whole Screen", systemImage: "display")
+                        Label("Whole Display", systemImage: "display")
                     }
                 }
                 Section("Windows") {

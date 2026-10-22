@@ -80,7 +80,7 @@ final class HostServiceTests {
             try await session.send(.hello(Hello(deviceName: "Test iPhone", viewport: Viewport(width: 402, height: 874, scale: 3))))
             guard case .helloAck(let ack)? = try await control.next() else { Issue.record("expected helloAck"); return }
             #expect(ack.hostName == "Test Mac")
-            #expect(ack.displays.count == 1)
+            #expect(ack.displays.count == 2)
 
             guard case .streamConfig(let config)? = try await control.next() else { Issue.record("expected streamConfig"); return }
             #expect(config.codec == .hevc)
@@ -159,6 +159,78 @@ final class HostServiceTests {
         #expect(await frames.audioConfigurations.map { $0.0 } == [false, false, true, false])
         #expect(await frames.audioConfigurations.map { $0.1 } == [1, 2, 3, 4])
         #expect(await frames.startedSources == [.display(1), .window(42), .window(42), .window(42)])
+    }
+
+    @Test func remembersDisplayAndSwitchesWithoutReconnecting() async throws {
+        var trust = TrustStore()
+        trust.pin(PairedPeer(fingerprint: phone.fingerprint, name: "Phone"))
+        try trust.save(to: trustStoreURL)
+        let port = try await startService()
+        let input = input
+        try await connect(port: port) { session in
+            var control = session.controlMessages.makeAsyncIterator()
+            var video = session.videoFrames.makeAsyncIterator()
+            try await session.send(.hello(Hello(deviceName: "Phone", viewport: Viewport(width: 2560, height: 1440, scale: 1),
+                                               preferredDisplayID: "external")))
+            guard case .helloAck(let ack)? = try await control.next(),
+                  case .streamConfig(let initial)? = try await control.next() else { Issue.record("missing handshake"); return }
+            #expect(ack.displays.map(\.name) == ["Built-in", "External"])
+            #expect(initial.displayID == 2)
+            #expect(initial.width == 2560 && initial.height == 1440)
+            let first = try #require(try await video.next())
+            #expect(first.0.flags.contains(.keyframe))
+            #expect(input.sourceFrames.last == CGRect(x: -2560, y: 0, width: 2560, height: 1440))
+
+            try await session.send(.selectDisplay(1))
+            guard case .streamConfig(let main)? = try await control.next() else { Issue.record("missing display config"); return }
+            #expect(main.displayID == 1)
+            var next = try #require(try await video.next())
+            while next.0.sourceGeneration == first.0.sourceGeneration { next = try #require(try await video.next()) }
+            #expect(next.0.flags.contains([.keyframe, .parameterSets]))
+            #expect(next.0.sourceGeneration > first.0.sourceGeneration)
+            #expect(input.sourceFrames.last == CGRect(x: 0, y: 0, width: 1920, height: 1080))
+
+            try await session.send(.selectSource(windowID: 42))
+            guard case .streamConfig(let window)? = try await control.next() else { Issue.record("missing window config"); return }
+            #expect(window.displayID == nil)
+            try await session.send(.selectSource(windowID: nil))
+            guard case .streamConfig(let whole)? = try await control.next() else { Issue.record("missing whole-display config"); return }
+            #expect(whole.displayID == 1)
+
+            try await session.send(.selectDisplay(2))
+            guard case .streamConfig(let external)? = try await control.next() else { Issue.record("missing external config"); return }
+            #expect(external.displayID == 2)
+            try await session.send(.setAudioEnabled(false))
+            guard case .streamConfig(let muted)? = try await control.next() else { Issue.record("missing audio config"); return }
+            #expect(muted.displayID == 2)
+
+            // A monitor removed while the picker was open must leave the session usable.
+            try await session.send(.selectDisplay(999))
+            guard case .displays(let refreshed)? = try await control.next(),
+                  case .actionFailed? = try await control.next() else { Issue.record("missing stale-display response"); return }
+            #expect(refreshed.count == 2)
+            try await session.send(.ping(11))
+            #expect(try await control.next() == .pong(11))
+            try await session.send(.bye(reason: "done"))
+        }
+        #expect(await frames.startedSources == [.display(2), .display(1), .window(42), .display(1), .display(2), .display(2)])
+    }
+
+    @Test func unavailableRememberedDisplayFallsBackToMain() async throws {
+        var trust = TrustStore()
+        trust.pin(PairedPeer(fingerprint: phone.fingerprint, name: "Phone"))
+        try trust.save(to: trustStoreURL)
+        let port = try await startService()
+        try await connect(port: port) { session in
+            var control = session.controlMessages.makeAsyncIterator()
+            try await session.send(.hello(Hello(deviceName: "Phone", viewport: Viewport(width: 400, height: 800, scale: 1),
+                                               preferredDisplayID: "unplugged")))
+            guard case .helloAck? = try await control.next(),
+                  case .streamConfig(let config)? = try await control.next() else { Issue.record("missing handshake"); return }
+            #expect(config.displayID == 1)
+            try await session.send(.bye(reason: "done"))
+        }
+        #expect(await frames.startedSources == [.display(1)])
     }
 
     @Test func pairedPhoneReconnectsWithoutInvite() async throws {

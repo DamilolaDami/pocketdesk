@@ -1,4 +1,6 @@
 #if os(macOS)
+import AppKit
+import ColorSync
 import CoreGraphics
 import CoreMedia
 import Foundation
@@ -25,9 +27,19 @@ public actor ScreenCaptureSource: FrameSource {
     public init() {}
 
     public func displays() async throws -> [DisplayInfo] {
-        try await SCShareableContent.current.displays.map { display in
+        let names = await MainActor.run {
+            Dictionary(uniqueKeysWithValues: NSScreen.screens.compactMap { screen -> (UInt32, String)? in
+                guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
+                return (number.uint32Value, screen.localizedName)
+            })
+        }
+        return try await SCShareableContent.current.displays.map { display in
             let (width, height) = Self.pixelSize(of: display.displayID)
-            return DisplayInfo(id: display.displayID, width: width, height: height)
+            let uuid = CGDisplayCreateUUIDFromDisplayID(display.displayID)?.takeRetainedValue()
+            let persistentID = uuid.map { CFUUIDCreateString(nil, $0) as String }
+            return DisplayInfo(id: display.displayID, width: width, height: height,
+                               name: names[display.displayID] ?? "Display", isMain: CGDisplayIsMain(display.displayID) != 0,
+                               persistentID: persistentID)
         }
     }
 

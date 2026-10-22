@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/3`, four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/4`, four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -63,8 +63,8 @@ while `QUICHostListener.run`'s handler or `QUICClient.connect`'s body runs. `con
 on `.failed` or if not ready within its timeout. Otherwise a rejected handshake sits in
 `.waiting` forever.
 
-Media streams carry an explicit kind byte; stream arrival order is unspecified. Protocol v3
-uses a new ALPN so older peers cannot interpret the changed media framing.
+Media streams carry an explicit kind byte; stream arrival order is unspecified. The ALPN
+tracks the protocol version so incompatible peers cannot interpret changed messages or framing.
 
 ### Session flow
 
@@ -113,6 +113,32 @@ phone, and refreshed at most every five minutes.
 5. **Decode/render** (phone, `FrameAssembler` + `VideoDisplay`): hand `CMSampleBuffer`s to `AVSampleBufferDisplayLayer` (hardware
    decode, display-synced, no Metal work for v1). Move to `VTDecompressionSession` + Metal
    only if we need custom compositing (cursor overlay, zoom lens).
+
+## Display selection (protocol v4)
+
+The stream screen has **Displays** beside **Windows**. `helloAck` provides display names,
+pixel sizes, the main-display marker, numeric capture IDs, and persistent monitor identities.
+Opening the picker refreshes the list with `listDisplays` / `displays`; choosing a row sends
+`selectDisplay(id)` over the existing control connection. `HostSession` resolves it, changes
+input mapping to that display's global screen rectangle, and starts a new source generation
+with `streamConfig.displayID` and a keyframe. Audio restarts with the same generation.
+The phone only marks and saves a display after the host confirms it in `streamConfig`.
+A window config has no display ID and preserves the last whole-display choice; **Whole
+Display** returns to it. Audio setting changes preserve the selected display as well.
+
+`DisplayPreferences` persists the monitor identity under the paired Mac's host UUID in
+Application Support (`PocketDesk/displays.json`). A reconnect sends it in
+`hello.preferredDisplayID`; the Mac maps it to the current numeric capture ID before the
+first frame. An unavailable saved monitor falls back to the main display. An invalid picker
+selection refreshes the list and reports a notice while keeping the session connected.
+Forgetting a Mac removes its display preference. Connection IDs prevent a cancelled Mac's
+late events from overwriting another Mac's selection or saved preference.
+
+Validation covers real QUIC with two synthetic monitors (including negative screen origins),
+new-generation keyframes, input mapping, returning from windows, audio toggles, removed
+monitors, and preference persistence. ScreenCaptureKit tests capture each connected physical
+display when Screen Recording permission is available. Verify the picker on the phone with
+an external monitor attached, select both screens, reconnect, and confirm the saved choice.
 
 ## Audio pipeline (protocol v3)
 

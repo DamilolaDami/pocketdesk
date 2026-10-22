@@ -60,14 +60,22 @@ actor SyntheticFrameSource: FrameSource {
     func configureAudio(enabled: Bool, generation: UInt32) { audioConfigurations.append((enabled, generation)) }
     private(set) var startedSources: [CaptureSource] = []
 
-    func displays() -> [DisplayInfo] { [DisplayInfo(id: 1, width: displaySize.width, height: displaySize.height)] }
+    func displays() -> [DisplayInfo] {
+        [DisplayInfo(id: 1, width: displaySize.width, height: displaySize.height, name: "Built-in", isMain: true, persistentID: "builtin"),
+         DisplayInfo(id: 2, width: 2560, height: 1440, name: "External", persistentID: "external")]
+    }
     func windows() -> [WindowInfo] { [window] }
 
     func resolve(_ source: CaptureSource?) throws -> ResolvedSource {
         switch source {
-        case nil, .display:
+        case .display(2):
+            ResolvedSource(source: .display(2), pixelWidth: 2560, pixelHeight: 1440,
+                           screenFrame: CGRect(x: -2560, y: 0, width: 2560, height: 1440))
+        case nil, .display(1):
             ResolvedSource(source: .display(1), pixelWidth: displaySize.width, pixelHeight: displaySize.height,
                            screenFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080))
+        case .display:
+            throw CaptureError.sourceNotFound
         case .window(let id):
             ResolvedSource(source: .window(id), pixelWidth: 1600, pixelHeight: 1200,
                            screenFrame: CGRect(x: 100, y: 50, width: 800, height: 600), window: window)

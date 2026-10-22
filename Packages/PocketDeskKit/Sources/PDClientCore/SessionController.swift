@@ -22,6 +22,11 @@ public final class SessionController {
         }
     }
 
+    private let displayPreferencesURL: URL
+    private var displayPreferences: DisplayPreferences
+    private var connectionHostID: UUID?
+    private var activeConnectionID: UUID?
+
     private let identityLabel: String
     private let trustStoreURL: URL
     private var trustStore: TrustStore
@@ -44,7 +49,10 @@ public final class SessionController {
     public init(identityLabel: String = "com.pocketdesk.phone.identity",
                 trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json"),
                 shortcutsURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/shortcuts.json"),
-                cacheDirectory: URL = URL.cachesDirectory.appending(path: "PocketDesk")) {
+                cacheDirectory: URL = URL.cachesDirectory.appending(path: "PocketDesk"),
+                displayPreferencesURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/displays.json")) {
+        self.displayPreferencesURL = displayPreferencesURL
+        self.displayPreferences = (try? DisplayPreferences.load(from: displayPreferencesURL)) ?? DisplayPreferences()
         self.cacheDirectory = cacheDirectory
         self.identityLabel = identityLabel
         self.trustStoreURL = trustStoreURL
@@ -148,13 +156,20 @@ public final class SessionController {
             store.send(.disconnected(reason: "Couldn't create this phone's identity: \(error)"))
             return
         }
+        let connectionID = UUID()
+        activeConnectionID = connectionID
+        connectionHostID = host.hostID ?? invite?.hostID
         let connection = ClientConnection(
             identity: identity,
             request: .init(endpoint: host.endpoint, hostFingerprint: hostFingerprint, invite: invite,
-                           deviceName: deviceName, viewport: viewport, audioEnabled: audioEnabled),
+                           deviceName: deviceName, viewport: viewport, audioEnabled: audioEnabled,
+                           preferredDisplayID: displayPreferences.displayID(for: connectionHostID)),
             display: display
         ) { [weak self] event in
-            Task { @MainActor in self?.handle(event) }
+            Task { @MainActor in
+                guard let self, self.activeConnectionID == connectionID else { return }
+                self.handle(event)
+            }
         }
         self.connection = connection
         connectionTask = Task { await connection.run() }
@@ -168,8 +183,16 @@ public final class SessionController {
             trustStore.pin(peer)
             try? trustStore.save(to: trustStoreURL)
             store.send(.pairingConfirmed)
+        case .displays(let displays):
+            store.update(displays: displays)
         case .streamConfig(let config):
+            if config.displayID != nil { store.send(.sourceChanged(nil)) }
             store.send(.connected(config))
+            if let displayID = config.displayID, let hostID = connectionHostID,
+               let selected = store.displaySelection.displays.first(where: { $0.id == displayID }) {
+                displayPreferences.remember(selected.persistentID, for: hostID)
+                try? displayPreferences.save(to: displayPreferencesURL)
+            }
             if let action = pendingAction {
                 pendingAction = nil
                 connection?.send(.run(action))
@@ -179,6 +202,8 @@ public final class SessionController {
         case .notice(let text):
             store.post(notice: text)
         case .ended(let reason):
+            activeConnectionID = nil
+            connectionHostID = nil
             pendingAction = nil
             connection = nil
             connectionTask = nil
@@ -194,6 +219,13 @@ public final class SessionController {
 
     public func insertText(_ text: String) {
         connection?.send(.insertText(text))
+    }
+
+    public func refreshDisplays() { connection?.send(.listDisplays) }
+
+    public func selectDisplay(_ display: DisplayInfo) {
+        guard store.displaySelection.displays.contains(where: { $0.id == display.id }) else { return }
+        connection?.send(.selectDisplay(display.id))
     }
 
     public func refreshWindows() {
@@ -228,6 +260,8 @@ public final class SessionController {
     /// Forgets a Mac; it will need pairing again.
     public func forget(_ host: DiscoveredHost) {
         guard let peer = host.hostID.flatMap(trustStore.peer(hostID:)) else { return }
+        if let hostID = peer.hostID ?? host.hostID { displayPreferences.forget(hostID) }
+        try? displayPreferences.save(to: displayPreferencesURL)
         trustStore.revoke(peer.fingerprint)
         try? trustStore.save(to: trustStoreURL)
         store.send(.hostsChanged(discoveredHosts()))
@@ -380,6 +414,8 @@ public final class SessionController {
     }
 
     private func disconnectConnection() {
+        activeConnectionID = nil
+        connectionHostID = nil
         connectionTask?.cancel()
         connectionTask = nil
         connection = nil

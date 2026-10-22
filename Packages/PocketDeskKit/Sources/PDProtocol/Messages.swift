@@ -1,8 +1,8 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 3
+public let protocolVersion: UInt16 = 4
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
-public let alpn = "pocketdesk/3"
+public let alpn = "pocketdesk/4"
 
 /// Bonjour service type advertised by the host on the local network.
 public let bonjourServiceType = "_pocketdesk._udp"
@@ -15,6 +15,9 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     case pairRequest(PairRequest)
     /// Host's answer once the person at the Mac accepts or rejects the verification code.
     case pairResult(accepted: Bool)
+    case listDisplays
+    case displays([DisplayInfo])
+    case selectDisplay(UInt32)
     case listWindows
     case windows([WindowInfo])
     /// `nil` streams the whole display.
@@ -62,13 +65,16 @@ public struct Hello: Codable, Sendable, Equatable {
     public var deviceName: String
     /// Client screen in points + scale, so the host can pick a matching stream size.
     public var viewport: Viewport
+    /// Restored per Mac; the host falls back to its main display if unavailable.
+    public var preferredDisplayID: String?
     public var audioEnabled: Bool
     public var mode: Mode
 
-    public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport, mode: Mode = .stream, audioEnabled: Bool = true) {
+    public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport, mode: Mode = .stream, audioEnabled: Bool = true, preferredDisplayID: String? = nil) {
         self.version = version
         self.deviceName = deviceName
         self.viewport = viewport
+        self.preferredDisplayID = preferredDisplayID
         self.audioEnabled = audioEnabled
         self.mode = mode
     }
@@ -132,11 +138,18 @@ public struct Viewport: Codable, Sendable, Equatable {
 
 public struct DisplayInfo: Codable, Sendable, Equatable, Identifiable {
     public var id: UInt32
+    /// Stable monitor identity; the numeric capture ID can change after a reboot.
+    public var persistentID: String
+    public var name: String
+    public var isMain: Bool
     public var width: Int
     public var height: Int
 
-    public init(id: UInt32, width: Int, height: Int) {
+    public init(id: UInt32, width: Int, height: Int, name: String = "Display", isMain: Bool = false, persistentID: String? = nil) {
         self.id = id
+        self.name = name
+        self.isMain = isMain
+        self.persistentID = persistentID ?? String(id)
         self.width = width
         self.height = height
     }
@@ -167,13 +180,16 @@ public struct StreamConfig: Codable, Sendable, Equatable {
     public var width: Int
     public var height: Int
     public var fps: Int
+    /// The actual whole-display source; nil while streaming a window.
+    public var displayID: UInt32?
     public var bitrateKbps: Int
 
-    public init(codec: Codec, width: Int, height: Int, fps: Int, bitrateKbps: Int) {
+    public init(codec: Codec, width: Int, height: Int, fps: Int, bitrateKbps: Int, displayID: UInt32? = nil) {
         self.codec = codec
         self.width = width
         self.height = height
         self.fps = fps
+        self.displayID = displayID
         self.bitrateKbps = bitrateKbps
     }
 }

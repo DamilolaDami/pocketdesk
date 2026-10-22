@@ -5,7 +5,7 @@ import PDSecurity
 import Testing
 @testable import PDTransport
 
-/// Real QUIC over 127.0.0.1 with two Keychain identities. Every test calls
+/// Real four-channel QUIC over 127.0.0.1 with two Keychain identities. Every test calls
 /// `removeIdentities()` so nothing is left in the login keychain.
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct QUICSessionTests {

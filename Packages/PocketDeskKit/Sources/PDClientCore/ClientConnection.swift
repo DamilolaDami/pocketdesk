@@ -11,6 +11,7 @@ public enum ClientEvent: Sendable, Equatable {
     /// Pairing: show this code; the person at the Mac must accept the same one.
     case awaitingApproval(code: String)
     case paired(PairedPeer)
+    case displays([DisplayInfo])
     case streamConfig(StreamConfig)
     case windows([WindowInfo])
     /// Something to tell the person without ending the session (a shortcut that failed).
@@ -42,15 +43,17 @@ public actor ClientConnection {
         public var invite: PairingInvite?
         public var deviceName: String
         public var viewport: Viewport
+        public var preferredDisplayID: String?
         public var audioEnabled: Bool
 
         public init(endpoint: NWEndpoint, hostFingerprint: Fingerprint, invite: PairingInvite?,
-                    deviceName: String, viewport: Viewport, audioEnabled: Bool = true) {
+                    deviceName: String, viewport: Viewport, audioEnabled: Bool = true, preferredDisplayID: String? = nil) {
             self.endpoint = endpoint
             self.hostFingerprint = hostFingerprint
             self.invite = invite
             self.deviceName = deviceName
             self.viewport = viewport
+            self.preferredDisplayID = preferredDisplayID
             self.audioEnabled = audioEnabled
         }
     }
@@ -114,7 +117,7 @@ public actor ClientConnection {
         if let invite = request.invite {
             try await pair(session, invite: invite)
         }
-        try await session.send(.hello(Hello(deviceName: request.deviceName, viewport: request.viewport, audioEnabled: request.audioEnabled)))
+        try await session.send(.hello(Hello(deviceName: request.deviceName, viewport: request.viewport, audioEnabled: request.audioEnabled, preferredDisplayID: request.preferredDisplayID)))
 
         let display = display
         let inputs = inputs.stream
@@ -140,6 +143,8 @@ public actor ClientConnection {
             group.addTask {
                 for try await message in session.controlMessages {
                     switch message {
+                    case .helloAck(let ack): onEvent(.displays(ack.displays))
+                    case .displays(let displays): onEvent(.displays(displays))
                     case .streamConfig(let config): onEvent(.streamConfig(config))
                     case .windows(let windows): onEvent(.windows(windows))
                     case .actionFailed(let reason): onEvent(.notice(reason))
@@ -147,7 +152,7 @@ public actor ClientConnection {
                         hostReason.value = reason
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
-                    case .setAudioEnabled, .helloAck, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
+                    case .listDisplays, .selectDisplay, .setAudioEnabled, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .run, .listApps, .apps, .requestAppIcons, .appIcon:
                         continue
                     }

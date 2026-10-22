@@ -56,6 +56,19 @@ import Testing
         #expect(try JSONDecoder().decode(ControlMessage.self, from: data) == .run(action))
     }
 
+    @Test func displayMessagesRoundTrip() throws {
+        let display = DisplayInfo(id: 2, width: 2560, height: 1440, name: "Studio Display", persistentID: "monitor-uuid")
+        let messages: [ControlMessage] = [
+            .hello(Hello(deviceName: "Phone", viewport: Viewport(width: 400, height: 800, scale: 3), preferredDisplayID: "monitor-uuid")),
+            .helloAck(HelloAck(hostName: "Mac", displays: [display])),
+            .listDisplays, .displays([display]), .selectDisplay(2),
+            .streamConfig(StreamConfig(codec: .hevc, width: 2560, height: 1440, fps: 60, bitrateKbps: 10_000, displayID: 2)),
+        ]
+        for message in messages {
+            #expect(try JSONDecoder().decode(ControlMessage.self, from: JSONEncoder().encode(message)) == message)
+        }
+    }
+
     @Test func catalogMessagesRoundTrip() throws {
         let messages: [ControlMessage] = [
             .hello(Hello(deviceName: "iPhone", viewport: Viewport(width: 1, height: 1, scale: 1), mode: .catalog)),

@@ -71,6 +71,7 @@ public actor HostService: PairingAuthority {
     public nonisolated let identity: DeviceIdentity
     private var configuration: Configuration
     private let makeFrameSource: @Sendable () -> any FrameSource
+    private let clipboard: any ClipboardSink
     private let input: any InputSink
     private let onEvent: @Sendable (HostEvent) -> Void
 
@@ -83,12 +84,14 @@ public actor HostService: PairingAuthority {
 
     public init(configuration: Configuration,
                 makeFrameSource: @escaping @Sendable () -> any FrameSource = { ScreenCaptureSource() },
+                clipboard: any ClipboardSink = MacPasteboard(),
                 input: any InputSink,
                 onEvent: @escaping @Sendable (HostEvent) -> Void) throws {
         self.configuration = configuration
         self.identity = try DeviceIdentity.loadOrCreate(label: configuration.identityLabel)
         self.trustStore = try TrustStore.load(from: configuration.trustStoreURL)
         self.makeFrameSource = makeFrameSource
+        self.clipboard = clipboard
         self.input = input
         self.onEvent = onEvent
     }
@@ -234,7 +237,7 @@ public actor HostService: PairingAuthority {
         let hostSession = HostSession(
             session: ThrottledSession.fromEnvironment(session), peer: peer,
             configuration: .init(hostName: configuration.hostName, wake: WakeAddresses.current()),
-            frameSource: makeFrameSource(), input: input, pairing: self
+            frameSource: makeFrameSource(), input: input, pairing: self, clipboard: clipboard
         ) { [onEvent, started] event in
             switch event {
             case .connected(let peer, let deviceName):

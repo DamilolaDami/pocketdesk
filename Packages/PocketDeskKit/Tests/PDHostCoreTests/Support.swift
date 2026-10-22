@@ -5,6 +5,7 @@ import CoreMedia
 import CoreVideo
 import Foundation
 import PDProtocol
+import PDSecurity
 import PDTransport
 @testable import PDHostCore
 
@@ -138,12 +139,39 @@ struct PhoneControl {
         while let message = try await messages.next() {
             switch message {
             case .ping(let value): try await session.send(.pong(value))
-            case .linkQuality: continue
+            case .linkQuality, .clipboard: continue
             default: return message
             }
         }
         return nil
     }
+}
+
+/// A clipboard the test controls: `copy` is someone copying on the Mac.
+actor FakeClipboard: ClipboardSink {
+    private var count = 0
+    private var item: ClipboardItem?
+    private(set) var written: [ClipboardItem] = []
+
+    func copy(_ item: ClipboardItem) {
+        count += 1
+        self.item = item
+    }
+
+    func changeCount() -> Int { count }
+    func read() -> ClipboardItem? { item }
+    func write(_ item: ClipboardItem) -> Int {
+        written.append(item)
+        count += 1
+        self.item = item
+        return count
+    }
+}
+
+/// Trusts every phone, for `HostSession` tests without a `HostService`.
+struct TrustEveryone: PairingAuthority {
+    func isTrusted(_ peer: Fingerprint) async -> Bool { true }
+    func approve(peer: Fingerprint, deviceName: String, token: [UInt8]) async -> Bool { true }
 }
 
 /// Records injected input.

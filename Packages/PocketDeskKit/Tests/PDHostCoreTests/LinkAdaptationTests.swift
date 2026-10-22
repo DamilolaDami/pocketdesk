@@ -142,10 +142,4 @@ struct LinkAdaptationTests {
         try await host.value
     }
 }
-
-private struct TrustEveryone: PairingAuthority {
-    func isTrusted(_ peer: Fingerprint) async -> Bool { true }
-    func approve(peer: Fingerprint, deviceName: String, token: [UInt8]) async -> Bool { true }
-}
-
 #endif

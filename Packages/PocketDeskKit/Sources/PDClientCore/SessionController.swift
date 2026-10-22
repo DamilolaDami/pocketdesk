@@ -22,6 +22,16 @@ public final class SessionController {
         }
     }
 
+    /// Share copied text and images with the Mac while streaming.
+    public var clipboardEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "shareClipboard") as? Bool ?? true }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "shareClipboard")
+            connection?.send(.setClipboardEnabled(newValue))
+        }
+    }
+    public var pasteboard: any PhonePasteboard = SystemPasteboard()
+
     private let displayPreferencesURL: URL
     private var displayPreferences: DisplayPreferences
     private let wakeBookURL: URL
@@ -231,7 +241,8 @@ public final class SessionController {
             identity: identity,
             request: .init(endpoint: host.endpoint, hostFingerprint: hostFingerprint, invite: invite,
                            deviceName: deviceName, viewport: viewport, audioEnabled: audioEnabled,
-                           preferredDisplayID: displayPreferences.displayID(for: connectionHostID)),
+                           preferredDisplayID: displayPreferences.displayID(for: connectionHostID),
+                           clipboardEnabled: clipboardEnabled),
             display: display
         ) { [weak self] event in
             Task { @MainActor in
@@ -273,6 +284,10 @@ public final class SessionController {
             }
         case .linkQuality(let quality):
             store.update(link: quality)
+        case .clipboard(let item):
+            guard clipboardEnabled else { return }
+            pasteboard.write(item)
+            store.post(notice: item.text != nil ? "Copied from your Mac" : "Image copied from your Mac")
         case .windows(let windows):
             store.update(windows: windows)
         case .notice(let text):
@@ -291,6 +306,17 @@ public final class SessionController {
 
     public func send(_ input: InputEvent) {
         connection?.send(input)
+    }
+
+    /// From the stream's Paste button: the phone's clipboard, for the Mac's.
+    public func sendClipboard(_ item: ClipboardItem) {
+        guard item.fitsLimits else {
+            store.post(notice: "That's too large to send to the Mac.")
+            return
+        }
+        guard !item.isEmpty else { return }
+        connection?.send(.clipboard(item))
+        store.post(notice: item.text != nil ? "Pasted to your Mac's clipboard" : "Image sent to your Mac's clipboard")
     }
 
     public func insertText(_ text: String) {

@@ -43,7 +43,7 @@ final class HostServiceTests {
         let service = try HostService(
             configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
                                  trustStoreURL: trustStoreURL, advertise: false, askBeforeConnecting: askBeforeConnecting),
-            makeFrameSource: { [frames] in frames }, input: input
+            makeFrameSource: { [frames] in frames }, clipboard: FakeClipboard(), input: input
         ) { event in
             events.append(event)
             if case .approvalRequested(let approval) = event {

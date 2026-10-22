@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/6`, four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/7`, four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -239,6 +239,20 @@ The person at the Mac always knows and controls who is using it:
   `PairingAuthority.allowSession`, shown as an approval with no code. Silence after the
   approval timeout is a no. A phone that has just been paired isn't asked a second time.
 - The menu bar icon changes while any phone is connected.
+
+## Clipboard (protocol v7)
+
+`clipboard(ClipboardItem)` (text, or a base64 PNG) goes both ways while a stream is live.
+Items over 1 MB of text or 8 MB of image are refused, not truncated.
+
+- **Mac → phone:** `HostSession` polls `NSPasteboard.changeCount` every 500 ms (`ClipboardSink`,
+  faked in tests) and sends anything copied after the stream started. On the phone it lands
+  on `UIPasteboard`, which never prompts for writes.
+- **Phone → Mac:** the stream's paste button is the system `PasteButton`, so reading the
+  phone's clipboard needs no "Allow Paste" prompt: the tap is the consent. The Mac writes the
+  item and records the new change count, so it never echoes back.
+- **Off switch:** Settings › Share Clipboard (`Hello.clipboardEnabled`,
+  `setClipboardEnabled` mid-session). Turning it on never sends what was copied while it was off.
 
 ## Waking the Mac (protocol v6)
 

@@ -1,6 +1,7 @@
 import PDClientCore
 import PDProtocol
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Mac, edge to edge, with a floating glass control bar that tucks away.
 struct StreamScreen: View {
@@ -13,6 +14,7 @@ struct StreamScreen: View {
     @State private var showingShortcuts = false
     @AppStorage(SettingsKey.startInLandscape) private var startInLandscape = false
     @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
+    @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
     @State private var controlsExpanded = true
     @State private var showsStatus = true
     @Namespace private var glass
@@ -71,37 +73,72 @@ struct StreamScreen: View {
             }
     }
 
+    /// The few things used all the time stay out; the rest live in More, like a media
+    /// player's controls. Hidden, it shrinks to one button.
     private func controls(isLandscape: Bool) -> some View {
-        GlassEffectContainer(spacing: 10) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 10) {
-                    if controlsExpanded {
-                        control(isLandscape ? "Portrait" : "Landscape",
-                                isLandscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate") {
-                            rotate(toLandscape: !isLandscape)
-                        }
-                        control("Keyboard", keyboardShown ? "keyboard.chevron.compact.down.fill" : "keyboard") {
-                            keyboardShown.toggle()
-                        }
-                        control("Shortcuts", "square.grid.2x2.fill") { showingShortcuts = true }
-                        control("Displays", "display.2") { showingDisplays = true }
-                        control("Windows", "macwindow.on.rectangle") {
-                            controller.refreshWindows()
-                            showingWindows = true
-                        }
-                        control("Disconnect", "xmark", tint: .red) { controller.disconnect() }
+        GlassEffectContainer(spacing: 12) {
+            HStack(spacing: 12) {
+                if controlsExpanded {
+                    control("Keyboard", keyboardShown ? "keyboard.chevron.compact.down.fill" : "keyboard") {
+                        keyboardShown.toggle()
                     }
-                    control(controlsExpanded ? "Hide Controls" : "Show Controls",
-                            controlsExpanded ? "chevron.down" : "slider.horizontal.3") {
-                        withAnimation(.bouncy) { controlsExpanded.toggle() }
+                    control("Shortcuts", "square.grid.2x2.fill") { showingShortcuts = true }
+                    if shareClipboard {
+                        // The system paste button reads the clipboard without iOS's
+                        // "Allow Paste" prompt, because the tap itself is the consent.
+                        PasteButton(supportedContentTypes: [.plainText, .image]) { providers in
+                            Task { @MainActor in
+                                if let item = await ClipboardItem(providers) { controller.sendClipboard(item) }
+                            }
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonBorderShape(.circle)
+                        .tint(Color(white: 0.2))
+                        .foregroundStyle(.white)
+                        .controlSize(.large)
+                        .accessibilityLabel("Paste to Mac")
+                    }
+                    moreMenu(isLandscape: isLandscape)
+                } else {
+                    control("Show Controls", "slider.horizontal.3") {
+                        withAnimation(.bouncy) { controlsExpanded = true }
                     }
                 }
-                .padding(.horizontal, 12)
             }
-            .scrollIndicators(.hidden)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: controlsExpanded ? 450 : 72)
+            .padding(.horizontal, 12)
         }
+    }
+
+    private func moreMenu(isLandscape: Bool) -> some View {
+        Menu {
+            Section {
+                Button(isLandscape ? "Portrait" : "Landscape",
+                       systemImage: isLandscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate") {
+                    rotate(toLandscape: !isLandscape)
+                }
+                Button("Displays", systemImage: "display.2") { showingDisplays = true }
+                Button("Windows", systemImage: "macwindow.on.rectangle") {
+                    controller.refreshWindows()
+                    showingWindows = true
+                }
+            }
+            Button("Hide Controls", systemImage: "chevron.down") {
+                withAnimation(.bouncy) { controlsExpanded = false }
+            }
+            Section {
+                Button("Disconnect", systemImage: "xmark", role: .destructive) { controller.disconnect() }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 48, height: 48)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
+        .glassEffectID("More", in: glass)
+        .accessibilityLabel("More")
     }
 
     /// The stream ignores the safe area; overlays still have to clear the Dynamic Island.
@@ -208,5 +245,31 @@ struct WindowPicker: View {
                 }
             }
         }
+    }
+}
+
+private extension ClipboardItem {
+    /// The first text or image the paste button handed over; images go as PNG.
+    init?(_ providers: [NSItemProvider]) async {
+        for provider in providers {
+            if provider.canLoadObject(ofClass: NSString.self) {
+                let text: String? = await withCheckedContinuation { done in
+                    _ = provider.loadObject(ofClass: NSString.self) { object, _ in done.resume(returning: object as? String) }
+                }
+                if let text {
+                    self.init(text: text)
+                    return
+                }
+            }
+            if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier),
+               let data: Data = await withCheckedContinuation({ done in
+                   _ = provider.loadDataRepresentation(for: .image) { data, _ in done.resume(returning: data) }
+               }),
+               let png = UIImage(data: data)?.pngData() {
+                self.init(png: png.base64EncodedString())
+                return
+            }
+        }
+        return nil
     }
 }

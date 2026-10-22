@@ -8,6 +8,8 @@ enum SettingsKey {
     static let startInLandscape = "startInLandscape"
     static let showStreamInfo = "showStreamInfo"
     static let streamAudio = "streamAudio"
+    /// Same key `SessionController.clipboardEnabled` reads.
+    static let shareClipboard = "shareClipboard"
     static let haptics = "haptics"
 }
 
@@ -18,6 +20,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.startInLandscape) private var startInLandscape = false
     @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
     @AppStorage(SettingsKey.streamAudio) private var streamAudio = true
+    @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
     @AppStorage(SettingsKey.haptics) private var haptics = true
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
@@ -48,6 +51,10 @@ struct SettingsView: View {
                         SettingsLabel("Play Mac Audio", symbol: "speaker.wave.2.fill", color: .blue)
                     }
                     .onChange(of: streamAudio) { _, enabled in controller.audioEnabled = enabled }
+                    Toggle(isOn: $shareClipboard) {
+                        SettingsLabel("Share Clipboard", symbol: "doc.on.clipboard.fill", color: .indigo)
+                    }
+                    .onChange(of: shareClipboard) { _, enabled in controller.clipboardEnabled = enabled }
                     Toggle(isOn: $startInLandscape) {
                         SettingsLabel("Start in Landscape", symbol: "rectangle.landscape.rotate", color: .orange)
                     }

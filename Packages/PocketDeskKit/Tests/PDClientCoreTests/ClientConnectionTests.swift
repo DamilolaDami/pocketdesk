@@ -37,7 +37,7 @@ final class ClientConnectionTests {
         let service = try HostService(
             configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
                                  trustStoreURL: trustStoreURL, advertise: false),
-            makeFrameSource: { MovingFrames() }, input: input
+            makeFrameSource: { MovingFrames() }, clipboard: FakeClipboard(), input: input
         ) { event in
             if case .approvalRequested(let approval) = event {
                 Task { await box.service?.resolveApproval(approval.id, accepted: true) }
@@ -109,7 +109,7 @@ final class ClientConnectionTests {
         let service = try HostService(
             configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
                                  trustStoreURL: trustStoreURL, advertise: false),
-            makeFrameSource: { MovingFrames() }, input: SinkRecorder()
+            makeFrameSource: { MovingFrames() }, clipboard: FakeClipboard(), input: SinkRecorder()
         ) { event in
             if case .approvalRequested(let approval) = event {
                 Task { await box.service?.resolveApproval(approval.id, accepted: false) }
@@ -143,7 +143,7 @@ final class ClientConnectionTests {
         let service = try HostService(
             configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
                                  trustStoreURL: trustStoreURL, advertise: false),
-            makeFrameSource: { MovingFrames() }, input: SinkRecorder()
+            makeFrameSource: { MovingFrames() }, clipboard: FakeClipboard(), input: SinkRecorder()
         ) { events.append($0) }
         let serviceTask = Task { try await service.run() }
         defer { serviceTask.cancel() }
@@ -241,3 +241,10 @@ actor HostBox {
     func set(_ service: HostService) { self.service = service }
 }
 #endif
+
+/// Keeps client tests off the real Mac clipboard.
+final class FakeClipboard: ClipboardSink, @unchecked Sendable {
+    func changeCount() async -> Int { 0 }
+    func read() async -> ClipboardItem? { nil }
+    func write(_ item: ClipboardItem) async -> Int { 0 }
+}

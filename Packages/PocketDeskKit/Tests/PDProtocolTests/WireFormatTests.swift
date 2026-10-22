@@ -77,6 +77,10 @@ import Testing
             .appIcon(AppIcon(bundleID: "com.apple.Music", png: "iVBORw0KGgo=")),
             .linkQuality(LinkQuality(isWeak: true, bitrateKbps: 2_400, fps: 30, roundTripMillis: 95)),
             .linkQuality(LinkQuality(isWeak: false, bitrateKbps: 18_000, fps: 60)),
+            .clipboard(ClipboardItem(text: "copied")),
+            .clipboard(ClipboardItem(png: "iVBORw0KGgo=")),
+            .setClipboardEnabled(false),
+            .hello(Hello(deviceName: "iPhone", viewport: Viewport(width: 1, height: 1, scale: 1), clipboardEnabled: false)),
         ]
         for message in messages {
             let data = try JSONEncoder().encode(message)

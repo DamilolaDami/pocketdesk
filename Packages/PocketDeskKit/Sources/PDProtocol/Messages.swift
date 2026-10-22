@@ -1,8 +1,8 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 6
+public let protocolVersion: UInt16 = 7
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
-public let alpn = "pocketdesk/6"
+public let alpn = "pocketdesk/7"
 
 /// Bonjour service type advertised by the host on the local network.
 public let bonjourServiceType = "_pocketdesk._udp"
@@ -26,6 +26,9 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// Host → phone: the stream was fitted to the link (sent whenever that changes).
     case linkQuality(LinkQuality)
     case setAudioEnabled(Bool)
+    /// Copied on one side, for the other's clipboard (either direction, while streaming).
+    case clipboard(ClipboardItem)
+    case setClipboardEnabled(Bool)
     case requestKeyframe
     /// Committed text (IME, dictation, paste). Single keystrokes go over the input channel.
     case insertText(String)
@@ -70,9 +73,12 @@ public struct Hello: Codable, Sendable, Equatable {
     /// Restored per Mac; the host falls back to its main display if unavailable.
     public var preferredDisplayID: String?
     public var audioEnabled: Bool
+    /// Share copied text and images with the Mac during this session.
+    public var clipboardEnabled: Bool
     public var mode: Mode
 
-    public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport, mode: Mode = .stream, audioEnabled: Bool = true, preferredDisplayID: String? = nil) {
+    public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport, mode: Mode = .stream, audioEnabled: Bool = true, preferredDisplayID: String? = nil, clipboardEnabled: Bool = true) {
+        self.clipboardEnabled = clipboardEnabled
         self.version = version
         self.deviceName = deviceName
         self.viewport = viewport
@@ -238,5 +244,27 @@ public struct LinkQuality: Codable, Sendable, Equatable {
         self.bitrateKbps = bitrateKbps
         self.fps = fps
         self.roundTripMillis = roundTripMillis
+    }
+}
+
+/// Clipboard contents: text, or an image as PNG. Big items are refused, not truncated: the
+/// control stream also carries input-related messages.
+public struct ClipboardItem: Codable, Sendable, Equatable {
+    public var text: String?
+    /// Base64 PNG (compact in JSON).
+    public var png: String?
+
+    public static let maxTextBytes = 1_000_000
+    public static let maxImageBytes = 8_000_000
+
+    public init(text: String? = nil, png: String? = nil) {
+        self.text = text
+        self.png = png
+    }
+
+    public var isEmpty: Bool { (text ?? "").isEmpty && (png ?? "").isEmpty }
+
+    public var fitsLimits: Bool {
+        (text?.utf8.count ?? 0) <= Self.maxTextBytes && (png?.utf8.count ?? 0) * 3 / 4 <= Self.maxImageBytes
     }
 }

@@ -38,9 +38,13 @@ public actor HostSession {
         public var adaptInterval: Duration
         /// Told to the phone in `helloAck` so it can wake this Mac later.
         public var wake: WakeInfo?
+        /// How often the Mac's clipboard is checked for something new to send.
+        public var clipboardInterval: Duration
 
         public init(hostName: String, fps: Int = 60, maxFramesInFlight: Int = 2, refineFrames: Int = 8,
-                    adaptInterval: Duration = .milliseconds(500), wake: WakeInfo? = nil) {
+                    adaptInterval: Duration = .milliseconds(500), wake: WakeInfo? = nil,
+                    clipboardInterval: Duration = .milliseconds(500)) {
+            self.clipboardInterval = clipboardInterval
             self.hostName = hostName
             self.fps = fps
             self.maxFramesInFlight = maxFramesInFlight
@@ -68,9 +72,14 @@ public actor HostSession {
     private let input: any InputSink
     private let pairing: any PairingAuthority
     private let catalog: any AppCatalogSource
+    private let clipboard: any ClipboardSink
     private let onEvent: @Sendable (Event) -> Void
 
     private var audioEnabled = true
+    private var clipboardEnabled = false
+    private var clipboardTask: Task<Void, Never>?
+    /// The Mac clipboard's change count as last sent or written; anything newer goes out.
+    private var clipboardSeen = 0
     private var currentSource: CaptureSource?
     private var selectedDisplayID: UInt32?
     private var viewport = Viewport(width: 390, height: 844, scale: 3)
@@ -107,9 +116,10 @@ public actor HostSession {
 
     public init(session: any PeerSession, peer: Fingerprint, configuration: Configuration,
                 frameSource: any FrameSource, input: any InputSink, pairing: any PairingAuthority,
-                catalog: any AppCatalogSource = InstalledApps(),
+                catalog: any AppCatalogSource = InstalledApps(), clipboard: any ClipboardSink = MacPasteboard(),
                 onEvent: @escaping @Sendable (Event) -> Void = { _ in }) {
         self.catalog = catalog
+        self.clipboard = clipboard
         self.session = session
         self.peer = peer
         self.configuration = configuration
@@ -205,6 +215,9 @@ public actor HostSession {
         }
 
         adaptTask = Task { await self.adaptToLink() }
+        clipboardEnabled = hello.clipboardEnabled
+        clipboardSeen = await clipboard.changeCount()
+        clipboardTask = Task { await self.watchClipboard() }
         // Owned by the actor so `stopStreaming` can wait for it: tasks holding the session must
         // not outlive the connection.
         inputTask = Task { [session, input] in
@@ -220,6 +233,13 @@ public actor HostSession {
                 }
             case .requestKeyframe:
                 encoder?.requestKeyframe()
+            case .clipboard(let item):
+                guard clipboardEnabled, item.fitsLimits, !item.isEmpty else { continue }
+                clipboardSeen = await clipboard.write(item)
+            case .setClipboardEnabled(let enabled):
+                clipboardEnabled = enabled
+                // Turning it back on mustn't send whatever was copied while it was off.
+                if enabled { clipboardSeen = await clipboard.changeCount() }
             case .listDisplays:
                 try await session.send(.displays(try await frameSource.displays()))
             case .selectDisplay(let id):
@@ -448,6 +468,25 @@ public actor HostSession {
         }
     }
 
+    // MARK: Clipboard
+
+    /// Sends what's copied on the Mac while the session is live (and sharing is on).
+    private func watchClipboard() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: configuration.clipboardInterval)
+            guard !Task.isCancelled, clipboardEnabled else { continue }
+            let count = await clipboard.changeCount()
+            guard count != clipboardSeen else { continue }
+            clipboardSeen = count
+            guard let item = await clipboard.read(), !item.isEmpty else { continue }
+            guard item.fitsLimits else {
+                Self.log.info("Clipboard item too large to send")
+                continue
+            }
+            try? await session.send(.clipboard(item))
+        }
+    }
+
     // MARK: Fitting the stream to the link
 
     private var streamFPS: Int { min(configuration.fps, rate.step.fps) }
@@ -495,7 +534,9 @@ public actor HostSession {
                     // Resolving the source failed before the old stream was touched: keep it,
                     // just slower. Otherwise there's nothing left to stream.
                     guard encoder != nil, !pumpTasks.isEmpty else {
-                        await finish(with: .bye(reason: Self.describeStreamingFailure(error)))
+                        // Not `finish`: the message loop is reading the control stream, and it
+                        // can only have one reader.
+                        await end(reason: Self.describeStreamingFailure(error))
                         return
                     }
                     encoder?.setRate(bitrateKbps: streamBitrateKbps, fps: streamFPS)
@@ -523,6 +564,11 @@ public actor HostSession {
             adaptTask.cancel()
             await adaptTask.value
             self.adaptTask = nil
+        }
+        if let clipboardTask {
+            clipboardTask.cancel()
+            await clipboardTask.value
+            self.clipboardTask = nil
         }
         if let inputTask {
             inputTask.cancel()

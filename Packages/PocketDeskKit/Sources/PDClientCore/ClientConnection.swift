@@ -15,6 +15,8 @@ public enum ClientEvent: Sendable, Equatable {
     case displays([DisplayInfo])
     /// How to wake this Mac later (from its `helloAck`).
     case wake(WakeInfo)
+    /// Something copied on the Mac.
+    case clipboard(ClipboardItem)
     case streamConfig(StreamConfig)
     case linkQuality(LinkQuality)
     case windows([WindowInfo])
@@ -49,9 +51,12 @@ public actor ClientConnection {
         public var viewport: Viewport
         public var preferredDisplayID: String?
         public var audioEnabled: Bool
+        public var clipboardEnabled: Bool
 
         public init(endpoint: NWEndpoint, hostFingerprint: Fingerprint, invite: PairingInvite?,
-                    deviceName: String, viewport: Viewport, audioEnabled: Bool = true, preferredDisplayID: String? = nil) {
+                    deviceName: String, viewport: Viewport, audioEnabled: Bool = true, preferredDisplayID: String? = nil,
+                    clipboardEnabled: Bool = true) {
+            self.clipboardEnabled = clipboardEnabled
             self.endpoint = endpoint
             self.hostFingerprint = hostFingerprint
             self.invite = invite
@@ -126,7 +131,8 @@ public actor ClientConnection {
         if let invite = request.invite {
             try await pair(session, invite: invite)
         }
-        try await session.send(.hello(Hello(deviceName: request.deviceName, viewport: request.viewport, audioEnabled: request.audioEnabled, preferredDisplayID: request.preferredDisplayID)))
+        try await session.send(.hello(Hello(deviceName: request.deviceName, viewport: request.viewport, audioEnabled: request.audioEnabled, preferredDisplayID: request.preferredDisplayID,
+                                             clipboardEnabled: request.clipboardEnabled)))
 
         let display = display
         let inputs = inputs.stream
@@ -158,13 +164,14 @@ public actor ClientConnection {
                     case .displays(let displays): onEvent(.displays(displays))
                     case .streamConfig(let config): onEvent(.streamConfig(config))
                     case .linkQuality(let quality): onEvent(.linkQuality(quality))
+                    case .clipboard(let item): onEvent(.clipboard(item))
                     case .windows(let windows): onEvent(.windows(windows))
                     case .actionFailed(let reason): onEvent(.notice(reason))
                     case .bye(let reason):
                         hostReason.value = reason
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
-                    case .listDisplays, .selectDisplay, .setAudioEnabled, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
+                    case .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .run, .listApps, .apps, .requestAppIcons, .appIcon:
                         continue
                     }

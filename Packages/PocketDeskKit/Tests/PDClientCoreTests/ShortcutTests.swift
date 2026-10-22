@@ -11,6 +11,12 @@ import Testing
     private let spotlight = Shortcut(name: "Spotlight", symbol: "magnifyingglass", color: .gray,
                                      action: .keystroke(code: 0x31, modifiers: ShortcutPreset.command))
 
+    @Test func mediaKeysRunWithoutThePicture() {
+        #expect(!MacAction.media(.playPause).needsPicture)
+        #expect(netflix.action.needsPicture)
+        #expect(spotlight.action.needsPicture)
+    }
+
     @Test func startsWithNetflixAndFriends() {
         let names = ShortcutLibrary().shortcuts.map(\.name)
         #expect(names.first == "Netflix")

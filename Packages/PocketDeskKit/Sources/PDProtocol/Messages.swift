@@ -1,5 +1,5 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 9
+public let protocolVersion: UInt16 = 10
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/9"
@@ -30,8 +30,11 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     case clipboard(ClipboardItem)
     case setClipboardEnabled(Bool)
     case requestKeyframe
-    /// Committed text (IME, dictation, paste). Single keystrokes go over the input channel.
+    /// Committed text (IME, dictation, paste).
     case insertText(String)
+    /// One key going down or up. Keys ride the control stream, not datagrams: a lost key-up
+    /// would leave ⌘ held down on the Mac.
+    case key(KeyPress)
     /// A shortcut from the phone: open a website or app, or press a key combination.
     case run(MacAction)
     /// Host → phone: a `run` that couldn't be done, in words for the person.
@@ -274,5 +277,18 @@ public struct ClipboardItem: Codable, Sendable, Equatable {
 
     public var fitsLimits: Bool {
         (text?.utf8.count ?? 0) <= Self.maxTextBytes && (png?.utf8.count ?? 0) * 3 / 4 <= Self.maxImageBytes
+    }
+}
+
+/// A macOS virtual key code (`kVK_*`) and the `CGEventFlags` modifier bits held with it.
+public struct KeyPress: Codable, Sendable, Equatable {
+    public var code: UInt16
+    public var isDown: Bool
+    public var modifiers: UInt32
+
+    public init(code: UInt16, isDown: Bool, modifiers: UInt32 = 0) {
+        self.code = code
+        self.isDown = isDown
+        self.modifiers = modifiers
     }
 }

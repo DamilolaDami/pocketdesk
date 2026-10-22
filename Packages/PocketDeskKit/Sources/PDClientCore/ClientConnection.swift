@@ -172,7 +172,7 @@ public actor ClientConnection {
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
                     case .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
-                         .requestKeyframe, .insertText, .run, .listApps, .apps, .requestAppIcons, .appIcon:
+                         .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon:
                         continue
                     }
                 }

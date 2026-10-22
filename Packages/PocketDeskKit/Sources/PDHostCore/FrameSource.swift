@@ -70,5 +70,11 @@ public protocol InputSink: AnyObject, Sendable {
     func insertText(_ text: String)
     /// Runs a phone shortcut. Throws `MacActionError` with a reason worth showing on the phone.
     func perform(_ action: MacAction) async throws
+    /// Lets go of every key the phone still holds down.
+    func releaseKeys()
+}
+
+extension InputSink {
+    public func releaseKeys() {}
 }
 #endif

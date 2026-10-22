@@ -17,13 +17,16 @@ struct StreamScreen: View {
     @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
     @State private var controlsExpanded = true
     @State private var showsStatus = true
+    /// The on-screen keyboard is up (not just the key bar a hardware keyboard leaves).
+    @State private var softKeyboardUp = false
     @Namespace private var glass
 
     var body: some View {
         GeometryReader { geometry in
             stream(isLandscape: geometry.size.width > geometry.size.height)
         }
-        .ignoresSafeArea()
+        // Not the keyboard's: the control bar rides above the keyboard and its key bar.
+        .ignoresSafeArea(.container)
     }
 
     private func stream(isLandscape: Bool) -> some View {
@@ -48,7 +51,20 @@ struct StreamScreen: View {
                 }
             }
             .animation(.smooth, value: controller.store.link?.isWeak)
-            .overlay(alignment: .bottom) { controls(isLandscape: isLandscape).padding(.bottom, 10) }
+            .overlay(alignment: .bottom) {
+                // While typing, the key bar's own button puts the keyboard away.
+                if !softKeyboardUp {
+                    controls(isLandscape: isLandscape).padding(.bottom, 10)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+                guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+                let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds ?? .zero
+                // The key bar alone is ~56 pt; the keyboard is several times that.
+                let up = screen.intersection(frame).height > 150
+                if up != softKeyboardUp { withAnimation(.smooth) { softKeyboardUp = up } }
+            }
             .persistentSystemOverlays(.hidden)
             .statusBarHidden()
             .onAppear { if startInLandscape { rotate(toLandscape: true) } }

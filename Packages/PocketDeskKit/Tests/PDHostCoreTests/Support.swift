@@ -189,6 +189,10 @@ final class RecordingInputSink: InputSink, @unchecked Sendable {
     func inject(_ event: InputEvent) { lock.withLock { _events.append(event) } }
     func insertText(_ text: String) { lock.withLock { _text.append(text) } }
 
+    private var _releases = 0
+    var releases: Int { lock.withLock { _releases } }
+    func releaseKeys() { lock.withLock { _releases += 1 } }
+
     private var _actions: [MacAction] = []
     var actions: [MacAction] { lock.withLock { _actions } }
 

@@ -14,6 +14,7 @@ public final class InputInjector: InputSink, @unchecked Sendable {
     /// Normalized client coordinates map into it.
     private var sourceFrame: CGRect = CGDisplayBounds(CGMainDisplayID())
     private var pressedButtons: Set<MouseButton> = []
+    private var pressedKeys: Set<UInt16> = []
 
     public init() {}
 
@@ -59,9 +60,19 @@ public final class InputInjector: InputSink, @unchecked Sendable {
                          wheel1: Int32(dy.rounded()), wheel2: Int32(dx.rounded()), wheel3: 0))
 
         case let .key(code, isDown, modifiers):
+            if isDown { pressedKeys.insert(code) } else { pressedKeys.remove(code) }
             let keyEvent = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: isDown)
             keyEvent?.flags = CGEventFlags(rawValue: UInt64(modifiers))
             post(keyEvent)
+        }
+    }
+
+    public func releaseKeys() {
+        lock.withLock {
+            for code in pressedKeys {
+                post(CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: false))
+            }
+            pressedKeys = []
         }
     }
 

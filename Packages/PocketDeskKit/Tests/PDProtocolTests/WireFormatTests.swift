@@ -82,6 +82,7 @@ import Testing
             .clipboard(ClipboardItem(text: "copied")),
             .clipboard(ClipboardItem(png: "iVBORw0KGgo=")),
             .setClipboardEnabled(false),
+            .key(KeyPress(code: 0x30, isDown: true, modifiers: 1 << 20)),
             .hello(Hello(deviceName: "iPhone", viewport: Viewport(width: 1, height: 1, scale: 1), clipboardEnabled: false)),
         ]
         for message in messages {

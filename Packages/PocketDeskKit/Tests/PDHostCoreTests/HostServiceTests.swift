@@ -100,6 +100,9 @@ final class HostServiceTests {
                 try await Task.sleep(for: .milliseconds(20))
             }
             try await session.send(.insertText("héllo"))
+            // ⌘C over the control stream, so the key-up can't be lost.
+            try await session.send(.key(KeyPress(code: 0x08, isDown: true, modifiers: 1 << 20)))
+            try await session.send(.key(KeyPress(code: 0x08, isDown: false, modifiers: 1 << 20)))
 
             // Shortcuts run in order; one that can't be done says why.
             try await session.send(.run(.openURL("https://www.netflix.com")))
@@ -128,6 +131,9 @@ final class HostServiceTests {
         #expect(await service.isTrusted(phoneFingerprint))
         #expect(input.events.first == .button(.left, isDown: true, x: 0.5, y: 0.5))
         #expect(input.text == ["héllo"])
+        #expect(input.events.suffix(2) == [.key(code: 0x08, isDown: true, modifiers: 1 << 20),
+                                           .key(code: 0x08, isDown: false, modifiers: 1 << 20)])
+        #expect(input.releases >= 1) // held keys are let go when the stream stops
         #expect(input.actions == [.openURL("https://www.netflix.com")])
         #expect(input.sourceFrames.last == CGRect(x: 100, y: 50, width: 800, height: 600))
         #expect(await frames.startedSources == [.display(1), .window(42)])

@@ -275,6 +275,8 @@ public actor HostSession {
                 }
             case .insertText(let text):
                 input.insertText(text)
+            case .key(let press):
+                input.inject(.key(code: press.code, isDown: press.isDown, modifiers: press.modifiers))
             case .run(let action):
                 do {
                     try await input.perform(action)
@@ -589,6 +591,8 @@ public actor HostSession {
             await inputTask.value
             self.inputTask = nil
         }
+        // A phone that vanished mid-shortcut mustn't leave ⌘ held down on the Mac.
+        input.releaseKeys()
         await stopPump()
         await frameSource.stop()
     }

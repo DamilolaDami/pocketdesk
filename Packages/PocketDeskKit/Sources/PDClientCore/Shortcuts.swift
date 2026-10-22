@@ -177,6 +177,11 @@ public struct ShortcutPreset: Sendable, Identifiable {
 }
 
 extension MacAction {
+    /// Whether tapping it should open the stream. Media keys you hear, not see.
+    public var needsPicture: Bool {
+        if case .media = self { false } else { true }
+    }
+
     /// One line for the editor and tiles: "netflix.com", "Opens Music", "⌃↑".
     public var summary: String {
         switch self {

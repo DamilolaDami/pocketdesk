@@ -46,12 +46,12 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/9`, four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/10`, four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
 | control | bidirectional stream, opened by the phone | `ControlMessage` as JSON via `Coder` | Reliable, ordered, easy to evolve |
-| input | datagrams (max frame 1200 B) | `InputEvent`, ≤11 bytes binary | Lost pointer moves are superseded by the next one, so no retransmit lag |
+| input | datagrams (max frame 1200 B) | `InputEvent`, ≤11 bytes binary | Lost pointer moves are superseded by the next one, so no retransmit lag. Keys go on the control stream (`ControlMessage.key`): a lost key-up would leave ⌘ held down |
 | video | unidirectional stream, opened by the Mac on its first frame; initial byte `0` | `VideoFrameHeader` (21 B) + payload | Reliable, but the host drops frames *before* encoding under backpressure |
 | audio | independent unidirectional stream, opened by the Mac on its first packet; initial byte `1` | `AudioFrameHeader` (16 B) + raw AAC-LC packet | Timestamped audio cannot block video delivery |
 
@@ -243,6 +243,27 @@ The person at the Mac always knows and controls who is using it:
   approval timeout is a no. A phone that has just been paired isn't asked a second time.
 - The menu bar icon changes while any phone is connected.
 
+## Keyboard (protocol v10)
+
+- **Key bar:** the stream view's `inputAccessoryView` (`KeyBar`, SwiftUI in a hosting view)
+  has Esc, Tab, ⌃ ⌥ ⇧ ⌘, arrows, ⌦, Home/End, Page Up/Down and F1–F12. Modifiers stick
+  (`StickyModifiers`): one tap for the next key, a quick double tap to lock. With a modifier
+  on, a letter typed on the iOS keyboard goes as its key (`KeyMap.stroke`) instead of as text.
+  The stream view owns the sticky state and pushes it into the bar: observation didn't
+  reliably re-render a hosting controller used as an input accessory.
+- **Hardware keyboards:** `pressesBegan` and `pressesEnded` send every key as a real key-down
+  and key-up, mapping HID usages to Mac key codes (`KeyMap.macKey`). Both are positional, so
+  layouts match when the phone and the Mac use the same one. Modifier keys go down and up on
+  their own, so ⌘-Tab-Tab cycles apps. While `GCKeyboard.coalesced` is set, the stream view
+  stays first responder without the on-screen keyboard.
+- **Repeat:** keys posted with `CGEvent` don't auto-repeat, so `SessionController.sendKey`
+  repeats a held key itself (450 ms, then every 40 ms).
+- **Safety:** every key rides the reliable control stream, and the Mac lets go of any keys
+  still down when a stream stops (`InputSink.releaseKeys`).
+- **Limits:** iOS keeps some combinations for itself, like ⌘-Space and, on iPad, ⌘-Tab. Use
+  the bar for those. Text typed without a modifier still goes as Unicode (`insertText`), so
+  any language works.
+
 ## Shortcuts outside the app (protocol v8)
 
 - **Siri and the Shortcuts app:** `RunShortcutIntent` takes a `ShortcutEntity` and runs in the
@@ -253,7 +274,8 @@ The person at the Mac always knows and controls who is using it:
   that sends one `run` and no picture. The Mac applies "Ask Before Each Connection" to it.
 - **Widgets and Control Center:** in the `PocketDeskWidgets` extension, Home Screen tiles, Lock
   Screen accessories and a configurable control open `pocketdesk://run?id=…`, and the app
-  runs the shortcut and shows the stream. The extension can't hold a QUIC connection or the
+  runs the shortcut and shows the stream. A tap on a tile that has nothing to look at
+  (`MacAction.needsPicture` is false, for media keys) runs it in the background instead. The extension can't hold a QUIC connection or the
   phone's identity, so the app does the work.
 - **Sharing:** shortcuts live in the App Group `group.com.pocketdesk.app`
   (`ShortcutLibrary.sharedURL`; an older copy is moved across once). When they change, the

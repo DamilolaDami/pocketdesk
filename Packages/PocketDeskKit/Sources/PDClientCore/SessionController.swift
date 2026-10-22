@@ -63,6 +63,7 @@ public final class SessionController {
     private let cacheDirectory: URL
     private var catalogTask: Task<Void, Never>?
     private var catalogFetchedAt: [UUID: ContinuousClock.Instant] = [:]
+    private var heldKey: (code: UInt16, task: Task<Void, Never>)?
 
     public init(identityLabel: String = "com.pocketdesk.phone.identity",
                 trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json"),
@@ -295,6 +296,7 @@ public final class SessionController {
         case .notice(let text):
             store.post(notice: text)
         case .ended(let reason):
+            stopKeyRepeat()
             activeConnectionID = nil
             connectionHostID = nil
             pendingAction = nil
@@ -307,7 +309,44 @@ public final class SessionController {
     // MARK: While streaming
 
     public func send(_ input: InputEvent) {
-        connection?.send(input)
+        if case let .key(code, isDown, modifiers) = input {
+            connection?.send(.key(KeyPress(code: code, isDown: isDown, modifiers: modifiers)))
+        } else {
+            connection?.send(input)
+        }
+    }
+
+    /// A key on the bar or typed with a sticky modifier: down and straight back up.
+    public func tapKey(_ code: UInt16, modifiers: MacModifiers = []) {
+        connection?.send(.key(KeyPress(code: code, isDown: true, modifiers: modifiers.rawValue)))
+        connection?.send(.key(KeyPress(code: code, isDown: false, modifiers: modifiers.rawValue)))
+    }
+
+    /// A hardware keyboard key going down or up. Keys the Mac gets from software don't
+    /// auto-repeat, so a held key (an arrow, Delete) repeats from here.
+    public func sendKey(_ code: UInt16, isDown: Bool, modifiers: MacModifiers) {
+        connection?.send(.key(KeyPress(code: code, isDown: isDown, modifiers: modifiers.rawValue)))
+        if isDown, KeyMap.modifier(forMacKey: code) == nil {
+            heldKey?.task.cancel()
+            let task = Task { [weak self] in
+                try? await Task.sleep(for: Self.keyRepeatDelay)
+                while !Task.isCancelled {
+                    self?.connection?.send(.key(KeyPress(code: code, isDown: true, modifiers: modifiers.rawValue)))
+                    try? await Task.sleep(for: Self.keyRepeatInterval)
+                }
+            }
+            heldKey = (code, task)
+        } else if !isDown, heldKey?.code == code {
+            stopKeyRepeat()
+        }
+    }
+
+    public static let keyRepeatDelay: Duration = .milliseconds(450)
+    public static let keyRepeatInterval: Duration = .milliseconds(40)
+
+    private func stopKeyRepeat() {
+        heldKey?.task.cancel()
+        heldKey = nil
     }
 
     /// From the stream's Paste button: the phone's clipboard, for the Mac's.
@@ -397,6 +436,18 @@ public final class SessionController {
         guard let host = shortcutTarget(preferredHostID: preferredHostID) else {
             store.post(notice: "Open PocketDesk on a paired Mac to run “\(shortcut.name)”.")
             return false
+        }
+        if !shortcut.action.needsPicture {
+            // Nothing to look at (Play / Pause, volume): run it without opening the stream.
+            Task {
+                do throws(BackgroundRunError) {
+                    let mac = try await runInBackground(shortcut.id, preferredHostID: host.hostID)
+                    store.post(notice: "\(shortcut.name): done on \(mac)")
+                } catch {
+                    store.post(notice: error.description)
+                }
+            }
+            return true
         }
         disconnectConnection()
         store.send(.cancel)
@@ -587,6 +638,7 @@ public final class SessionController {
     }
 
     private func disconnectConnection() {
+        stopKeyRepeat()
         activeConnectionID = nil
         connectionHostID = nil
         connectionTask?.cancel()

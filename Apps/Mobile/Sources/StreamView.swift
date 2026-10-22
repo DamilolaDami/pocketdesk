@@ -1,4 +1,5 @@
 import AVFoundation
+import GameController
 import PDClientCore
 import PDProtocol
 import SwiftUI
@@ -15,26 +16,29 @@ struct StreamView: UIViewRepresentable {
         controller.display.attach(view.displayLayer)
         view.onInput = { [controller] in controller.send($0) }
         view.onText = { [controller] in controller.insertText($0) }
+        view.onTapKey = { [controller] in controller.tapKey($0, modifiers: $1) }
+        view.onKey = { [controller] in controller.sendKey($0, isDown: $1, modifiers: $2) }
+        view.onHideKeyboard = { keyboardShown = false }
         return view
     }
 
     func updateUIView(_ view: StreamUIView, context: Context) {
         view.videoSize = videoSize
-        if keyboardShown, !view.isFirstResponder {
-            view.becomeFirstResponder()
-        } else if !keyboardShown, view.isFirstResponder {
-            view.resignFirstResponder()
-        }
+        view.wantsKeyboard = keyboardShown
     }
 
     static func dismantleUIView(_ view: StreamUIView, coordinator: ()) {
         view.onInput = { _ in }
+        view.onKey = { _, _, _ in }
+        view.onTapKey = { _, _ in }
     }
 }
 
 /// Gestures → `InputEvent`s:
 /// - tap: click · long press: right-click · one-finger drag: click-drag
 /// - two-finger pan: scroll · keyboard (`UIKeyInput`): text, return, delete
+/// - hardware keyboard (`pressesBegan`): every key as itself, modifiers included
+/// - the key bar above the keyboard: Esc, Tab, arrows, F-keys and sticky ⌃ ⌥ ⇧ ⌘
 /// - pinch: zoom the picture on the phone (pans with the fingers); nothing is sent to the Mac
 final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// Holds the video layer; pinch transforms it. Touch locations are read in its
@@ -50,9 +54,31 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private static let maxZoom: CGFloat = 6
     var onInput: (InputEvent) -> Void = { _ in }
     var onText: (String) -> Void = { _ in }
+    var onTapKey: (UInt16, MacModifiers) -> Void = { _, _ in }
+    var onKey: (UInt16, Bool, MacModifiers) -> Void = { _, _, _ in }
+    var onHideKeyboard: () -> Void = {}
 
-    private static let returnKey: UInt16 = 0x24
-    private static let deleteKey: UInt16 = 0x33
+    /// The on-screen keyboard is wanted. With a hardware keyboard attached the view takes
+    /// keys regardless, so typing works without opening anything.
+    var wantsKeyboard = false {
+        didSet {
+            if wantsKeyboard { putAway = false }
+            if wantsKeyboard != oldValue { updateFirstResponder() }
+        }
+    }
+    /// The on-screen keyboard was put away by hand: don't bring it back just because a
+    /// hardware keyboard is attached too (an iPad can show both).
+    private var putAway = false
+    /// The bar's ⌃ ⌥ ⇧ ⌘, applied to the next key from anywhere.
+    private var sticky = StickyModifiers() {
+        didSet { if sticky != oldValue { accessory.sticky = sticky } }
+    }
+    private lazy var accessory = KeyBarAccessory(KeyBar(
+        tapModifier: { [weak self] modifier in self?.sticky.tap(modifier) },
+        tap: { [weak self] code in self?.tapKey(code) },
+        dismiss: { [weak self] in self?.hideKeyboard() }))
+    /// Hardware keys down now, with what each was sent as: the key-up must match.
+    private var heldKeys: [UIKeyboardHIDUsage: UInt16] = [:]
     /// Mac pixels scrolled per point of finger travel.
     private static let scrollScale: CGFloat = 2
 
@@ -76,6 +102,50 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         scroll.delegate = self
         tap.require(toFail: longPress)
         for recognizer in [tap, longPress, drag, scroll, pinch] { addGestureRecognizer(recognizer) }
+
+        for name in [Notification.Name.GCKeyboardDidConnect, .GCKeyboardDidDisconnect] {
+            NotificationCenter.default.addObserver(self, selector: #selector(keyboardsChanged), name: name, object: nil)
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardFrameChanged),
+                                               name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+    }
+
+    /// The on-screen keyboard is showing, not just the key bar over a hardware keyboard.
+    private var softKeyboardUp = false
+
+    @objc private func keyboardFrameChanged(_ note: Notification) {
+        guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+              let screen = window?.windowScene?.screen.bounds else { return }
+        softKeyboardUp = screen.intersection(frame).height > 150
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updateFirstResponder()
+    }
+
+    @objc private func keyboardsChanged() {
+        putAway = false
+        updateFirstResponder()
+    }
+
+    private func updateFirstResponder() {
+        guard window != nil else { return }
+        let wanted = wantsKeyboard || (GCKeyboard.coalesced != nil && !putAway)
+        if wanted, !isFirstResponder {
+            becomeFirstResponder()
+        } else if !wanted, isFirstResponder {
+            resignFirstResponder()
+        }
+    }
+
+    private func hideKeyboard() {
+        onHideKeyboard()
+        // With a hardware keyboard and only the bar showing, keep taking keys.
+        if softKeyboardUp || GCKeyboard.coalesced == nil {
+            putAway = true
+            resignFirstResponder()
+        }
     }
 
     override func layoutSubviews() {
@@ -177,21 +247,69 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     var smartQuotesType: UITextSmartQuotesType = .no
     var smartDashesType: UITextSmartDashesType = .no
 
+    override var inputAccessoryView: UIView? { accessory }
+
     func insertText(_ text: String) {
+        let held = sticky.active
         if text == "\n" {
-            press(Self.returnKey)
+            tapKey(MacKey.return)
+        } else if !held.isEmpty, text.count == 1, let stroke = KeyMap.stroke(for: text.first!) {
+            // ⌘ on the bar, then "c" on the keyboard: ⌘C, not the letter.
+            tapKey(stroke.code, extra: stroke.shift ? .shift : [])
         } else {
             onText(text)
         }
     }
 
     func deleteBackward() {
-        press(Self.deleteKey)
+        tapKey(MacKey.delete)
     }
 
-    private func press(_ key: UInt16) {
-        onInput(.key(code: key, isDown: true, modifiers: 0))
-        onInput(.key(code: key, isDown: false, modifiers: 0))
+    private func tapKey(_ code: UInt16, extra: MacModifiers = []) {
+        onTapKey(code, sticky.consume().union(extra))
+    }
+
+    // MARK: Hardware keyboard
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var unhandled = Set<UIPress>()
+        for press in presses {
+            guard let key = press.key, let code = KeyMap.macKey(hidUsage: key.keyCode.rawValue) else {
+                unhandled.insert(press)
+                continue
+            }
+            var modifiers = MacModifiers(phoneFlags: key.modifierFlags.rawValue)
+            if let own = KeyMap.modifier(forMacKey: code) {
+                modifiers.insert(own)
+            } else {
+                modifiers.formUnion(sticky.consume())
+            }
+            heldKeys[key.keyCode] = code
+            onKey(code, true, modifiers)
+        }
+        if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        release(presses, with: event) { super.pressesEnded($0, with: event) }
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        release(presses, with: event) { super.pressesCancelled($0, with: event) }
+    }
+
+    private func release(_ presses: Set<UIPress>, with event: UIPressesEvent?, unhandled: (Set<UIPress>) -> Void) {
+        var rest = Set<UIPress>()
+        for press in presses {
+            guard let key = press.key, let code = heldKeys.removeValue(forKey: key.keyCode) else {
+                rest.insert(press)
+                continue
+            }
+            var modifiers = MacModifiers(phoneFlags: key.modifierFlags.rawValue)
+            if let own = KeyMap.modifier(forMacKey: code) { modifiers.remove(own) }
+            onKey(code, false, modifiers)
+        }
+        if !rest.isEmpty { unhandled(rest) }
     }
 }
 

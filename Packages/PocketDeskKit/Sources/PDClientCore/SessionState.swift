@@ -22,12 +22,15 @@ public struct DiscoveredHost: Sendable, Equatable, Identifiable, Hashable {
     /// From the TXT record; matches pairing invites and pinned hosts.
     public var hostID: UUID?
     public var isPaired: Bool
+    /// `false` for a paired Mac that isn't advertising right now (asleep, app closed, away).
+    public var isOnline: Bool
 
-    public init(id: String, name: String, hostID: UUID? = nil, isPaired: Bool) {
+    public init(id: String, name: String, hostID: UUID? = nil, isPaired: Bool, isOnline: Bool = true) {
         self.id = id
         self.name = name
         self.hostID = hostID
         self.isPaired = isPaired
+        self.isOnline = isOnline
     }
 }
 

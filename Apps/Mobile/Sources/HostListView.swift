@@ -1,73 +1,157 @@
 import PDClientCore
 import SwiftUI
 
-/// Macs found over Bonjour: paired ones connect on tap, new ones start pairing.
+/// Home: your Macs as big cards (connect in one tap), then Macs nearby that can be paired.
 struct HostListView: View {
     let controller: SessionController
     let hosts: [DiscoveredHost]
     @State private var showingLinkEntry = false
 
+    private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
+    private var nearby: [DiscoveredHost] { hosts.filter { !$0.isPaired } }
+
     var body: some View {
         NavigationStack {
-            List {
-                let paired = hosts.filter(\.isPaired)
-                let nearby = hosts.filter { !$0.isPaired }
-                if !paired.isEmpty {
-                    Section("Your Macs") {
-                        ForEach(paired) { host in
-                            row(host, subtitle: "Tap to connect", symbol: "desktopcomputer")
-                                .swipeActions {
-                                    Button("Forget", role: .destructive) { controller.forget(host) }
-                                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    if hosts.isEmpty {
+                        SearchingCard()
+                    }
+                    if !paired.isEmpty {
+                        section("Your Macs") {
+                            ForEach(paired) { host in
+                                PairedMacCard(host: host) { controller.select(host) }
+                                    .contextMenu {
+                                        Button("Forget This Mac", systemImage: "trash", role: .destructive) {
+                                            controller.forget(host)
+                                        }
+                                    }
+                            }
                         }
                     }
-                }
-                Section {
-                    ForEach(nearby) { host in
-                        row(host, subtitle: "Tap to pair", symbol: "desktopcomputer.and.arrow.down")
+                    if !nearby.isEmpty {
+                        section("Nearby") {
+                            ForEach(nearby) { host in
+                                NearbyMacRow(host: host) { controller.select(host) }
+                            }
+                        }
                     }
-                } header: {
-                    Text("Nearby")
-                } footer: {
-                    Text("Open PocketDesk on your Mac and choose “Pair a Phone…” from its menu bar icon.")
+                    SetupHint()
                 }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 32)
+                .animation(.smooth, value: hosts)
             }
-            .overlay {
-                if hosts.isEmpty {
-                    ContentUnavailableView {
-                        Label("Looking for Macs…", systemImage: "wifi")
-                    } description: {
-                        Text("Make sure PocketDesk is running on your Mac and both are on the same Wi-Fi.")
-                    }
-                }
-            }
+            .scrollBounceBehavior(.basedOnSize)
+            .background { AppBackground() }
             .navigationTitle("PocketDesk")
             .toolbar {
-                Button("Pair with Link", systemImage: "link") { showingLinkEntry = true }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Pair with Link", systemImage: "link") { showingLinkEntry = true }
+                }
             }
             .sheet(isPresented: $showingLinkEntry) {
-                NavigationStack {
-                    PairingLinkEntry(controller: controller) { showingLinkEntry = false }
-                        .navigationTitle("Pair with Link")
-                        .navigationBarTitleDisplayMode(.inline)
-                }
-                .presentationDetents([.medium])
+                PairWithLinkSheet(controller: controller) { showingLinkEntry = false }
             }
         }
     }
 
-    private func row(_ host: DiscoveredHost, subtitle: String, symbol: String) -> some View {
-        Button {
-            controller.select(host)
-        } label: {
-            Label {
-                VStack(alignment: .leading) {
-                    Text(host.name).foregroundStyle(.primary)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+    private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .padding(.leading, 4)
+            content()
+        }
+    }
+}
+
+private struct PairedMacCard: View {
+    let host: DiscoveredHost
+    let connect: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 14) {
+                MacGlyph(dimmed: !host.isOnline)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(host.name).font(.title3.weight(.semibold)).lineLimit(1)
+                    StatusPill(text: host.isOnline ? "Online" : "Offline",
+                               color: host.isOnline ? Brand.online : .gray)
                 }
-            } icon: {
-                Image(systemName: symbol)
+                Spacer(minLength: 0)
+            }
+            Button(action: connect) {
+                Label(host.isOnline ? "Connect" : "Not Available", systemImage: host.isOnline ? "play.fill" : "moon.zzz")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(Brand.accent)
+            .disabled(!host.isOnline)
+        }
+        .card()
+    }
+}
+
+private struct NearbyMacRow: View {
+    let host: DiscoveredHost
+    let pair: () -> Void
+
+    var body: some View {
+        Button(action: pair) {
+            HStack(spacing: 14) {
+                MacGlyph(size: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(host.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
+                    Text("Ready to pair").font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Text("Pair")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .glassEffect(.regular.tint(Brand.accent.opacity(0.25)), in: .capsule)
             }
         }
+        .buttonStyle(.plain)
+        .card(interactive: true)
+    }
+}
+
+/// Shown until the first Mac appears.
+private struct SearchingCard: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 44, weight: .medium))
+                .foregroundStyle(Brand.accent)
+                .symbolEffect(.variableColor.iterative.reversing, options: .repeating)
+            Text("Looking for your Mac").font(.title3.weight(.semibold))
+            Text("Make sure PocketDesk is open on your Mac and both are on the same Wi-Fi.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .card()
+    }
+}
+
+private struct SetupHint: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "menubar.arrow.up.rectangle")
+                .font(.title3)
+                .foregroundStyle(Brand.accent)
+            Text("New Mac? Open PocketDesk from its menu bar icon and choose **Pair a Phone…**")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
     }
 }

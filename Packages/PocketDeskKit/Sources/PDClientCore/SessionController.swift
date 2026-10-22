@@ -22,6 +22,8 @@ public final class SessionController {
     private var discoveryTask: Task<Void, Never>?
     private var connection: ClientConnection?
     private var connectionTask: Task<Void, Never>?
+    /// The Mac last tapped, for "Try Again".
+    public private(set) var lastHost: DiscoveredHost?
 
     public init(identityLabel: String = "com.pocketdesk.phone.identity",
                 trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json")) {
@@ -58,19 +60,30 @@ public final class SessionController {
         }
     }
 
+    /// Online Macs from Bonjour, plus paired Macs that aren't advertising right now.
     private func discoveredHosts() -> [DiscoveredHost] {
-        browsed.values
-            .map { host in
-                DiscoveredHost(id: host.id, name: host.name, hostID: host.hostID,
-                               isPaired: host.hostID.flatMap(trustStore.peer(hostID:)) != nil)
+        let online = browsed.values.map { host in
+            DiscoveredHost(id: host.id, name: host.name, hostID: host.hostID,
+                           isPaired: host.hostID.flatMap(trustStore.peer(hostID:)) != nil)
+        }
+        let onlineIDs = Set(online.compactMap(\.hostID))
+        let offline = trustStore.peers.values
+            .filter { peer in peer.hostID.map { !onlineIDs.contains($0) } ?? false }
+            .map { peer in
+                DiscoveredHost(id: "paired-\(peer.fingerprint.description)", name: peer.name, hostID: peer.hostID,
+                               isPaired: true, isOnline: false)
             }
-            .sorted { ($0.isPaired ? 0 : 1, $0.name) < ($1.isPaired ? 0 : 1, $1.name) }
+        return (online + offline).sorted {
+            ($0.isPaired ? 0 : 1, $0.isOnline ? 0 : 1, $0.name) < ($1.isPaired ? 0 : 1, $1.isOnline ? 0 : 1, $1.name)
+        }
     }
 
     // MARK: Connecting
 
     /// Paired Macs connect straight away; unpaired ones show the pairing screen.
     public func select(_ host: DiscoveredHost) {
+        guard host.isOnline else { return }
+        lastHost = host
         store.send(.select(host))
         guard host.isPaired, let browsedHost = browsed[host.id],
               let peer = host.hostID.flatMap(trustStore.peer(hostID:)) else { return }
@@ -162,6 +175,17 @@ public final class SessionController {
     public func selectSource(_ window: WindowInfo?) {
         connection?.send(.selectSource(windowID: window?.id))
         store.send(.sourceChanged(window))
+    }
+
+    /// Reconnects to the last Mac after a failure, if it's still around and paired.
+    public func retry() {
+        disconnectConnection()
+        store.send(.cancel)
+        startDiscovery()
+        guard let hostID = lastHost?.hostID,
+              let host = discoveredHosts().first(where: { $0.hostID == hostID && $0.isOnline && $0.isPaired })
+        else { return }
+        select(host)
     }
 
     /// Leaves the current Mac (or pairing attempt) and goes back to the list.

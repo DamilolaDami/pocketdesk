@@ -58,6 +58,7 @@ public actor HostSession {
     private var viewport = Viewport(width: 390, height: 844, scale: 3)
     private var encoder: HEVCEncoder?
     private var pumpTasks: [Task<Void, Never>] = []
+    private var inputTask: Task<Void, Never>?
     private var generation: UInt32 = 0
     private var nextFrameID: UInt32 = 0
     private var framesInFlight = 0
@@ -95,20 +96,23 @@ public actor HostSession {
 
         if await !pairing.isTrusted(peer) {
             guard case .pairRequest(let request)? = try await messages.next() else {
-                try await session.send(.bye(reason: "Not paired with this Mac"))
+                await finish(with: .bye(reason: "Not paired with this Mac"))
                 return
             }
             let accepted = await pairing.approve(peer: peer, deviceName: request.deviceName, token: request.token)
-            try await session.send(.pairResult(accepted: accepted))
-            guard accepted else { return }
+            guard accepted else {
+                await finish(with: .pairResult(accepted: false))
+                return
+            }
+            try await session.send(.pairResult(accepted: true))
         }
 
         guard case .hello(let hello)? = try await messages.next() else {
-            try await session.send(.bye(reason: "Expected hello"))
+            await finish(with: .bye(reason: "Expected hello"))
             return
         }
         guard hello.version == protocolVersion else {
-            try await session.send(.bye(reason: "Unsupported protocol version \(hello.version)"))
+            await finish(with: .bye(reason: "Unsupported protocol version \(hello.version)"))
             return
         }
         viewport = hello.viewport
@@ -120,14 +124,15 @@ public actor HostSession {
             try await startStreaming(nil)
         } catch {
             // Tell the phone why instead of just dropping the connection.
-            await sayGoodbye(Self.describeStreamingFailure(error))
+            await finish(with: .bye(reason: Self.describeStreamingFailure(error)))
             throw error
         }
 
-        let inputTask = Task { [session, input] in
-            for try await event in session.inputEvents { input.inject(event) }
+        // Owned by the actor so `stopStreaming` can wait for it: tasks holding the session must
+        // not outlive the connection.
+        inputTask = Task { [session, input] in
+            do { for try await event in session.inputEvents { input.inject(event) } } catch {}
         }
-        defer { inputTask.cancel() }
 
         while let message = try await messages.next() {
             switch message {
@@ -139,7 +144,7 @@ public actor HostSession {
                 do {
                     try await startStreaming(windowID.map(CaptureSource.window))
                 } catch {
-                    await sayGoodbye(Self.describeStreamingFailure(error))
+                    await finish(with: .bye(reason: Self.describeStreamingFailure(error)))
                     throw error
                 }
             case .insertText(let text):
@@ -156,10 +161,10 @@ public actor HostSession {
 
     // MARK: Streaming
 
-    /// Sends `bye` and waits for the phone to hang up (up to a second): closing the QUIC
-    /// connection straight away would discard the unsent reason.
-    private func sayGoodbye(_ reason: String) async {
-        try? await session.send(.bye(reason: reason))
+    /// Sends a session's last message and waits for the phone to hang up (up to a second):
+    /// closing the QUIC connection straight away would discard it unsent.
+    private func finish(with message: ControlMessage) async {
+        try? await session.send(message)
         let controlMessages = session.controlMessages
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
@@ -183,7 +188,7 @@ public actor HostSession {
     }
 
     private func startStreaming(_ source: CaptureSource?) async throws {
-        stopPump()
+        await stopPump()
         let resolved = try await frameSource.resolve(source)
         let size = StreamSizing.fit(sourceWidth: resolved.pixelWidth, sourceHeight: resolved.pixelHeight, into: viewport)
         let config = StreamConfig(codec: .hevc, width: size.width, height: size.height, fps: configuration.fps,
@@ -267,14 +272,22 @@ public actor HostSession {
         }
     }
 
-    private func stopPump() {
-        for task in pumpTasks { task.cancel() }
+    private func stopPump() async {
+        let tasks = pumpTasks
         pumpTasks = []
+        for task in tasks { task.cancel() }
+        for task in tasks { await task.value }
         encoder = nil
     }
 
+    /// Ends everything this session started and waits for it, before the connection closes.
     private func stopStreaming() async {
-        stopPump()
+        if let inputTask {
+            inputTask.cancel()
+            await inputTask.value
+            self.inputTask = nil
+        }
+        await stopPump()
         await frameSource.stop()
     }
 }

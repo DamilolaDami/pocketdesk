@@ -67,15 +67,19 @@ public final class QUICPeerSession: PeerSession {
 
         var iterator = firstStream.stream.makeAsyncIterator()
         guard let control = await iterator.next() else {
-            controlReader.cancel()
+            await stop([controlReader])
             throw TransportError.closed
         }
         guard let peer = Fingerprint(peerOf: connection.securityProtocolMetadata) else {
-            controlReader.cancel()
+            await stop([controlReader])
             throw TransportError.unauthenticatedPeer
         }
 
-        let datagrams = try await connection.datagrams
+        let datagrams: QUIC.Datagrams<QUICDatagram>
+        do { datagrams = try await connection.datagrams } catch {
+            await stop([controlReader])
+            throw error
+        }
         let inputReader = Task {
             do {
                 for try await datagram in datagrams.messages {
@@ -89,7 +93,11 @@ public final class QUICPeerSession: PeerSession {
                 channels.input.continuation.finish(throwing: error)
             }
         }
-        let videoOut = try await connection.openStream(directionality: .unidirectional)
+        let videoOut: QUIC.Stream<QUICStream>
+        do { videoOut = try await connection.openStream(directionality: .unidirectional) } catch {
+            await stop([controlReader, inputReader])
+            throw error
+        }
 
         return QUICPeerSession(peer: peer, control: control, datagrams: datagrams, videoOut: videoOut,
                                channels: channels, readers: [controlReader, inputReader])
@@ -126,7 +134,13 @@ public final class QUICPeerSession: PeerSession {
                 channels.video.continuation.finish(throwing: error)
             }
         }
-        let datagrams = try await connection.datagrams
+        // The host may hang up while we're still setting up (e.g. it can't capture the
+        // screen); the readers above must not outlive the connection.
+        let datagrams: QUIC.Datagrams<QUICDatagram>
+        do { datagrams = try await connection.datagrams } catch {
+            await stop([controlReader, videoReader])
+            throw error
+        }
 
         return QUICPeerSession(peer: host, control: control, datagrams: datagrams, videoOut: nil,
                                channels: channels, readers: [controlReader, videoReader])
@@ -153,6 +167,15 @@ public final class QUICPeerSession: PeerSession {
         try await videoOut.send(bytes)
     }
 
+    /// Cancels setup-time readers and waits for them, for when `accept`/`open` fails partway.
+    private static func stop(_ readers: [Task<Void, Never>]) async {
+        for reader in readers { reader.cancel() }
+        for reader in readers { await reader.value }
+    }
+
+    /// Stops the readers and waits for them to finish, so every stream they hold is released
+    /// while the connection still exists. Network.framework traps if a stream outlives the
+    /// scope of its connection.
     public func close() async {
         let tasks = readers.withLock { tasks in
             defer { tasks = [] }
@@ -160,6 +183,7 @@ public final class QUICPeerSession: PeerSession {
         }
         for task in tasks { task.cancel() }
         finishAll()
+        for task in tasks { await task.value }
     }
 }
 

@@ -167,12 +167,12 @@ extension QUICSessionTests {
         let port = try await waitForPort(listener)
         let endpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .init(rawValue: port)!)
 
-        let first = Box<ControlMessage?>(nil)
+        // The first session's handler throws right away. (Whether its bye arrives is a race;
+        // HostSession flushes final messages with `finish(with:)`, tested in PDHostCoreTests.)
         try? await QUICClient.connect(to: endpoint, identity: phoneIdentity, host: hostIdentity.fingerprint) { session in
             try await session.send(.ping(1))
-            first.value = try await session.controlMessages.first { _ in true }
+            _ = try await session.controlMessages.first { _ in true }
         }
-        #expect(first.value == .bye(reason: "first fails"))
 
         try await QUICClient.connect(to: endpoint, identity: phoneIdentity, host: hostIdentity.fingerprint, timeout: .seconds(3)) { session in
             try await session.send(.ping(2))
@@ -180,11 +180,6 @@ extension QUICSessionTests {
         }
         #expect(await sessions.peers.count == 2)
     }
-}
-
-final class Box<T>: @unchecked Sendable {
-    var value: T
-    init(_ value: T) { self.value = value }
 }
 
 func waitForPort(_ listener: QUICHostListener) async throws -> UInt16 {

@@ -1,3 +1,5 @@
+#if os(macOS)
+// Uses the macOS host engines (encoder, capture, HostService).
 import AVFoundation
 import CoreGraphics
 import CoreMedia
@@ -178,3 +180,4 @@ actor HostBox {
     private(set) var service: HostService?
     func set(_ service: HostService) { self.service = service }
 }
+#endif

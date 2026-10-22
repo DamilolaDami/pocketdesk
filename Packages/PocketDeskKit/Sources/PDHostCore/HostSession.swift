@@ -1,5 +1,7 @@
 #if os(macOS)
 import CoreGraphics
+import CoreMedia
+import CoreVideo
 import Foundation
 import PDProtocol
 import PDSecurity
@@ -23,11 +25,14 @@ public actor HostSession {
         public var fps: Int
         /// Frames allowed between "submitted to the encoder" and "QUIC accepted it".
         public var maxFramesInFlight: Int
+        /// Re-encodes of the last frame once the screen goes still (see `refineStillFrame`).
+        public var refineFrames: Int
 
-        public init(hostName: String, fps: Int = 60, maxFramesInFlight: Int = 2) {
+        public init(hostName: String, fps: Int = 60, maxFramesInFlight: Int = 2, refineFrames: Int = 8) {
             self.hostName = hostName
             self.fps = fps
             self.maxFramesInFlight = maxFramesInFlight
+            self.refineFrames = refineFrames
         }
     }
 
@@ -57,6 +62,9 @@ public actor HostSession {
     private var nextFrameID: UInt32 = 0
     private var framesInFlight = 0
     private var lastFrameAccepted = ContinuousClock.now
+    private var lastFrame: CapturedFrame?
+    private var lastCaptureAt = ContinuousClock.now
+    private var refinesLeft = 0
     public private(set) var stats = Stats()
 
     public init(session: any PeerSession, peer: Fingerprint, configuration: Configuration,
@@ -105,9 +113,16 @@ public actor HostSession {
         }
         viewport = hello.viewport
         onEvent(.connected(peer: peer, deviceName: hello.deviceName))
-        try await session.send(.helloAck(HelloAck(hostName: configuration.hostName,
-                                                  displays: try await frameSource.displays())))
-        try await startStreaming(nil)
+        do {
+            // Listing displays already needs Screen Recording, so it's inside the goodbye path.
+            let displays = try await frameSource.displays()
+            try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: displays)))
+            try await startStreaming(nil)
+        } catch {
+            // Tell the phone why instead of just dropping the connection.
+            await sayGoodbye(Self.describeStreamingFailure(error))
+            throw error
+        }
 
         let inputTask = Task { [session, input] in
             for try await event in session.inputEvents { input.inject(event) }
@@ -121,7 +136,12 @@ public actor HostSession {
             case .listWindows:
                 try await session.send(.windows(try await frameSource.windows()))
             case .selectSource(let windowID):
-                try await startStreaming(windowID.map(CaptureSource.window))
+                do {
+                    try await startStreaming(windowID.map(CaptureSource.window))
+                } catch {
+                    await sayGoodbye(Self.describeStreamingFailure(error))
+                    throw error
+                }
             case .insertText(let text):
                 input.insertText(text)
             case .ping(let value):
@@ -136,6 +156,32 @@ public actor HostSession {
 
     // MARK: Streaming
 
+    /// Sends `bye` and waits for the phone to hang up (up to a second): closing the QUIC
+    /// connection straight away would discard the unsent reason.
+    private func sayGoodbye(_ reason: String) async {
+        try? await session.send(.bye(reason: reason))
+        let controlMessages = session.controlMessages
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                do { for try await _ in controlMessages {} } catch {}
+            }
+            group.addTask { try? await Task.sleep(for: .seconds(1)) }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
+    static func describeStreamingFailure(_ error: any Error) -> String {
+        if !CGPreflightScreenCaptureAccess() {
+            return "PocketDesk on the Mac needs Screen Recording permission (System Settings › Privacy & Security)."
+        }
+        switch error {
+        case CaptureError.sourceNotFound: return "That window or display isn't available any more."
+        case EncoderError.sessionCreation(let status): return "The Mac couldn't start the video encoder (\(status))."
+        default: return "The Mac couldn't start streaming: \(error.localizedDescription)"
+        }
+    }
+
     private func startStreaming(_ source: CaptureSource?) async throws {
         stopPump()
         let resolved = try await frameSource.resolve(source)
@@ -147,6 +193,8 @@ public actor HostSession {
                                       bitrateKbps: config.bitrateKbps)
         generation &+= 1
         framesInFlight = 0
+        lastFrame = nil
+        refinesLeft = 0
         self.encoder = encoder
         input.setSourceFrame(resolved.screenFrame)
 
@@ -159,21 +207,43 @@ public actor HostSession {
         pumpTasks = [
             Task { await self.pumpCapture(frames, into: encoder) },
             Task { await self.pumpEncoded(from: encoder, generation: generation) },
+            Task { await self.refineStillFrames(into: encoder) },
         ]
     }
 
     private func pumpCapture(_ frames: AsyncStream<CapturedFrame>, into encoder: HEVCEncoder) async {
         for await frame in frames {
             guard !Task.isCancelled else { return }
-            // An encoder error can lose a frame without output; don't let that stall the pump.
-            if framesInFlight >= configuration.maxFramesInFlight, ContinuousClock.now - lastFrameAccepted < .seconds(1) {
-                stats.framesDropped += 1
-                continue
-            }
-            if framesInFlight >= configuration.maxFramesInFlight { framesInFlight = 0 }
-            framesInFlight += 1
-            encoder.encode(frame.pixelBuffer, presentationTime: frame.presentationTime)
+            lastFrame = frame
+            lastCaptureAt = .now
+            refinesLeft = configuration.refineFrames
+            submit(frame.pixelBuffer, presentationTime: frame.presentationTime, to: encoder)
         }
+    }
+
+    /// ScreenCaptureKit only delivers frames when pixels change, so after a change the encoder
+    /// would never get the follow-up frames its rate control uses to sharpen a quickly coded
+    /// picture: a still screen stays blurry. Once the screen has been still briefly, feed the
+    /// last frame again a few times; each re-encode spends bits on the remaining error.
+    private func refineStillFrames(into encoder: HEVCEncoder) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(80))
+            guard refinesLeft > 0, let lastFrame, ContinuousClock.now - lastCaptureAt > .milliseconds(150) else { continue }
+            refinesLeft -= 1
+            let now = CMClockGetTime(CMClockGetHostTimeClock())
+            submit(lastFrame.pixelBuffer, presentationTime: now, to: encoder)
+        }
+    }
+
+    private func submit(_ pixelBuffer: CVPixelBuffer, presentationTime: CMTime, to encoder: HEVCEncoder) {
+        // An encoder error can lose a frame without output; don't let that stall the pump.
+        if framesInFlight >= configuration.maxFramesInFlight, ContinuousClock.now - lastFrameAccepted < .seconds(1) {
+            stats.framesDropped += 1
+            return
+        }
+        if framesInFlight >= configuration.maxFramesInFlight { framesInFlight = 0 }
+        framesInFlight += 1
+        encoder.encode(pixelBuffer, presentationTime: presentationTime)
     }
 
     private func pumpEncoded(from encoder: HEVCEncoder, generation: UInt32) async {

@@ -1,3 +1,5 @@
+#if os(macOS)
+// Uses the macOS host engines (encoder, capture, HostService).
 import CoreGraphics
 import CoreMedia
 import CoreVideo
@@ -142,3 +144,4 @@ func flatFrame(width: Int, height: Int, luma: UInt8) -> CVPixelBuffer {
         #expect(clamped.y == 0)
     }
 }
+#endif

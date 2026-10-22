@@ -73,6 +73,9 @@ public actor ScreenCaptureSource: FrameSource {
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         // NV12 is what the hardware encoder consumes natively; no conversion pass.
         configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        // Match the encoder's color tags (BT.709), and render in sRGB so text stays crisp.
+        configuration.colorMatrix = kCVImageBufferYCbCrMatrix_ITU_R_709_2
+        configuration.colorSpaceName = CGColorSpace.sRGB
         configuration.queueDepth = 4
         configuration.showsCursor = true
         configuration.capturesAudio = false

@@ -1,3 +1,5 @@
+#if os(macOS)
+// Uses the macOS host engines (encoder, capture, HostService).
 import CoreGraphics
 import CoreMedia
 import Foundation
@@ -220,3 +222,4 @@ final class EventLog: @unchecked Sendable {
     var all: [HostEvent] { lock.withLock { events } }
     func append(_ event: HostEvent) { lock.withLock { events.append(event) } }
 }
+#endif

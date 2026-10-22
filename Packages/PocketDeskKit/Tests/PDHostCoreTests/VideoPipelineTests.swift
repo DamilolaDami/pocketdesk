@@ -1,3 +1,5 @@
+#if os(macOS)
+// Uses the macOS host engines (encoder, capture, HostService).
 import CoreGraphics
 import CoreMedia
 import Testing
@@ -32,8 +34,8 @@ import PDProtocol
     }
 
     @Test func bitrateIsClamped() {
-        #expect(StreamSizing.bitrateKbps(width: 100, height: 100, fps: 60) == 2_000)
-        #expect(StreamSizing.bitrateKbps(width: 3840, height: 2160, fps: 60) == 40_000)
+        #expect(StreamSizing.bitrateKbps(width: 100, height: 100, fps: 60) == 4_000)
+        #expect(StreamSizing.bitrateKbps(width: 3840, height: 2160, fps: 60) == 50_000)
     }
 }
 
@@ -110,3 +112,4 @@ struct ScreenCaptureSourceTests {
         #expect(windows.allSatisfy { $0.width >= 80 && $0.height >= 60 })
     }
 }
+#endif

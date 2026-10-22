@@ -22,3 +22,6 @@ PocketDesk: a macOS host and an iOS client for using your Mac from your phone. R
   (labels `com.pocketdesk.tests.*`, always deleted afterwards), use QUIC on 127.0.0.1 and
   Bonjour. Screen-capture tests run only if the process has Screen Recording permission.
 - `xcodegen && xcodebuild -scheme PocketDesk -destination 'generic/platform=iOS Simulator' build`
+- Run the Mac host signed with a stable identity, e.g. `CODE_SIGN_IDENTITY="<your Apple Development
+  cert>" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=""` (see Gotchas in `docs/ARCHITECTURE.md`).
+- In zsh `log` is a builtin: read system logs with `/usr/bin/log show`.

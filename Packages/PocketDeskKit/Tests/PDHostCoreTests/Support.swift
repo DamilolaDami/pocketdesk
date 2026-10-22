@@ -1,3 +1,5 @@
+#if os(macOS)
+// Uses the macOS host engines (encoder, capture, HostService).
 import CoreGraphics
 import CoreMedia
 import CoreVideo
@@ -108,3 +110,4 @@ final class RecordingInputSink: InputSink, @unchecked Sendable {
     func inject(_ event: InputEvent) { lock.withLock { _events.append(event) } }
     func insertText(_ text: String) { lock.withLock { _text.append(text) } }
 }
+#endif

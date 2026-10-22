@@ -60,6 +60,10 @@ public final class HEVCEncoder: @unchecked Sendable {
             // Keyframes come on request; this is only a safety net for a lost one.
             kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration: 60,
             kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality: true,
+            // Tag the stream so the phone converts YCbCr → RGB with the same matrix the capture used.
+            kVTCompressionPropertyKey_ColorPrimaries: kCVImageBufferColorPrimaries_ITU_R_709_2,
+            kVTCompressionPropertyKey_TransferFunction: kCVImageBufferTransferFunction_ITU_R_709_2,
+            kVTCompressionPropertyKey_YCbCrMatrix: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
         ]
         for (key, value) in properties {
             // Not every key is supported by every encoder; unsupported ones are optional tuning.

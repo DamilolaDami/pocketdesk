@@ -57,15 +57,11 @@ public final class QUICHostListener: Sendable {
     }
 
     /// Runs until cancelled. Each session's connection stays open while `handler` runs.
+    /// A failing session ends only its own connection, never the listener.
     public func run(_ handler: @escaping @Sendable (QUICPeerSession) async throws -> Void) async throws {
         try await listener.run { connection in
-            let session = try await QUICPeerSession.accept(connection)
-            do {
-                try await handler(session)
-            } catch {
-                await session.close()
-                throw error
-            }
+            guard let session = try? await QUICPeerSession.accept(connection) else { return }
+            try? await handler(session)
             await session.close()
         }
     }

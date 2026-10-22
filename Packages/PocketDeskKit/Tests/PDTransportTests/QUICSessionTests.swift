@@ -144,6 +144,49 @@ extension QUICSessionTests {
     }
 }
 
+extension QUICSessionTests {
+    /// A failing session must end only its own connection; the next phone still gets in.
+    @Test func listenerSurvivesAFailedSession() async throws {
+        defer { removeIdentities() }
+        let phone = phoneIdentity.fingerprint
+        let listener = try QUICHostListener(identity: hostIdentity, advertise: nil) { $0 == phone }
+        let sessions = HostLog()
+        let server = Task {
+            try await listener.run { session in
+                await sessions.record(peer: session.peer)
+                if await sessions.peers.count == 1 {
+                    try await session.send(.bye(reason: "first fails"))
+                    throw TransportError.closed
+                }
+                for try await message in session.controlMessages {
+                    if case .ping(let n) = message { try await session.send(.pong(n)) }
+                }
+            }
+        }
+        defer { server.cancel() }
+        let port = try await waitForPort(listener)
+        let endpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .init(rawValue: port)!)
+
+        let first = Box<ControlMessage?>(nil)
+        try? await QUICClient.connect(to: endpoint, identity: phoneIdentity, host: hostIdentity.fingerprint) { session in
+            try await session.send(.ping(1))
+            first.value = try await session.controlMessages.first { _ in true }
+        }
+        #expect(first.value == .bye(reason: "first fails"))
+
+        try await QUICClient.connect(to: endpoint, identity: phoneIdentity, host: hostIdentity.fingerprint, timeout: .seconds(3)) { session in
+            try await session.send(.ping(2))
+            #expect(try await session.controlMessages.first { _ in true } == .pong(2))
+        }
+        #expect(await sessions.peers.count == 2)
+    }
+}
+
+final class Box<T>: @unchecked Sendable {
+    var value: T
+    init(_ value: T) { self.value = value }
+}
+
 func waitForPort(_ listener: QUICHostListener) async throws -> UInt16 {
     for _ in 0..<200 {
         if let port = listener.port { return port }

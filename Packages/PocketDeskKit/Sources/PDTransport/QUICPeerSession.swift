@@ -167,7 +167,10 @@ public final class QUICPeerSession: PeerSession {
 private struct Channels: Sendable {
     let control = AsyncThrowingStream<ControlMessage, any Error>.makeStream()
     let input = AsyncThrowingStream<InputEvent, any Error>.makeStream(bufferingPolicy: .bufferingNewest(64))
-    let video = AsyncThrowingStream<(VideoFrameHeader, [UInt8]), any Error>.makeStream(bufferingPolicy: .bufferingNewest(4))
+    // Unbounded on purpose: every delta frame references the one before it, so dropping any
+    // encoded frame here corrupts everything until the next keyframe (smeared, ghosted video).
+    // Pacing is the host's job: it drops frames before encoding when the network is behind.
+    let video = AsyncThrowingStream<(VideoFrameHeader, [UInt8]), any Error>.makeStream(bufferingPolicy: .unbounded)
 
     var finish: @Sendable () -> Void {
         { [control, input, video] in

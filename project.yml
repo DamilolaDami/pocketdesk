@@ -51,6 +51,9 @@ targets:
       properties:
         CFBundleDisplayName: PocketDesk
         UILaunchScreen: {}
+        # Landscape fits a Mac display far better; the stream re-fits on rotation.
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         NSLocalNetworkUsageDescription: PocketDesk finds your Mac on the local network.
         NSBonjourServices: [_pocketdesk._udp]
         NSCameraUsageDescription: Scan the pairing code shown on your Mac.

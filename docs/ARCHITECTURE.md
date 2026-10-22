@@ -153,6 +153,16 @@ and pinning, never on obscurity.
 - The macOS file keychain ignores `kSecAttrLabel` on certificates (it labels them by common
   name), so the certificate's CN *is* the storage label. It also fails key generation under
   concurrent use, so `DeviceIdentity` serializes Keychain writes.
+- Never drop *encoded* video anywhere (transport buffers, encoder output): every delta frame
+  references the previous one, and one missing frame smears the picture until the next
+  keyframe. Pace by dropping *captured* frames before the encoder.
+- ScreenCaptureKit only delivers frames when pixels change, so a quickly coded frame never gets
+  refined on a still screen. `HostSession` re-encodes the last frame a few times once it's still.
+- Closing a QUIC connection discards unsent stream data: send `bye(reason)` and wait for the
+  phone to hang up (`sayGoodbye`), or the phone only ever sees "connection reset".
+- Local Mac builds: sign with a stable identity (your Apple Development certificate, passed on
+  the `xcodebuild` command line, never committed). Ad-hoc signatures change every build, and
+  macOS then re-asks for the keychain key and silently drops the Screen Recording grant.
 
 ## Distribution
 

@@ -20,10 +20,11 @@ public enum StreamSizing {
         return (even(Double(sourceWidth) * scale), even(Double(sourceHeight) * scale))
     }
 
-    /// Bitrate heuristic for screen content at 60 fps: ~0.1 bits per pixel, clamped.
+    /// Bitrate heuristic for screen content: ~0.15 bits per pixel per frame, clamped. Text needs
+    /// far more than camera video at the same size, and this is a LAN link.
     public static func bitrateKbps(width: Int, height: Int, fps: Int) -> Int {
-        let kbps = Double(width * height * fps) * 0.1 / 1000
-        return Int(min(max(kbps, 2_000), 40_000))
+        let kbps = Double(width * height * fps) * 0.15 / 1000
+        return Int(min(max(kbps, 4_000), 50_000))
     }
 
     private static func even(_ value: Double) -> Int {

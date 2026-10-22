@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import OSLog
 import PDProtocol
 import PDSecurity
 import PDTransport
@@ -200,7 +201,14 @@ public actor HostService: PairingAuthority {
             }
         }
         defer { onEvent(.sessionEnded(peer: peer)) }
-        try await hostSession.run()
+        do {
+            try await hostSession.run()
+        } catch {
+            Self.log.error("Session with \(peer.description, privacy: .public) ended: \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
+
+    private static let log = Logger(subsystem: "com.pocketdesk.host", category: "session")
 }
 #endif

@@ -3,6 +3,7 @@ import Network
 import PDProtocol
 import PDSecurity
 import PDTransport
+import Synchronization
 
 /// What a connection reports to `SessionController`.
 public enum ClientEvent: Sendable, Equatable {
@@ -101,6 +102,21 @@ public actor ClientConnection {
         let inputs = inputs.stream
         let outbox = outbox.stream
         let onEvent = onEvent
+        // The host says why before it hangs up, but its close also fails the video channel;
+        // keep the stated reason so it wins over "connection reset".
+        let hostReason = HostReason()
+        do {
+            try await stream(session, display: display, inputs: inputs, outbox: outbox, onEvent: onEvent, hostReason: hostReason)
+        } catch {
+            if let reason = hostReason.value { throw ClientError.hostEnded(reason) }
+            throw error
+        }
+    }
+
+    private nonisolated func stream(_ session: QUICPeerSession, display: VideoDisplay,
+                                    inputs: AsyncStream<InputEvent>, outbox: AsyncStream<ControlMessage>,
+                                    onEvent: @escaping @Sendable (ClientEvent) -> Void,
+                                    hostReason: HostReason) async throws {
         // Whichever channel ends first ends the session.
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
@@ -108,7 +124,9 @@ public actor ClientConnection {
                     switch message {
                     case .streamConfig(let config): onEvent(.streamConfig(config))
                     case .windows(let windows): onEvent(.windows(windows))
-                    case .bye(let reason): throw ClientError.hostEnded(reason)
+                    case .bye(let reason):
+                        hostReason.value = reason
+                        throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
                     case .helloAck, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText:
@@ -160,5 +178,14 @@ public actor ClientConnection {
         case TransportError.closed: "The Mac closed the connection."
         default: error.localizedDescription
         }
+    }
+}
+
+/// The reason from the host's `bye`, shared between the session's channel tasks.
+private final class HostReason: Sendable {
+    private let storage = Mutex<String?>(nil)
+    var value: String? {
+        get { storage.withLock { $0 } }
+        set { storage.withLock { $0 = newValue } }
     }
 }

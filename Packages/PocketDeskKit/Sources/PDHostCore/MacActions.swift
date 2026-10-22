@@ -2,16 +2,20 @@
 import AppKit
 import PDProtocol
 
-public enum MacActionError: Error, Equatable, CustomStringConvertible {
+public indirect enum MacActionError: Error, Equatable, CustomStringConvertible {
     case invalidURL(String)
     case appNotFound(String)
     case couldNotOpen(String)
+    case shortcutFailed(String, reason: String)
+    case step(Int, MacActionError)
 
     public var description: String {
         switch self {
         case .invalidURL(let url): "“\(url)” isn't a link the Mac can open."
         case .appNotFound(let name): "\(name) isn't installed on this Mac."
         case .couldNotOpen(let name): "The Mac couldn't open \(name)."
+        case .shortcutFailed(let name, let reason): "“\(name)” didn't run on the Mac: \(reason)"
+        case .step(let number, let error): "Step \(number): \(error)"
         }
     }
 }
@@ -50,6 +54,39 @@ extension InputInjector {
 
         case .media(let key):
             await Self.press(key)
+
+        case .runShortcut(let id, let name):
+            // A shortcut can take a while (or ask a question on the Mac): once it's been
+            // running a few seconds, call it started rather than keep the phone waiting.
+            let result: MacShortcuts.Result?
+            do {
+                result = try await MacShortcuts.run(["run", id ?? name], keepOutput: false, timeout: .seconds(4))
+            } catch {
+                throw MacActionError.couldNotOpen("Shortcuts")
+            }
+            guard let result else { return }
+            guard result.status == 0 else {
+                // "Error: The operation couldn’t be completed. Couldn’t find shortcut" → the last part.
+                let reason = result.error.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacing(#/^Error: /#, with: "")
+                    .replacing(#/^The operation couldn[’']t be completed\. ?/#, with: "")
+                throw MacActionError.shortcutFailed(name, reason: reason.isEmpty ? "it stopped with an error." : reason)
+            }
+
+        case .setVolume(let level):
+            guard SystemVolume.set(level) else { throw MacActionError.couldNotOpen("the sound settings") }
+
+        case .wait(let milliseconds):
+            try? await Task.sleep(for: .milliseconds(milliseconds))
+
+        case .steps(let steps):
+            for (index, step) in steps.enumerated() {
+                do {
+                    try await perform(step)
+                } catch let error as MacActionError {
+                    throw MacActionError.step(index + 1, error)
+                }
+            }
         }
     }
 

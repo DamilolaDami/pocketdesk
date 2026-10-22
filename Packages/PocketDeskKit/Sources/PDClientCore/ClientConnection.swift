@@ -172,7 +172,8 @@ public actor ClientConnection {
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
                     case .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
-                         .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon:
+                         .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon,
+                         .listMacShortcuts, .macShortcuts:
                         continue
                     }
                 }
@@ -249,6 +250,7 @@ public enum CatalogUpdate: Sendable, Equatable {
     case apps([MacApp])
     /// `png == nil`: the Mac has no icon for it (or no such app).
     case icon(bundleID: String, png: Data?)
+    case macShortcuts([MacShortcut])
 }
 
 extension ClientConnection {
@@ -289,6 +291,9 @@ extension ClientConnection {
                                 continuation.yield(.icon(bundleID: icon.bundleID, png: icon.png.flatMap { Data(base64Encoded: $0) }))
                             }
                         }
+                        try await session.send(.listMacShortcuts)
+                        guard case .macShortcuts(let shortcuts) = try await next() else { throw ClientError.unexpectedMessage }
+                        continuation.yield(.macShortcuts(shortcuts))
                         try await session.send(.bye(reason: "done"))
                         // Let the Mac hang up first; closing now could discard the bye unsent.
                         while (try? await control.next()) != nil {}

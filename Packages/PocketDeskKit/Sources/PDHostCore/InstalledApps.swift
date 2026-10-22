@@ -7,6 +7,12 @@ public protocol AppCatalogSource: Sendable {
     func apps() async -> [MacApp]
     /// A square PNG of the app's icon, or `nil` if no app has that bundle ID.
     func iconPNG(bundleID: String) async -> Data?
+    /// The shortcuts in the Mac's Shortcuts app.
+    func shortcuts() async -> [MacShortcut]
+}
+
+extension AppCatalogSource {
+    public func shortcuts() async -> [MacShortcut] { [] }
 }
 
 /// Apps in the usual folders (not every helper bundle on disk), named as Finder shows them.
@@ -63,6 +69,58 @@ public struct InstalledApps: AppCatalogSource {
         context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
         guard let output = context.makeImage() else { return nil }
         return NSBitmapImageRep(cgImage: output).representation(using: .png, properties: [:])
+    }
+}
+extension InstalledApps {
+    /// `shortcuts list --show-identifiers` prints "Name (UUID)" per line.
+    public func shortcuts() async -> [MacShortcut] {
+        guard let output = (try? await MacShortcuts.run(["list", "--show-identifiers"]))??.output else { return [] }
+        return Self.parseShortcuts(output)
+    }
+
+    static func parseShortcuts(_ output: String) -> [MacShortcut] {
+        output.split(whereSeparator: \.isNewline).compactMap { line in
+            guard let match = line.wholeMatch(of: /(.+) \(([0-9A-Fa-f-]{36})\)/) else { return nil }
+            return MacShortcut(id: String(match.2), name: String(match.1))
+        }
+    }
+}
+
+/// The `shortcuts` command that ships with macOS.
+enum MacShortcuts {
+    struct Result {
+        var status: Int32
+        var output: String
+        var error: String
+    }
+
+    /// Runs `/usr/bin/shortcuts`. Gives up waiting after `timeout` (the shortcut keeps
+    /// running) and returns `nil`.
+    /// A shortcut's own output is dropped (`keepOutput: false`): a big one would fill the
+    /// pipe and stall it.
+    static func run(_ arguments: [String], keepOutput: Bool = true,
+                    timeout: Duration = .seconds(20)) async throws -> Result? {
+        let process = Process()
+        process.executableURL = URL(filePath: "/usr/bin/shortcuts")
+        process.arguments = arguments
+        let output = Pipe(), error = Pipe()
+        process.standardOutput = keepOutput ? output : FileHandle.nullDevice
+        process.standardError = error
+        let finished = AsyncStream<Void>.makeStream()
+        process.terminationHandler = { _ in finished.continuation.finish() }
+        try process.run()
+        let exited = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { for await _ in finished.stream {}; return true }
+            group.addTask { try? await Task.sleep(for: timeout); return false }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        guard exited else { return nil }
+        func text(_ pipe: Pipe) -> String {
+            String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        }
+        return Result(status: process.terminationStatus, output: keepOutput ? text(output) : "", error: text(error))
     }
 }
 #endif

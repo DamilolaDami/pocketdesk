@@ -52,10 +52,30 @@ import Testing
         .keystroke(code: 0x31, modifiers: 0x100000),
         .media(.playPause),
         .media(.volumeDown),
+        .runShortcut(id: "7DC33540-3D02-4FB6-A1BC-5A12E2FE3B16", name: "Movie Night"),
+        .setVolume(60),
+        .steps([.openURL("https://www.netflix.com"), .wait(milliseconds: 1500), .keystroke(code: 0x03, modifiers: 0x14_0000)]),
     ])
     func actionsRoundTrip(_ action: MacAction) throws {
         let data = try JSONEncoder().encode(ControlMessage.run(action))
         #expect(try JSONDecoder().decode(ControlMessage.self, from: data) == .run(action))
+    }
+
+    @Test func stepsStayWithinLimits() {
+        #expect(MacAction.steps([.media(.playPause), .wait(milliseconds: 500)]).isValid)
+        #expect(!MacAction.steps([]).isValid)
+        #expect(!MacAction.steps([.steps([.media(.mute)])]).isValid) // one level deep
+        #expect(!MacAction.steps(Array(repeating: .media(.mute), count: MacAction.maxSteps + 1)).isValid)
+        #expect(!MacAction.steps([.wait(milliseconds: 60_000)]).isValid)
+        #expect(!MacAction.setVolume(101).isValid)
+        #expect(alpn == "pocketdesk/\(protocolVersion)")
+    }
+
+    @Test func macShortcutsRoundTrip() throws {
+        let messages: [ControlMessage] = [.listMacShortcuts, .macShortcuts([MacShortcut(id: "A-1", name: "Focus")])]
+        for message in messages {
+            #expect(try JSONDecoder().decode(ControlMessage.self, from: JSONEncoder().encode(message)) == message)
+        }
     }
 
     @Test func displayMessagesRoundTrip() throws {

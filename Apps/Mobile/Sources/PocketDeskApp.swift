@@ -60,7 +60,7 @@ struct RootView: View {
         }
         .overlay(alignment: .top) {
             if let notice = controller.store.notice {
-                NoticeBanner(text: notice.text)
+                NoticeBanner(notice: notice)
                     .padding(.horizontal, 16)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .task(id: notice.id) {
@@ -73,7 +73,10 @@ struct RootView: View {
         .animation(.smooth(duration: 0.35), value: phase)
         .animation(.bouncy, value: controller.store.notice)
         .sensoryFeedback(trigger: isStreaming) { _, streaming in haptics && streaming ? .success : nil }
-        .sensoryFeedback(trigger: controller.store.notice) { _, notice in haptics && notice != nil ? .warning : nil }
+        .sensoryFeedback(trigger: controller.store.notice) { _, notice in
+            guard haptics, let notice else { return nil }
+            return notice.kind == .done ? .success : .warning
+        }
         .task { controller.startDiscovery() }
     }
 
@@ -148,10 +151,10 @@ struct MainTabs: View {
 }
 
 private struct NoticeBanner: View {
-    let text: String
+    let notice: Notice
 
     var body: some View {
-        Label(text, systemImage: "exclamationmark.triangle.fill")
+        Label(notice.text, systemImage: notice.kind == .done ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
             .font(.subheadline.weight(.medium))
             .symbolRenderingMode(.multicolor)
             .padding(.horizontal, 16)

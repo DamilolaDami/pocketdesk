@@ -185,7 +185,7 @@ public actor HostSession {
             var allowed: Bool?
             while let message = try await messages.next() {
                 switch message {
-                case .listApps, .requestAppIcons: try await answer(message)
+                case .listApps, .requestAppIcons, .listMacShortcuts: try await answer(message)
                 case .run(let action):
                     // Running something is using the Mac: "Ask Before Each Connection" applies.
                     if allowed == nil { allowed = await pairing.allowSession(peer: peer, deviceName: hello.deviceName) }
@@ -193,11 +193,7 @@ public actor HostSession {
                         try await session.send(.actionFailed("The Mac didn't allow this."))
                         continue
                     }
-                    do {
-                        try await input.perform(action)
-                    } catch {
-                        try await session.send(.actionFailed(String(describing: error)))
-                    }
+                    try await run(action)
                 case .bye: return
                 default: continue
                 }
@@ -278,12 +274,8 @@ public actor HostSession {
             case .key(let press):
                 input.inject(.key(code: press.code, isDown: press.isDown, modifiers: press.modifiers))
             case .run(let action):
-                do {
-                    try await input.perform(action)
-                } catch {
-                    try await session.send(.actionFailed(String(describing: error)))
-                }
-            case .listApps, .requestAppIcons:
+                try await run(action)
+            case .listApps, .requestAppIcons, .listMacShortcuts:
                 try await answer(message)
             case .ping(let value):
                 try await session.send(.pong(value))
@@ -297,14 +289,29 @@ public actor HostSession {
             case .bye:
                 return
             case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
-                 .actionFailed, .apps, .appIcon:
+                 .actionFailed, .apps, .appIcon, .macShortcuts:
                 continue
             }
         }
     }
 
+    /// A phone shortcut; one that can't be done says why.
+    private func run(_ action: MacAction) async throws {
+        guard action.isValid else {
+            try await session.send(.actionFailed("That shortcut has too many steps or too long a wait."))
+            return
+        }
+        do {
+            try await input.perform(action)
+        } catch {
+            try await session.send(.actionFailed(String(describing: error)))
+        }
+    }
+
     private func answer(_ question: ControlMessage) async throws {
         switch question {
+        case .listMacShortcuts:
+            try await session.send(.macShortcuts(await catalog.shortcuts()))
         case .listApps:
             try await session.send(.apps(await catalog.apps()))
         case .requestAppIcons(let bundleIDs):

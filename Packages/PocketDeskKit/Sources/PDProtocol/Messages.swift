@@ -1,8 +1,8 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 10
+public let protocolVersion: UInt16 = 11
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
-public let alpn = "pocketdesk/9"
+public let alpn = "pocketdesk/\(protocolVersion)"
 
 /// Bonjour service type advertised by the host on the local network.
 public let bonjourServiceType = "_pocketdesk._udp"
@@ -45,14 +45,18 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// Icons for these bundle IDs; the host answers with one `appIcon` per ID, in order.
     case requestAppIcons([String])
     case appIcon(AppIcon)
+    /// The shortcuts in the Mac's Shortcuts app, for a "Run Mac Shortcut" tile.
+    case listMacShortcuts
+    case macShortcuts([MacShortcut])
     case ping(UInt64)
     case pong(UInt64)
     case bye(reason: String)
 }
 
 /// Something a phone shortcut asks the Mac to do. A paired phone can already click and type
-/// anything, so these grant nothing new; they just save the taps.
-public enum MacAction: Codable, Sendable, Equatable, Hashable {
+/// anything, so these grant nothing new; they just save the taps. (Mac Shortcuts are ones the
+/// person at the Mac made, and could already be run from the Mac's menu bar.)
+public indirect enum MacAction: Codable, Sendable, Equatable, Hashable {
     /// Any URL the Mac can open (`https:`, or an app's own scheme like `spotify:`).
     case openURL(String)
     /// Launches or brings forward an app. `name` is the fallback when no app has that bundle ID.
@@ -62,6 +66,41 @@ public enum MacAction: Codable, Sendable, Equatable, Hashable {
     /// A keyboard media key. Play/Pause controls whatever is playing (Netflix in Safari,
     /// Music, YouTube), whichever app is in front.
     case media(MediaKey)
+    /// A shortcut from the Mac's Shortcuts app: by identifier, falling back to the name.
+    case runShortcut(id: String?, name: String)
+    /// Output volume, 0–100.
+    case setVolume(Int)
+    /// A pause between steps.
+    case wait(milliseconds: Int)
+    /// Several actions in order, one level deep; the Mac stops at the first that fails.
+    case steps([MacAction])
+}
+
+extension MacAction {
+    public static let maxSteps = 20
+    public static let maxWaitMilliseconds = 30_000
+
+    /// Within what the Mac will run: no nested steps, short waits, a sane volume.
+    public var isValid: Bool {
+        switch self {
+        case .steps(let steps):
+            !steps.isEmpty && steps.count <= Self.maxSteps
+                && steps.allSatisfy { if case .steps = $0 { false } else { $0.isValid } }
+        case .wait(let milliseconds): (0...Self.maxWaitMilliseconds).contains(milliseconds)
+        case .setVolume(let level): (0...100).contains(level)
+        default: true
+        }
+    }
+}
+
+public struct MacShortcut: Codable, Sendable, Equatable, Hashable, Identifiable {
+    public var id: String
+    public var name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
 }
 
 public enum MediaKey: String, Codable, Sendable, Hashable, CaseIterable {

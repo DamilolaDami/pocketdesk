@@ -24,6 +24,15 @@ import Testing
         #expect(watched.opensStream)
     }
 
+    @Test func stepsAndMacShortcutsDescribeThemselves() {
+        #expect(MacAction.runShortcut(id: nil, name: "Focus").summary == "Runs “Focus”")
+        #expect(MacAction.setVolume(60).summary == "Volume 60%")
+        #expect(MacAction.wait(milliseconds: 1500).summary == "Wait 1.5 s")
+        #expect(MacAction.steps([.media(.playPause), .setVolume(30)]).summary == "2 steps")
+        #expect(!MacAction.steps([.media(.playPause), .setVolume(30)]).needsPicture)
+        #expect(MacAction.steps([.openURL("https://netflix.com"), .setVolume(30)]).needsPicture)
+    }
+
     @Test func shortcutsSavedBeforeShowsMacStillLoad() throws {
         let json = #"{"id":"11111111-0000-4000-8000-000000000001","name":"Netflix","symbol":"play.tv.fill","color":"red","action":{"openURL":{"_0":"https://www.netflix.com"}}}"#
         let shortcut = try JSONDecoder().decode(Shortcut.self, from: Data(json.utf8))

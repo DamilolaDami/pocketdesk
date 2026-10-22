@@ -42,6 +42,7 @@ struct ShortcutsView: View {
                 switch sheet {
                 case .picks:
                     QuickPicksSheet(controller: controller, pick: { self.sheet = .editor(.from($0)) },
+                                    pickMacShortcut: { self.sheet = .editor(.from($0)) },
                                     startFromScratch: { self.sheet = .editor(.new()) })
                 case .editor(let draft):
                     ShortcutEditor(controller: controller, draft: draft, save: controller.save,

@@ -185,9 +185,14 @@ public struct ShortcutPreset: Sendable, Identifiable {
 }
 
 extension MacAction {
-    /// Whether a tap shows the Mac unless the shortcut says otherwise. Media keys you hear, not see.
+    /// Whether a tap shows the Mac unless the shortcut says otherwise. Media keys, volume and
+    /// Mac Shortcuts you hear or feel, not see; steps need it if any of theirs does.
     public var needsPicture: Bool {
-        if case .media = self { false } else { true }
+        switch self {
+        case .media, .setVolume, .wait, .runShortcut: false
+        case .steps(let steps): steps.contains(where: \.needsPicture)
+        case .openURL, .openApp, .keystroke: true
+        }
     }
 
     /// One line for the editor and tiles: "netflix.com", "Opens Music", "⌃↑".
@@ -209,6 +214,15 @@ extension MacAction {
             case .volumeDown: "Volume down"
             case .mute: "Mute"
             }
+        case .runShortcut(_, let name):
+            return "Runs “\(name)”"
+        case .setVolume(let level):
+            return "Volume \(level)%"
+        case .wait(let milliseconds):
+            return milliseconds % 1000 == 0 ? "Wait \(milliseconds / 1000) s"
+                : "Wait \((Double(milliseconds) / 1000).formatted(.number.precision(.fractionLength(1)))) s"
+        case .steps(let steps):
+            return steps.count == 1 ? steps[0].summary : "\(steps.count) steps"
         }
     }
 

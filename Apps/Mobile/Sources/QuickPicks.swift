@@ -1,12 +1,18 @@
 import PDClientCore
+import PDProtocol
 import SwiftUI
 
 /// "Start from…": every quick pick at a glance, by category, before the editor opens.
 struct QuickPicksSheet: View {
     let controller: SessionController
     let pick: (ShortcutPreset) -> Void
+    /// One of the Mac's own Shortcuts-app shortcuts.
+    let pickMacShortcut: (MacShortcut) -> Void
     let startFromScratch: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var showsAllMacShortcuts = false
+
+    private var macShortcuts: [MacShortcut] { controller.store.macShortcuts }
 
     var body: some View {
         NavigationStack {
@@ -23,6 +29,36 @@ struct QuickPicksSheet: View {
                                         .flatMap { controller.store.appIcons[$0] }) {
                                         pick(preset)
                                     }
+                                }
+                            }
+                        }
+                    }
+                    if !controller.store.macShortcuts.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("From Your Mac's Shortcuts")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                            FlowLayout(spacing: 8) {
+                                ForEach(showsAllMacShortcuts ? macShortcuts : Array(macShortcuts.prefix(12))) { shortcut in
+                                    Button { pickMacShortcut(shortcut) } label: {
+                                        Label(shortcut.name, systemImage: "square.stack.3d.up.fill")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(ShortcutColor.indigo.tint.gradient, in: .capsule)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                if !showsAllMacShortcuts, macShortcuts.count > 12 {
+                                    Button("Show All \(macShortcuts.count)") {
+                                        withAnimation(.smooth) { showsAllMacShortcuts = true }
+                                    }
+                                    .font(.subheadline.weight(.semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(.quaternary, in: .capsule)
+                                    .buttonStyle(.plain)
                                 }
                             }
                         }

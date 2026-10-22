@@ -290,7 +290,7 @@ public final class SessionController {
         case .clipboard(let item):
             guard clipboardEnabled else { return }
             pasteboard.write(item)
-            store.post(notice: item.text != nil ? "Copied from your Mac" : "Image copied from your Mac")
+            store.post(notice: item.text != nil ? "Copied from your Mac" : "Image copied from your Mac", kind: .done)
         case .windows(let windows):
             store.update(windows: windows)
         case .notice(let text):
@@ -357,7 +357,8 @@ public final class SessionController {
         }
         guard !item.isEmpty else { return }
         connection?.send(.clipboard(item))
-        store.post(notice: item.text != nil ? "Pasted to your Mac's clipboard" : "Image sent to your Mac's clipboard")
+        store.post(notice: item.text != nil ? "Pasted to your Mac's clipboard" : "Image sent to your Mac's clipboard",
+                   kind: .done)
     }
 
     public func insertText(_ text: String) {
@@ -442,7 +443,7 @@ public final class SessionController {
             Task {
                 do throws(BackgroundRunError) {
                     let mac = try await runInBackground(shortcut.id, preferredHostID: host.hostID)
-                    store.post(notice: "\(shortcut.name): done on \(mac)")
+                    store.post(notice: "\(shortcut.name): done on \(mac)", kind: .done)
                 } catch {
                     store.post(notice: error.description)
                 }
@@ -480,6 +481,8 @@ public final class SessionController {
         }
         let cached = (try? JSONDecoder().decode([MacApp].self, from: Data(contentsOf: appsURL(hostID)))) ?? []
         store.update(macApps: cached)
+        store.update(macShortcuts: (try? JSONDecoder().decode([MacShortcut].self,
+                                                              from: Data(contentsOf: macShortcutsURL(hostID)))) ?? [])
         loadCachedIcons(for: cached.map(\.bundleID))
 
         if !force, let fetched = catalogFetchedAt[hostID], fetched.duration(to: .now) < .seconds(300) { return }
@@ -533,6 +536,9 @@ public final class SessionController {
             try? png.write(to: iconURL(bundleID), options: .atomic)
         case .icon(_, nil):
             break
+        case .macShortcuts(let shortcuts):
+            store.update(macShortcuts: shortcuts)
+            try? JSONEncoder().encode(shortcuts).write(to: macShortcutsURL(hostID), options: .atomic)
         }
     }
 
@@ -540,6 +546,10 @@ public final class SessionController {
         for bundleID in bundleIDs where store.appIcons[bundleID] == nil {
             if let png = try? Data(contentsOf: iconURL(bundleID)) { store.add(icon: png, for: bundleID) }
         }
+    }
+
+    private func macShortcutsURL(_ hostID: UUID) -> URL {
+        cacheDirectory.appending(path: "apps/\(hostID.uuidString)-shortcuts.json")
     }
 
     private func appsURL(_ hostID: UUID) -> URL {

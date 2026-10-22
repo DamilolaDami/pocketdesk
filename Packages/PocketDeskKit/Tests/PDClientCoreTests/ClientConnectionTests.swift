@@ -165,6 +165,12 @@ final class ClientConnectionTests {
                                                hostFingerprint: service.identity.fingerprint, identity: self.phone,
                                                deviceName: "Test iPhone")
         }
+        // A failure that takes a while still reaches the phone, not lost as the Mac hangs up.
+        await #expect(throws: ClientError.hostEnded("“Slow Missing” didn't run on the Mac: Couldn’t find shortcut")) {
+            try await ClientConnection.perform(.runShortcut(id: nil, name: "Slow Missing"), endpoint: endpoint,
+                                               hostFingerprint: service.identity.fingerprint, identity: self.phone,
+                                               deviceName: "Test iPhone")
+        }
         // Nothing was streamed, so the Mac never showed the phone as connected.
         #expect(!events.all.contains { if case .sessionStarted = $0 { true } else { false } })
     }
@@ -202,8 +208,8 @@ final class ClientConnectionTests {
         // Names with spaces resolve when a shortcut opens an app by name.
         #expect(InputInjector.application(bundleID: nil, name: "Activity Monitor") != nil)
         #expect(apps.map(\.name) == apps.map(\.name).sorted { $0.localizedStandardCompare($1) == .orderedAscending })
-        guard updates.count == 3, case .icon(let id, let png?) = updates[1],
-              case .icon("com.example.not-installed", nil) = updates[2] else {
+        guard updates.count == 4, case .icon(let id, let png?) = updates[1],
+              case .icon("com.example.not-installed", nil) = updates[2], case .macShortcuts = updates[3] else {
             Issue.record("expected one icon and one miss, got \(updates.dropFirst())"); return
         }
         #expect(id == apps[0].bundleID)
@@ -255,6 +261,11 @@ final class SinkRecorder: InputSink, @unchecked Sendable {
     /// Fails `openApp` for "Missing" so tests can check the error reaches the phone.
     func perform(_ action: MacAction) async throws {
         if case .openApp(_, "Missing") = action { throw MacActionError.appNotFound("Missing") }
+        // Like a real `shortcuts run`, which takes a moment to say it can't find one.
+        if case .runShortcut(_, "Slow Missing") = action {
+            try await Task.sleep(for: .milliseconds(1200))
+            throw MacActionError.shortcutFailed("Slow Missing", reason: "Couldn’t find shortcut")
+        }
         lock.withLock { _actions.append(action) }
     }
 }

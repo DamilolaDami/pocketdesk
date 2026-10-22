@@ -58,6 +58,13 @@ public final class SessionStore {
         self.shortcuts = shortcuts
     }
 
+    /// The target Mac's Shortcuts-app shortcuts, for "Run Mac Shortcut".
+    public private(set) var macShortcuts: [MacShortcut] = []
+
+    public func update(macShortcuts: [MacShortcut]) {
+        self.macShortcuts = macShortcuts
+    }
+
     public func update(macApps: [MacApp]) {
         self.macApps = macApps
     }
@@ -70,8 +77,8 @@ public final class SessionStore {
         self.catalogStatus = catalogStatus
     }
 
-    public func post(notice text: String) {
-        notice = Notice(text: text)
+    public func post(notice text: String, kind: Notice.Kind = .problem) {
+        notice = Notice(text: text, kind: kind)
     }
 
     public func dismiss(_ notice: Notice) {
@@ -80,8 +87,12 @@ public final class SessionStore {
 }
 
 public struct Notice: Sendable, Equatable, Identifiable {
+    /// Something went wrong, or something went right (a shortcut ran, a copy arrived).
+    public enum Kind: Sendable { case problem, done }
+
     public var id = UUID()
     public var text: String
+    public var kind: Kind = .problem
 }
 
 public struct StreamStats: Sendable, Equatable {

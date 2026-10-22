@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/10`, four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 11), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -263,6 +263,23 @@ The person at the Mac always knows and controls who is using it:
 - **Limits:** iOS keeps some combinations for itself, like ⌘-Space and, on iPad, ⌘-Tab. Use
   the bar for those. Text typed without a modifier still goes as Unicode (`insertText`), so
   any language works.
+
+## Routines and Mac Shortcuts (protocol v11)
+
+- **Mac Shortcuts:** `MacAction.runShortcut(id:name:)` runs one from the Mac's Shortcuts app
+  with `/usr/bin/shortcuts run`, by identifier so a rename doesn't break the tile. The catalog
+  connection also sends `listMacShortcuts` (answered from `shortcuts list --show-identifiers`)
+  for the editor's picker and the quick-picks sheet. The Mac waits up to 4 s for the result,
+  so "Couldn't find shortcut" reaches the phone; a longer shortcut counts as started. Its
+  output is discarded, since a big one would fill the pipe and stall it.
+- **Steps:** `MacAction.steps([MacAction])` runs actions in order and stops at the first that
+  fails ("Step 2: …"). One level deep, at most 20 steps, `wait(milliseconds:)` up to 30 s,
+  checked on the Mac (`MacAction.isValid`) before anything runs.
+- **Volume:** `setVolume(0–100)` goes through Core Audio (`SystemVolume`). AppleScript's
+  `set volume` silently does nothing from the hardened-runtime host.
+- Running a Mac Shortcut adds no new power: the person at the Mac made it, and a paired phone
+  could already click it in the Mac's menu bar. Arbitrary shell commands are deliberately not
+  an action.
 
 ## Shortcuts outside the app (protocol v8)
 

@@ -16,12 +16,19 @@ struct ShortcutDraft: Identifiable {
         ShortcutDraft(shortcut: preset.shortcut.copy(), isNew: true)
     }
 
+    /// One of the Mac's Shortcuts-app shortcuts as a tile.
+    static func from(_ macShortcut: MacShortcut) -> ShortcutDraft {
+        ShortcutDraft(shortcut: Shortcut(name: macShortcut.name, symbol: "square.stack.3d.up.fill", color: .indigo,
+                                         action: .runShortcut(id: macShortcut.id, name: macShortcut.name)), isNew: true)
+    }
+
     static func editing(_ shortcut: Shortcut) -> ShortcutDraft {
         ShortcutDraft(shortcut: shortcut, isNew: false)
     }
 }
 
 /// Create or edit a shortcut, with a live preview. New ones usually start from a quick pick.
+/// The first step is edited in place; more steps ("Then") make it a routine.
 struct ShortcutEditor: View {
     let controller: SessionController
     let isNew: Bool
@@ -30,42 +37,21 @@ struct ShortcutEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var shortcut: Shortcut
-    @State private var kind: Kind
-    @State private var website: String
-    @State private var appName: String
-    /// Set when picked from the Mac's list or a popular app; typed names go by name.
-    @State private var appBundleID: String?
-    @State private var keyPreset: String
-
-    private enum Kind: String, CaseIterable {
-        case website = "Website", app = "App", control = "Mac Control"
-    }
+    @State private var first: ActionDraft
+    @State private var more: [StepDraft]
 
     init(controller: SessionController, draft: ShortcutDraft, save: @escaping (Shortcut) -> Void, delete: (() -> Void)?) {
         self.controller = controller
         isNew = draft.isNew
-        _appBundleID = State(initialValue: draft.shortcut.appBundleID)
         self.save = save
         self.delete = delete
         _shortcut = State(initialValue: draft.shortcut)
-        let controls = ShortcutPreset.all.filter { $0.category == .controls }
-        switch draft.shortcut.action {
-        case .openURL(let url):
-            _kind = State(initialValue: .website)
-            _website = State(initialValue: url.replacing(/^https?:\/\/(www\.)?/, with: ""))
-            _appName = State(initialValue: "")
-            _keyPreset = State(initialValue: controls[0].id)
-        case .openApp(_, let name):
-            _kind = State(initialValue: .app)
-            _website = State(initialValue: "")
-            _appName = State(initialValue: name)
-            _keyPreset = State(initialValue: controls[0].id)
-        case .keystroke, .media:
-            _kind = State(initialValue: .control)
-            _website = State(initialValue: "")
-            _appName = State(initialValue: "")
-            _keyPreset = State(initialValue: controls.first { $0.shortcut.action == draft.shortcut.action }?.id
-                                ?? controls[0].id)
+        if case .steps(let steps) = draft.shortcut.action, let head = steps.first {
+            _first = State(initialValue: ActionDraft(head))
+            _more = State(initialValue: steps.dropFirst().map { StepDraft(draft: ActionDraft($0)) })
+        } else {
+            _first = State(initialValue: ActionDraft(draft.shortcut.action))
+            _more = State(initialValue: [])
         }
     }
 
@@ -88,17 +74,37 @@ struct ShortcutEditor: View {
                 }
 
                 Section {
-                    Picker("Does", selection: $kind) {
-                        ForEach(Kind.allCases, id: \.self) { Text($0.rawValue) }
-                    }
-                    .pickerStyle(.segmented)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
-                    actionFields
+                    ActionFields(controller: controller, draft: $first, kinds: ActionDraft.Kind.actions,
+                                 picked: named)
                 } header: {
-                    Text("Action")
+                    Text(more.isEmpty ? "Action" : "First")
                 } footer: {
-                    Text(actionFooter)
+                    Text(first.footer)
+                }
+
+                Section {
+                    ForEach($more) { $step in
+                        StepRow(controller: controller, step: $step)
+                    }
+                    .onDelete { more.remove(atOffsets: $0) }
+                    .onMove { more.move(fromOffsets: $0, toOffset: $1) }
+                    if more.count + 1 < MacAction.maxSteps {
+                        Menu {
+                            ForEach(ActionDraft.Kind.allCases.reversed(), id: \.self) { kind in
+                                Button(kind.stepTitle, systemImage: kind.symbol) {
+                                    withAnimation { more.append(StepDraft(draft: ActionDraft(kind: kind))) }
+                                }
+                            }
+                        } label: {
+                            Label("Add Step", systemImage: "plus.circle.fill")
+                        }
+                    }
+                } header: {
+                    if !more.isEmpty { Text("Then") }
+                } footer: {
+                    Text(more.isEmpty
+                         ? "Add steps to make a routine, like opening Netflix, waiting a moment, then going full screen."
+                         : "Steps run in order. If one can't be done, the rest are skipped.")
                 }
 
                 Section {
@@ -142,52 +148,6 @@ struct ShortcutEditor: View {
     }
 
     // MARK: Sections
-
-    @ViewBuilder private var actionFields: some View {
-        switch kind {
-        case .website:
-            TextField("netflix.com", text: $website)
-                .keyboardType(.URL)
-                .textContentType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-        case .app:
-            NavigationLink {
-                MacAppPicker(controller: controller, selected: appBundleID) { pick($0) }
-            } label: {
-                HStack(spacing: 12) {
-                    if let appBundleID {
-                        AppIconImage(bundleID: appBundleID, png: controller.store.appIcons[appBundleID], size: 30)
-                    } else {
-                        Image(systemName: "square.grid.3x3.fill").foregroundStyle(Brand.accent).frame(width: 30)
-                    }
-                    Text(appName.isEmpty ? "Choose an App" : appName)
-                        .foregroundStyle(appName.isEmpty ? Brand.accent : .primary)
-                }
-            }
-            TextField("Or type its name", text: Binding(get: { appBundleID == nil ? appName : "" }, set: { name in
-                appName = name
-                appBundleID = nil
-            }))
-            .textInputAutocapitalization(.words)
-            .autocorrectionDisabled()
-        case .control:
-            Picker("Press", selection: $keyPreset) {
-                ForEach(controlPresets) { preset in
-                    Text("\(preset.shortcut.name)  \(preset.shortcut.action.summary)").tag(preset.id)
-                }
-            }
-            .pickerStyle(.navigationLink)
-        }
-    }
-
-    private var actionFooter: String {
-        switch kind {
-        case .website: "Opens in the Mac's default browser."
-        case .app: "Opens the app, or brings it to the front if it's already running."
-        case .control: "Presses the keys on the Mac. Play / Pause works on whatever is playing, like Netflix in Safari."
-        }
-    }
 
     private var colorPicker: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
@@ -237,9 +197,6 @@ struct ShortcutEditor: View {
 
     // MARK: Building the shortcut
 
-    private var appPresets: [ShortcutPreset] { ShortcutPreset.all.filter { $0.category == .apps } }
-    private var controlPresets: [ShortcutPreset] { ShortcutPreset.all.filter { $0.category == .controls } }
-
     /// The shortcut as it would be saved right now.
     private var preview: Shortcut {
         var result = shortcut
@@ -248,30 +205,22 @@ struct ShortcutEditor: View {
     }
 
     private var action: MacAction? {
-        switch kind {
-        case .website:
-            Self.url(from: website).map(MacAction.openURL)
-        case .app:
-            appName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : .openApp(
-                // A picked app keeps its bundle ID (robust to renamed apps); typed ones go by name.
-                bundleID: appBundleID ?? appPresets.first { $0.shortcut.name == appName }?.shortcut.appBundleID,
-                name: appName.trimmingCharacters(in: .whitespaces))
-        case .control:
-            controlPresets.first { $0.id == keyPreset }?.shortcut.action
-        }
+        guard let head = first.action else { return nil }
+        if more.isEmpty { return head }
+        let rest = more.compactMap(\.draft.action)
+        guard rest.count == more.count else { return nil }
+        return .steps([head] + rest)
     }
 
     private var canSave: Bool {
-        !shortcut.name.trimmingCharacters(in: .whitespaces).isEmpty && action != nil
+        !shortcut.name.trimmingCharacters(in: .whitespaces).isEmpty && action?.isValid == true
     }
 
-    /// An app from the Mac's list: named after it unless you've named the shortcut yourself.
-    private func pick(_ app: MacApp) {
-        let previousName = appName
-        appName = app.name
-        appBundleID = app.bundleID
-        if shortcut.name.isEmpty || shortcut.name == previousName { shortcut.name = app.name }
-        if shortcut.symbol == "bolt.fill" { shortcut.symbol = "app.fill" }
+    /// A Mac app or Mac Shortcut picked for the first step: the shortcut takes its name
+    /// unless you've named it yourself.
+    private func named(_ name: String, previous: String, symbol: String) {
+        if shortcut.name.isEmpty || shortcut.name == previous { shortcut.name = name }
+        if shortcut.symbol == "bolt.fill" { shortcut.symbol = symbol }
     }
 
     /// "netflix.com" → "https://netflix.com"; full URLs and app schemes ("spotify:") pass through.

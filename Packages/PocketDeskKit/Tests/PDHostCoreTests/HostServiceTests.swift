@@ -320,6 +320,25 @@ final class HostServiceTests {
         #expect(!events.all.contains { if case .sessionStarted = $0 { true } else { false } })
     }
 
+    @Test func runsStepsAndRefusesOnesPastTheLimits() async throws {
+        try pinPhone()
+        let port = try await startService()
+        let input = input
+        let steps = MacAction.steps([.media(.playPause), .wait(milliseconds: 10), .setVolume(40)])
+        try await connect(port: port) { session in
+            var control = PhoneControl(session)
+            try await session.send(.hello(Hello(deviceName: "Test iPhone", viewport: Viewport(width: 0, height: 0, scale: 1),
+                                                mode: .catalog)))
+            guard case .helloAck? = try await control.next() else { Issue.record("expected helloAck"); return }
+            try await session.send(.run(.steps([.steps([.media(.mute)])])))
+            #expect(try await control.next() == .actionFailed("That shortcut has too many steps or too long a wait."))
+            try await session.send(.run(steps))
+            try await session.send(.bye(reason: "done"))
+            while (try? await control.next()) != nil {}
+        }
+        #expect(input.actions == [steps])
+    }
+
     /// Siri and widgets run shortcuts without streaming; asking first still applies.
     @Test func askBeforeConnectingCoversShortcutsFromSiri() async throws {
         try pinPhone()
@@ -396,6 +415,26 @@ final class HostServiceTests {
             #expect(try await session.controlMessages.first { _ in true } == .pairResult(accepted: false))
         }
         #expect(!events.all.contains { if case .approvalRequested = $0 { true } else { false } })
+    }
+}
+
+@Suite struct MacShortcutListTests {
+    @Test func aMissingMacShortcutSaysSo() async {
+        await #expect(throws: MacActionError.self) {
+            try await InputInjector().perform(.runShortcut(id: nil, name: "PocketDesk Test That Does Not Exist"))
+        }
+    }
+
+    @Test func parsesTheShortcutsCommand() {
+        let output = """
+        Movie Night (7DC33540-3D02-4FB6-A1BC-5A12E2FE3B16)
+        Focus (work) (A7DFF966-128A-4D2C-8B63-A022EE2AD9EC)
+        not a shortcut line
+        """
+        #expect(InstalledApps.parseShortcuts(output) == [
+            MacShortcut(id: "7DC33540-3D02-4FB6-A1BC-5A12E2FE3B16", name: "Movie Night"),
+            MacShortcut(id: "A7DFF966-128A-4D2C-8B63-A022EE2AD9EC", name: "Focus (work)"),
+        ])
     }
 }
 

@@ -129,6 +129,10 @@ Each change goes to the phone as `linkQuality`; from the second rung down the ph
 "Weak connection" pill. Frames the encoder skips at low bitrates come back as dropped
 `EncodedFrame`s so they free their in-flight slot.
 
+To try it on a fast LAN, launch the Mac app with `POCKETDESK_SIMULATE_KBPS=300` (see
+`ThrottledSession`). If a resize can't find the source (the screen locked, say), the stream
+keeps its size and only bitrate and frame rate drop.
+
 ## Display selection (protocol v4)
 
 The stream screen has **Displays** beside **Windows**. `helloAck` provides display names,
@@ -220,6 +224,15 @@ transitions.** No third-party architecture framework.
 We're skipping TCA (The Composable Architecture) because it adds a big dependency and
 learning curve, and Observation + actors + a reducer gives the same testability for an app
 this size. Revisit if feature count explodes.
+
+## Network.framework on iOS
+
+Releasing a QUIC stream or datagram flow after the connection is gone traps on iOS
+("nw_connection_set_queue called after nw_connection_start"). The host tears connections
+down whenever it likes (its TLS gate turns away unknown phones, or the Mac quits), so the
+phone never releases its streams: `QUICPeerSession` parks them in `Retired`. The host opens
+its media streams on first use and sends each frame to completion even when its pump is
+cancelled, since half a frame would corrupt the stream.
 
 ## Security
 

@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 import PDProtocol
 import PDSecurity
 import Synchronization
@@ -25,24 +26,39 @@ public final class QUICPeerSession: PeerSession {
     public let audioFrames: AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>
 
     private let control: ControlStream
-    private let datagrams: QUIC.Datagrams<QUICDatagram>
-    /// Host only: video (tag 0) and audio (tag 1), opened on first use.
-    private let outbound: OutboundStreams?
+    private let datagrams: OnFirstUse<QUIC.Datagrams<QUICDatagram>>
+    /// Host only, opened on first use (see `accept`).
+    private let video: OnFirstUse<QUIC.Stream<QUICStream>>?
+    private let audio: OnFirstUse<QUIC.Stream<QUICStream>>?
     private let readers: Mutex<[Task<Void, Never>]>
     private let finishAll: @Sendable () -> Void
 
-    private init(peer: Fingerprint, control: ControlStream, datagrams: QUIC.Datagrams<QUICDatagram>,
-                 outbound: OutboundStreams?, channels: Channels, readers: [Task<Void, Never>]) {
+    private init(peer: Fingerprint, control: ControlStream, datagrams: OnFirstUse<QUIC.Datagrams<QUICDatagram>>,
+                 video: OnFirstUse<QUIC.Stream<QUICStream>>?, audio: OnFirstUse<QUIC.Stream<QUICStream>>?,
+                 channels: Channels, readers: [Task<Void, Never>]) {
         self.peer = peer
         self.control = control
         self.datagrams = datagrams
         self.audioFrames = channels.audio.stream
-        self.outbound = outbound
+        self.video = video
+        self.audio = audio
         self.controlMessages = channels.control.stream
         self.inputEvents = channels.input.stream
         self.videoFrames = channels.video.stream
         self.readers = Mutex(readers)
         self.finishAll = channels.finish
+    }
+
+    deinit {
+        // On iOS, releasing a stream after the host has already torn the connection down
+        // (it turned this phone away at the TLS gate, or the Mac quit) traps inside
+        // Network.framework ("nw_connection_set_queue called after nw_connection_start").
+        // The phone can't make the host wait, so its streams are kept instead: a few bytes
+        // per session.
+        if video == nil {
+            Retired.keep(control)
+            Retired.keep(datagrams)
+        }
     }
 
     // MARK: Host side
@@ -100,13 +116,14 @@ public final class QUICPeerSession: PeerSession {
         // Not opened yet: a phone that's turned away, or only asks for the app list, never
         // gets media streams. Streams arriving at a phone as the host hangs up trip a
         // Network.framework trap there.
-        let outbound = OutboundStreams { tag in
+        let open: @Sendable (UInt8) async throws -> QUIC.Stream<QUICStream> = { tag in
             let stream = try await connection.openStream(directionality: .unidirectional)
             try await stream.send([tag])
             return stream
         }
 
-        return QUICPeerSession(peer: peer, control: control, datagrams: datagrams, outbound: outbound,
+        return QUICPeerSession(peer: peer, control: control, datagrams: OnFirstUse { datagrams },
+                               video: OnFirstUse { try await open(0) }, audio: OnFirstUse { try await open(1) },
                                channels: channels, readers: [controlReader, inputReader])
     }
 
@@ -129,6 +146,7 @@ public final class QUICPeerSession: PeerSession {
         let videoReader = Task {
             do {
                 try await connection.inboundStreams { stream in
+                    defer { Retired.keep(stream) } // see `deinit`
                     let tag = try await stream.receive(exactly: 1).content
                     guard let kind = tag.first, kind <= 1 else { throw WireError.unknownTag }
                     while true {
@@ -148,6 +166,8 @@ public final class QUICPeerSession: PeerSession {
                 channels.audio.continuation.finish()
                 channels.video.continuation.finish()
             } catch {
+                Logger(subsystem: "com.pocketdesk", category: "transport")
+                    .error("Media streams ended: \(String(describing: error), privacy: .public)")
                 channels.audio.continuation.finish(throwing: error)
                 channels.video.continuation.finish(throwing: error)
             }
@@ -160,7 +180,8 @@ public final class QUICPeerSession: PeerSession {
             throw error
         }
 
-        return QUICPeerSession(peer: host, control: control, datagrams: datagrams, outbound: nil,
+        return QUICPeerSession(peer: host, control: control, datagrams: OnFirstUse(keptAfterClose: true) { datagrams },
+                               video: nil, audio: nil,
                                channels: channels, readers: [controlReader, videoReader])
     }
 
@@ -171,29 +192,35 @@ public final class QUICPeerSession: PeerSession {
     }
 
     public func send(_ input: InputEvent) async throws {
-        try await datagrams.send(Data(input.encoded()))
+        try await datagrams.value.send(Data(input.encoded()))
     }
 
     /// Completes when QUIC has accepted the frame, which is the backpressure signal the
     /// host uses to drop frames instead of queueing them.
     public func send(frame header: VideoFrameHeader, payload: [UInt8]) async throws {
-        guard let outbound else { throw TransportError.wrongRole }
+        guard let video else { throw TransportError.wrongRole }
         var bytes: [UInt8] = []
         bytes.reserveCapacity(VideoFrameHeader.encodedSize + payload.count)
         header.encode(into: &bytes)
         bytes.append(contentsOf: payload)
-        try await outbound.stream(tag: 0).send(bytes)
+        try await Self.sendWhole(bytes, on: try await video.value)
     }
 
     public func send(audio header: AudioFrameHeader, payload: [UInt8]) async throws {
-        guard let outbound else { throw TransportError.wrongRole }
+        guard let audio else { throw TransportError.wrongRole }
         guard payload.count == Int(header.payloadLength), payload.count <= AudioFrameHeader.maxPayloadLength else {
             throw WireError.invalidValue
         }
         var bytes: [UInt8] = []
         header.encode(into: &bytes)
         bytes.append(contentsOf: payload)
-        try await outbound.stream(tag: 1).send(bytes)
+        try await Self.sendWhole(bytes, on: try await audio.value)
+    }
+
+    /// Sends one frame even if the caller is cancelled midway (the host restarts its pumps
+    /// on every source or size change): half a frame would corrupt the stream's framing.
+    private static func sendWhole(_ bytes: [UInt8], on stream: QUIC.Stream<QUICStream>) async throws {
+        try await Task { try await stream.send(bytes) }.value
     }
 
     /// Cancels setup-time readers and waits for them, for when `accept`/`open` fails partway.
@@ -213,40 +240,52 @@ public final class QUICPeerSession: PeerSession {
         for task in tasks { task.cancel() }
         finishAll()
         for task in tasks { await task.value }
-        await outbound?.close()
+        await datagrams.close()
+        await video?.close()
+        await audio?.close()
     }
 }
 
-/// The host's unidirectional media streams, each opened (and tagged) the first time it's
-/// sent on. Concurrent first sends share one open.
-private final class OutboundStreams: Sendable {
-    typealias Stream = QUIC.Stream<QUICStream>
-    private let open: @Sendable (UInt8) async throws -> Stream
-    private let streams = Mutex<[UInt8: Task<Stream, any Error>]>([:])
+/// A stream or datagram flow made the first time it's used (concurrent first uses share
+/// one), and dropped by `close()` so it can't outlive the connection's scope.
+private final class OnFirstUse<Value: Sendable>: Sendable {
+    private let make: @Sendable () async throws -> Value
+    private let made = Mutex<Task<Value, any Error>?>(nil)
+    /// Phone side: see `QUICPeerSession.deinit`.
+    private let keptAfterClose: Bool
 
-    init(open: @escaping @Sendable (UInt8) async throws -> Stream) {
-        self.open = open
+    init(keptAfterClose: Bool = false, _ make: @escaping @Sendable () async throws -> Value) {
+        self.keptAfterClose = keptAfterClose
+        self.make = make
     }
 
-    func stream(tag: UInt8) async throws -> Stream {
-        let open = open
-        let opening = streams.withLock { streams in
-            if let opening = streams[tag] { return opening }
-            let opening = Task { try await open(tag) }
-            streams[tag] = opening
-            return opening
+    var value: Value {
+        get async throws {
+            let make = make
+            let task = made.withLock { made in
+                if let made { return made }
+                let task = Task { try await make() }
+                made = task
+                return task
+            }
+            return try await task.value
         }
-        return try await opening.value
     }
 
-    /// Drops the streams so none outlives the connection's scope.
     func close() async {
-        let openings = streams.withLock { streams in
-            defer { streams = [:] }
-            return Array(streams.values)
+        let task = made.withLock { made in
+            defer { made = nil }
+            return made
         }
-        for opening in openings { _ = await opening.result }
+        _ = await task?.result
+        if keptAfterClose, let task { Retired.keep(task) }
     }
+}
+
+/// Phone-side streams that must never be released (see `QUICPeerSession.deinit`).
+private enum Retired {
+    private static let objects = Mutex<[any Sendable]>([])
+    static func keep(_ object: any Sendable) { objects.withLock { $0.append(object) } }
 }
 
 /// The four inbound channels, created before the readers that feed them.

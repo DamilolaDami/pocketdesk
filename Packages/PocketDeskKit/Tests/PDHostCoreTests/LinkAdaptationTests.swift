@@ -148,34 +148,4 @@ private struct TrustEveryone: PairingAuthority {
     func approve(peer: Fingerprint, deviceName: String, token: [UInt8]) async -> Bool { true }
 }
 
-/// The host end of a loopback pair whose video takes as long to send as it would over a link
-/// of `bitsPerSecond` (0 = unlimited).
-private final class ThrottledSession: PeerSession {
-    let inner: LoopbackSession
-    let bitsPerSecond: Atomic<Int>
-
-    init(_ inner: LoopbackSession, bitsPerSecond: Int) {
-        self.inner = inner
-        self.bitsPerSecond = Atomic(bitsPerSecond)
-    }
-
-    var controlMessages: AsyncThrowingStream<ControlMessage, any Error> { inner.controlMessages }
-    var inputEvents: AsyncThrowingStream<InputEvent, any Error> { inner.inputEvents }
-    var videoFrames: AsyncThrowingStream<(VideoFrameHeader, [UInt8]), any Error> { inner.videoFrames }
-    var audioFrames: AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error> { inner.audioFrames }
-
-    func send(_ message: ControlMessage) async throws { try await inner.send(message) }
-    func send(_ input: InputEvent) async throws { try await inner.send(input) }
-    func send(audio header: AudioFrameHeader, payload: [UInt8]) async throws { try await inner.send(audio: header, payload: payload) }
-
-    func send(frame header: VideoFrameHeader, payload: [UInt8]) async throws {
-        let bitsPerSecond = bitsPerSecond.load(ordering: .relaxed)
-        if bitsPerSecond > 0 {
-            try? await Task.sleep(for: .seconds(Double(payload.count * 8) / Double(bitsPerSecond)))
-        }
-        try await inner.send(frame: header, payload: payload)
-    }
-
-    func close() async { await inner.close() }
-}
 #endif

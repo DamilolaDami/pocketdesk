@@ -40,7 +40,7 @@ struct StreamScreen: View {
                 // Shown whatever the stream-info setting: it explains a softer picture.
                 if controller.store.link?.isWeak == true {
                     WeakConnectionPill()
-                        .padding(.top, 8)
+                        .padding(.top, topInset + 8)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
@@ -101,6 +101,11 @@ struct StreamScreen: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: controlsExpanded ? 450 : 72)
         }
+    }
+
+    /// The stream ignores the safe area; overlays still have to clear the Dynamic Island.
+    private var topInset: CGFloat {
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.keyWindow?.safeAreaInsets.top ?? 0
     }
 
     /// A Mac display fits a landscape phone far better; this flips without needing the

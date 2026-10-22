@@ -247,6 +247,23 @@ final class HostServiceTests {
         }
     }
 
+    /// The phone gave up waiting just before the Mac accepted, then scanned again.
+    @Test func pairedPhoneThatAsksAgainIsAccepted() async throws {
+        var store = TrustStore()
+        store.pin(PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone"))
+        try store.save(to: trustStoreURL)
+        let port = try await startService()
+
+        try await connect(port: port) { session in
+            var control = PhoneControl(session)
+            try await session.send(.pairRequest(PairRequest(token: Array(repeating: 1, count: 16), deviceName: "Test iPhone")))
+            #expect(try await control.next() == .pairResult(accepted: true))
+            try await session.send(.hello(Hello(deviceName: "Test iPhone", viewport: Viewport(width: 402, height: 874, scale: 3))))
+            guard case .helloAck? = try await control.next() else { Issue.record("expected helloAck"); return }
+            try await session.send(.bye(reason: "done"))
+        }
+    }
+
     @Test func unknownPhoneWithoutInviteCannotConnect() async throws {
         let port = try await startService()
         await #expect(throws: (any Error).self) {

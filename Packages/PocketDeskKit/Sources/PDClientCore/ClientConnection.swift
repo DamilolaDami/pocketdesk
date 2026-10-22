@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import Network
+import os
 import PDProtocol
 import PDSecurity
 import PDTransport
@@ -59,6 +60,8 @@ public actor ClientConnection {
         }
     }
 
+    static let log = Logger(subsystem: "com.pocketdesk", category: "connection")
+
     private let identity: DeviceIdentity
     private let request: Request
     private let display: VideoDisplay
@@ -93,10 +96,13 @@ public actor ClientConnection {
             try await QUICClient.connect(to: request.endpoint, identity: identity, host: request.hostFingerprint) { session in
                 try await self.drive(session, playbackID: playbackID)
             }
+            Self.log.info("Session ended normally")
             onEvent(.ended(reason: nil))
         } catch is CancellationError {
+            Self.log.info("Session cancelled")
             onEvent(.ended(reason: nil))
         } catch {
+            Self.log.error("Session ended: \(String(describing: error), privacy: .public)")
             onEvent(.ended(reason: Self.describe(error)))
         }
         inputs.continuation.finish()
@@ -140,7 +146,7 @@ public actor ClientConnection {
                                     onEvent: @escaping @Sendable (ClientEvent) -> Void,
                                     hostReason: HostReason, playbackID: UUID) async throws {
         // Whichever channel ends first ends the session.
-        try await withThrowingTaskGroup(of: Void.self) { group in
+        try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
                 for try await message in session.controlMessages {
                     switch message {
@@ -159,6 +165,7 @@ public actor ClientConnection {
                         continue
                     }
                 }
+                return "control"
             }
             group.addTask {
                 for try await (header, payload) in session.videoFrames {
@@ -166,20 +173,31 @@ public actor ClientConnection {
                         try await session.send(.requestKeyframe)
                     }
                 }
+                return "video"
             }
             group.addTask {
                 for try await (header, payload) in session.audioFrames {
                     try display.enqueueAudio(header: header, payload: payload, sessionID: playbackID)
                 }
+                return "audio"
             }
             group.addTask {
                 for await event in inputs { try await session.send(event) }
+                return "input"
             }
             group.addTask {
                 for await message in outbox { try await session.send(message) }
+                return "outbox"
             }
             defer { group.cancelAll() }
-            try await group.next()
+            do {
+                if let channel = try await group.next() {
+                    Self.log.info("The \(channel, privacy: .public) channel ended")
+                }
+            } catch {
+                Self.log.error("A channel failed: \(String(describing: error), privacy: .public)")
+                throw error
+            }
         }
     }
 
@@ -205,6 +223,9 @@ public actor ClientConnection {
         switch error {
         case let error as ClientError: error.description
         case TransportError.timedOut: "Couldn't reach the Mac. Is PocketDesk running on it?"
+        // The Mac's TLS gate turned this phone away: it isn't (or is no longer) paired.
+        case TransportError.connectionFailed(.posix(.EINVAL)), TransportError.connectionFailed(.tls):
+            "This Mac didn't recognize this iPhone. Pair again: on the Mac, choose Pair a Phone… from the PocketDesk menu."
         case TransportError.connectionFailed(let error): "Connection failed: \(error.localizedDescription)"
         case TransportError.closed: "The Mac closed the connection."
         default: error.localizedDescription

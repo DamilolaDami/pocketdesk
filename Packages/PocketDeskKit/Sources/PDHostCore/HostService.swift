@@ -194,7 +194,8 @@ public actor HostService: PairingAuthority {
         // would hide the same phone's live stream from the menu.
         let started = StartedFlag()
         let hostSession = HostSession(
-            session: session, peer: peer, configuration: .init(hostName: configuration.hostName),
+            session: ThrottledSession.fromEnvironment(session), peer: peer,
+            configuration: .init(hostName: configuration.hostName),
             frameSource: makeFrameSource(), input: input, pairing: self
         ) { [onEvent, started] event in
             switch event {

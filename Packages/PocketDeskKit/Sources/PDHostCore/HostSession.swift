@@ -3,6 +3,7 @@ import CoreGraphics
 import CoreMedia
 import CoreVideo
 import Foundation
+import os
 import PDProtocol
 import PDSecurity
 import PDTransport
@@ -93,6 +94,7 @@ public actor HostSession {
     /// A restart opens with a keyframe burst that isn't the link's fault: skip that window.
     private var settling = false
     static let minBitrateKbps = 800
+    static let log = Logger(subsystem: "com.pocketdesk.host", category: "session")
 
     public init(session: any PeerSession, peer: Fingerprint, configuration: Configuration,
                 frameSource: any FrameSource, input: any InputSink, pairing: any PairingAuthority,
@@ -122,8 +124,16 @@ public actor HostSession {
     private func runSession() async throws {
         var messages = session.controlMessages.makeAsyncIterator()
 
-        if await !pairing.isTrusted(peer) {
-            guard case .pairRequest(let request)? = try await messages.next() else {
+        var first = try await messages.next()
+        if await pairing.isTrusted(peer) {
+            // The phone gave up waiting just before the person at the Mac accepted, and asked
+            // again: it's already pinned, so say yes.
+            if case .pairRequest? = first {
+                try await session.send(.pairResult(accepted: true))
+                first = try await messages.next()
+            }
+        } else {
+            guard case .pairRequest(let request)? = first else {
                 await finish(with: .bye(reason: "Not paired with this Mac"))
                 return
             }
@@ -133,9 +143,10 @@ public actor HostSession {
                 return
             }
             try await session.send(.pairResult(accepted: true))
+            first = try await messages.next()
         }
 
-        guard case .hello(let hello)? = try await messages.next() else {
+        guard case .hello(let hello)? = first else {
             await finish(with: .bye(reason: "Expected hello"))
             return
         }
@@ -451,8 +462,14 @@ public actor HostSession {
                 do {
                     try await startStreaming(nil, keepingSource: true)
                 } catch {
-                    await finish(with: .bye(reason: Self.describeStreamingFailure(error)))
-                    return
+                    Self.log.error("Resize for the link failed (\(String(describing: self.currentSource), privacy: .public)): \(String(describing: error), privacy: .public)")
+                    // Resolving the source failed before the old stream was touched: keep it,
+                    // just slower. Otherwise there's nothing left to stream.
+                    guard encoder != nil, !pumpTasks.isEmpty else {
+                        await finish(with: .bye(reason: Self.describeStreamingFailure(error)))
+                        return
+                    }
+                    encoder?.setRate(bitrateKbps: streamBitrateKbps, fps: streamFPS)
                 }
             } else {
                 encoder?.setRate(bitrateKbps: streamBitrateKbps, fps: streamFPS)

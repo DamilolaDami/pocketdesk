@@ -1,22 +1,16 @@
 import PDClientCore
+import PDProtocol
 import SwiftUI
 
 struct ConnectingView: View {
     let hostName: String
+    var kind: MacKind?
     let cancel: () -> Void
 
     var body: some View {
         VStack(spacing: 28) {
             Spacer()
-            ZStack {
-                Circle()
-                    .fill(Brand.accent.opacity(0.12))
-                    .frame(width: 160, height: 160)
-                    .phaseAnimator([1.0, 1.15]) { circle, scale in
-                        circle.scaleEffect(scale)
-                    } animation: { _ in .easeInOut(duration: 1.1) }
-                MacGlyph(size: 96)
-            }
+            MacGlyph(kind: kind, size: 96, status: .waking)
             VStack(spacing: 8) {
                 Text("Connecting").font(.title2.weight(.bold))
                 Text(hostName).font(.headline).foregroundStyle(.secondary)

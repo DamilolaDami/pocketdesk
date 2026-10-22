@@ -9,6 +9,7 @@ public struct BrowsedHost: Sendable, Hashable, Identifiable {
     /// From the TXT record; matches `PairingInvite.hostID`.
     public var hostID: UUID?
     public var protocolVersion: UInt16?
+    public var kind: MacKind?
     public var endpoint: NWEndpoint
 }
 
@@ -24,6 +25,7 @@ public enum HostBrowser {
                             BrowsedHost(id: endpoint.id, name: endpoint.name,
                                         hostID: endpoint.txtRecord["id"].flatMap(UUID.init(uuidString:)),
                                         protocolVersion: endpoint.txtRecord["v"].flatMap { UInt16($0) },
+                                        kind: endpoint.txtRecord["k"].flatMap(MacKind.init(rawValue:)),
                                         endpoint: endpoint.nwEndpoint)
                         })
                     }

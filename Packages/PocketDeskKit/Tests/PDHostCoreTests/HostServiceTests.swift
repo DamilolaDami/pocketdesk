@@ -243,7 +243,10 @@ final class HostServiceTests {
         try await connect(port: port) { session in
             try await session.send(.hello(Hello(deviceName: "Test iPhone", viewport: Viewport(width: 402, height: 874, scale: 3))))
             var control = PhoneControl(session)
-            guard case .helloAck? = try await control.next() else { Issue.record("expected helloAck"); return }
+            guard case .helloAck(let ack)? = try await control.next() else { Issue.record("expected helloAck"); return }
+            // How to wake this Mac later: its real interfaces, over the encrypted session.
+            let wake = try #require(ack.wake)
+            #expect(wake.interfaces.allSatisfy { WakeOnLAN.parse($0.mac) != nil && $0.ipv4 != nil })
             try await session.send(.bye(reason: "done"))
         }
     }
@@ -370,6 +373,32 @@ final class HostServiceTests {
             #expect(try await session.controlMessages.first { _ in true } == .pairResult(accepted: false))
         }
         #expect(!events.all.contains { if case .approvalRequested = $0 { true } else { false } })
+    }
+}
+
+@Suite struct WakeAddressTests {
+    @Test func readsThisMacsInterfaces() throws {
+        // Dev Macs have Wi-Fi, CI machines Ethernet: either way an en* with an address.
+        let first = try #require(WakeAddresses.interfaces().first)
+        #expect(WakeOnLAN.parse(first.mac) != nil)
+        let ip = try #require(first.ipv4), broadcast = try #require(first.broadcast)
+        #expect(ip.split(separator: ".").count == 4 && broadcast.split(separator: ".").count == 4)
+        #expect(ip.split(separator: ".").first == broadcast.split(separator: ".").first)
+    }
+
+    @Test func knowsWhatKindOfMacItIs() {
+        #expect(MacModel.kind(model: "MacBookPro18,3", hasBattery: true) == .laptop)
+        #expect(MacModel.kind(model: "Macmini9,1", hasBattery: false) == .mini)
+        #expect(MacModel.kind(model: "iMac21,1", hasBattery: false) == .imac)
+        #expect(MacModel.kind(model: "Mac13,1", hasBattery: false) == .studio)
+        #expect(MacModel.kind(model: "Mac14,2", hasBattery: true) == .laptop)
+        #expect(MacModel.kind(model: "Mac99,1", hasBattery: false) == .desktop)
+    }
+
+    @Test func parsesTheWakeSetting() {
+        #expect(WakeAddresses.parseWomp(" sleep                1\n womp                 1\n") == true)
+        #expect(WakeAddresses.parseWomp(" womp                 0\n") == false)
+        #expect(WakeAddresses.parseWomp(" sleep 1\n") == nil)
     }
 }
 

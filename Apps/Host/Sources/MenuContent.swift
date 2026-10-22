@@ -8,6 +8,8 @@ struct MenuContent: View {
     @State private var permissions = HostPermissions.current()
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var askBeforeConnecting = false
+    /// `nil` until checked, or if `pmset` couldn't say.
+    @State private var wakeForNetworkAccess: Bool?
     @Environment(\.openWindow) private var openWindow
 
     private var state: HostState { controller.store.state }
@@ -18,6 +20,10 @@ struct MenuContent: View {
 
             if !permissions.allGranted {
                 PermissionsPanel(permissions: permissions)
+            }
+
+            if permissions.allGranted, wakeForNetworkAccess == false {
+                WakeHint()
             }
 
             if let approval = state.pendingApprovals.first {
@@ -52,6 +58,12 @@ struct MenuContent: View {
             while !Task.isCancelled {
                 permissions = .current()
                 try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                wakeForNetworkAccess = await Task.detached { WakeAddresses.wakeForNetworkAccess() }.value
+                try? await Task.sleep(for: .seconds(5))
             }
         }
     }
@@ -152,6 +164,33 @@ private struct PermissionsPanel: View {
                 Button("Open") { HostPermissions.request(kind) }
                     .buttonStyle(.glass)
                     .controlSize(.small)
+            }
+        }
+    }
+}
+
+/// "Wake for network access" is off, so a phone can't wake this Mac from sleep.
+private struct WakeHint: View {
+    var body: some View {
+        Panel {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "power.circle")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Let your phone wake this Mac").font(.callout.weight(.semibold))
+                    Text("Turn on “Wake for network access” in Battery › Options (Energy on desktops).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open Settings") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Battery-Settings.extension") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                }
             }
         }
     }

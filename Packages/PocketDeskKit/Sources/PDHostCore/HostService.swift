@@ -99,7 +99,8 @@ public actor HostService: PairingAuthority {
     public func run() async throws {
         onEvent(.pairedPeersChanged(Array(trustStore.peers.values)))
         let advertisement = configuration.advertise
-            ? QUICHostListener.Advertisement(name: configuration.hostName, hostID: configuration.hostID)
+            ? QUICHostListener.Advertisement(name: configuration.hostName, hostID: configuration.hostID,
+                                             kind: MacModel.current())
             : nil
         let listener = try QUICHostListener(identity: identity, advertise: advertisement) { [weak self] peer in
             await self?.mayConnect(peer) ?? false
@@ -232,7 +233,7 @@ public actor HostService: PairingAuthority {
         let started = StartedFlag()
         let hostSession = HostSession(
             session: ThrottledSession.fromEnvironment(session), peer: peer,
-            configuration: .init(hostName: configuration.hostName),
+            configuration: .init(hostName: configuration.hostName, wake: WakeAddresses.current()),
             frameSource: makeFrameSource(), input: input, pairing: self
         ) { [onEvent, started] event in
             switch event {

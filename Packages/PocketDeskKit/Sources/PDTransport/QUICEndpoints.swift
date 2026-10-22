@@ -27,10 +27,12 @@ public final class QUICHostListener: Sendable {
     public struct Advertisement: Sendable {
         public var name: String
         public var hostID: UUID
+        public var kind: MacKind?
 
-        public init(name: String, hostID: UUID) {
+        public init(name: String, hostID: UUID, kind: MacKind? = nil) {
             self.name = name
             self.hostID = hostID
+            self.kind = kind
         }
     }
 
@@ -43,7 +45,9 @@ public final class QUICHostListener: Sendable {
                 authorize: @escaping @Sendable (Fingerprint) async -> Bool) throws {
         let quic = QUICOptions.make(identity: identity, validate: authorize)
         if let advertisement {
-            let txt = NWTXTRecord(["id": advertisement.hostID.uuidString, "v": String(protocolVersion)])
+            var fields = ["id": advertisement.hostID.uuidString, "v": String(protocolVersion)]
+            if let kind = advertisement.kind { fields["k"] = kind.rawValue }
+            let txt = NWTXTRecord(fields)
             listener = try NetworkListener(for: .bonjour(name: advertisement.name, type: bonjourServiceType, txtRecord: txt)) { quic }
         } else {
             listener = try NetworkListener { quic }

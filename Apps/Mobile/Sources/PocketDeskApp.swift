@@ -62,7 +62,7 @@ struct RootView: View {
             }
             .transition(.move(edge: .bottom).combined(with: .opacity))
         case .connecting(let host):
-            ConnectingView(hostName: host.name) { controller.disconnect() }
+            ConnectingView(hostName: host.name, kind: host.kind) { controller.disconnect() }
                 .transition(.opacity)
         case .streaming(let host, let config, _):
             StreamScreen(controller: controller, hostName: host.name, config: config)

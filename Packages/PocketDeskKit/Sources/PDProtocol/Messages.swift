@@ -1,8 +1,8 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 5
+public let protocolVersion: UInt16 = 6
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
-public let alpn = "pocketdesk/5"
+public let alpn = "pocketdesk/6"
 
 /// Bonjour service type advertised by the host on the local network.
 public let bonjourServiceType = "_pocketdesk._udp"
@@ -118,11 +118,40 @@ public struct HelloAck: Codable, Sendable, Equatable {
     public var version: UInt16
     public var hostName: String
     public var displays: [DisplayInfo]
+    /// How to wake this Mac from sleep later. Sent only inside the encrypted session.
+    public var wake: WakeInfo?
 
-    public init(version: UInt16 = protocolVersion, hostName: String, displays: [DisplayInfo]) {
+    public init(version: UInt16 = protocolVersion, hostName: String, displays: [DisplayInfo], wake: WakeInfo? = nil) {
         self.version = version
         self.hostName = hostName
         self.displays = displays
+        self.wake = wake
+    }
+}
+
+/// The Mac's network interfaces, for Wake-on-LAN once it's asleep.
+public struct WakeInfo: Codable, Sendable, Equatable {
+    public struct Interface: Codable, Sendable, Equatable {
+        /// Hardware address, "aa:bb:cc:dd:ee:ff".
+        public var mac: String
+        /// Its IPv4 address and subnet broadcast address when the Mac was last seen.
+        public var ipv4: String?
+        public var broadcast: String?
+
+        public init(mac: String, ipv4: String? = nil, broadcast: String? = nil) {
+            self.mac = mac
+            self.ipv4 = ipv4
+            self.broadcast = broadcast
+        }
+    }
+
+    public var interfaces: [Interface]
+    /// The Mac's "Wake for network access" setting, when it could tell.
+    public var wakeForNetworkAccess: Bool?
+
+    public init(interfaces: [Interface], wakeForNetworkAccess: Bool? = nil) {
+        self.interfaces = interfaces
+        self.wakeForNetworkAccess = wakeForNetworkAccess
     }
 }
 

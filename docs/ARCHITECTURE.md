@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/5`, four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/6`, four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -239,6 +239,29 @@ The person at the Mac always knows and controls who is using it:
   `PairingAuthority.allowSession`, shown as an approval with no code. Silence after the
   approval timeout is a no. A phone that has just been paired isn't asked a second time.
 - The menu bar icon changes while any phone is connected.
+
+## Waking the Mac (protocol v6)
+
+Each `helloAck` carries `WakeInfo`, sent only inside the encrypted session:
+- each `en*` interface's MAC, IPv4 and subnet broadcast address,
+- whether `pmset`'s `womp` ("Wake for network access") is on.
+
+The phone keeps the last useful one per Mac (`PerMac<WakeInfo>`, `wake.json`). A paired Mac
+that isn't advertising shows as Asleep with **Wake & Connect**. That sends magic packets
+(`WakeOnLAN`, `WakeSender`) to the subnet broadcast, 255.255.255.255 and the Mac's last
+address, on ports 9 and 7, at 0, 3, 8 and 15 s. The phone connects as soon as the Mac shows
+up in Bonjour, or gives up after 40 s with a hint about the setting (`WakeAttempts`, a pure
+value with tests). When the setting is off, the Mac's menu bar panel says so.
+
+**iOS limit:** broadcasting needs Apple's `com.apple.developer.networking.multicast`
+entitlement, which Apple grants on request. Until the app has it, a real iPhone's broadcasts
+fail and only the direct packet goes out. That direct packet reliably reaches a Mac on
+Ethernet, but often not one asleep on Wi-Fi. The Simulator isn't restricted. A Bonjour Sleep
+Proxy (an Apple TV or HomePod) keeps a sleeping Mac advertised and wakes it on connect,
+with no packets needed.
+
+The Mac also advertises what kind of Mac it is in its TXT record (`k`: laptop, imac, mini,
+studio, pro, desktop; `MacModel`), so the phone draws the right device, even while it's asleep.
 
 ## Network.framework on iOS
 

@@ -24,6 +24,12 @@ public final class SessionController {
 
     private let displayPreferencesURL: URL
     private var displayPreferences: DisplayPreferences
+    private let wakeBookURL: URL
+    private var wakeBook: PerMac<WakeInfo>
+    private let macKindsURL: URL
+    private var macKinds: PerMac<MacKind>
+    private var wakeAttempts = WakeAttempts()
+    private var wakeTasks: [UUID: Task<Void, Never>] = [:]
     private var connectionHostID: UUID?
     private var activeConnectionID: UUID?
 
@@ -50,7 +56,13 @@ public final class SessionController {
                 trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json"),
                 shortcutsURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/shortcuts.json"),
                 cacheDirectory: URL = URL.cachesDirectory.appending(path: "PocketDesk"),
-                displayPreferencesURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/displays.json")) {
+                displayPreferencesURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/displays.json"),
+                wakeBookURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/wake.json"),
+                macKindsURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/mac-kinds.json")) {
+        self.wakeBookURL = wakeBookURL
+        self.wakeBook = (try? PerMac.load(from: wakeBookURL)) ?? PerMac()
+        self.macKindsURL = macKindsURL
+        self.macKinds = (try? PerMac.load(from: macKindsURL)) ?? PerMac()
         self.displayPreferencesURL = displayPreferencesURL
         self.displayPreferences = (try? DisplayPreferences.load(from: displayPreferencesURL)) ?? DisplayPreferences()
         self.cacheDirectory = cacheDirectory
@@ -83,7 +95,23 @@ public final class SessionController {
 
     private func update(_ hosts: [BrowsedHost]) {
         browsed = Dictionary(hosts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // Remember what each paired Mac looks like, to draw it while it's offline too.
+        var kindsChanged = false
+        for host in hosts {
+            guard let kind = host.kind, let hostID = host.hostID, trustStore.peer(hostID: hostID) != nil,
+                  macKinds[hostID] != kind else { continue }
+            macKinds[hostID] = kind
+            kindsChanged = true
+        }
+        if kindsChanged { try? macKinds.save(to: macKindsURL) }
+        let woke = wakeAttempts.woke(Set(hosts.compactMap(\.hostID)))
+        for host in woke { wakeTasks.removeValue(forKey: host)?.cancel() }
         store.send(.hostsChanged(discoveredHosts()))
+        // A Mac we were waking is up: connect, unless something else has started meanwhile.
+        if let hostID = woke.first, case .discovering = store.state,
+           let host = discoveredHosts().first(where: { $0.hostID == hostID && $0.isOnline }) {
+            select(host)
+        }
         if let invite = pendingInvite, let host = hosts.first(where: { $0.hostID == invite.hostID }) {
             pendingInvite = nil
             beginPairing(invite, with: host)
@@ -94,14 +122,16 @@ public final class SessionController {
     private func discoveredHosts() -> [DiscoveredHost] {
         let online = browsed.values.map { host in
             DiscoveredHost(id: host.id, name: host.name, hostID: host.hostID,
-                           isPaired: host.hostID.flatMap(trustStore.peer(hostID:)) != nil)
+                           isPaired: host.hostID.flatMap(trustStore.peer(hostID:)) != nil, kind: host.kind)
         }
         let onlineIDs = Set(online.compactMap(\.hostID))
         let offline = trustStore.peers.values
             .filter { peer in peer.hostID.map { !onlineIDs.contains($0) } ?? false }
             .map { peer in
                 DiscoveredHost(id: "paired-\(peer.fingerprint.description)", name: peer.name, hostID: peer.hostID,
-                               isPaired: true, isOnline: false)
+                               isPaired: true, isOnline: false, canWake: wakeBook[peer.hostID] != nil,
+                               isWaking: peer.hostID.map(wakeAttempts.waking.contains) ?? false,
+                               kind: macKinds[peer.hostID])
             }
         return (online + offline).sorted {
             ($0.isPaired ? 0 : 1, $0.isOnline ? 0 : 1, $0.name) < ($1.isPaired ? 0 : 1, $1.isOnline ? 0 : 1, $1.name)
@@ -118,6 +148,44 @@ public final class SessionController {
         guard host.isPaired, let browsedHost = browsed[host.id],
               let peer = host.hostID.flatMap(trustStore.peer(hostID:)) else { return }
         connect(to: browsedHost, hostFingerprint: peer.fingerprint, invite: nil)
+    }
+
+    /// Sends magic packets to a sleeping Mac, then connects as soon as it shows up.
+    public func wake(_ host: DiscoveredHost) {
+        guard let hostID = host.hostID, !host.isOnline else { return }
+        guard let info = wakeBook[hostID] else {
+            store.post(notice: "Connect to \(host.name) once while it's awake, so this iPhone learns how to wake it.")
+            return
+        }
+        if info.wakeForNetworkAccess == false {
+            store.post(notice: "\(host.name) has “Wake for network access” turned off; it may not wake.")
+        }
+        lastHost = host
+        wakeAttempts.start(hostID, at: .now)
+        startDiscovery()
+        // Packets can be lost and a Mac can miss the first while dozing off: send a few.
+        wakeTasks[hostID]?.cancel()
+        wakeTasks[hostID] = Task { [weak self] in
+            var elapsed = Duration.zero
+            for at in [0, 3, 8, 15].map(Duration.seconds) {
+                try? await Task.sleep(for: at - elapsed)
+                elapsed = at
+                guard !Task.isCancelled else { return }
+                await Task.detached { WakeSender.wake(info) }.value
+            }
+            try? await Task.sleep(for: WakeAttempts.timeout - elapsed)
+            guard !Task.isCancelled else { return }
+            self?.wakeTimedOut()
+        }
+    }
+
+    private func wakeTimedOut() {
+        for hostID in wakeAttempts.expire(at: .now) {
+            wakeTasks[hostID] = nil
+            let name = trustStore.peer(hostID: hostID)?.name ?? "The Mac"
+            store.post(notice: "Couldn't wake \(name). On the Mac, turn on “Wake for network access” in System Settings › Battery › Options (Energy on desktops).")
+        }
+        store.send(.hostsChanged(discoveredHosts()))
     }
 
     /// From a scanned QR code, a pasted link, or a `pocketdesk://pair` URL opened on the phone.
@@ -185,6 +253,12 @@ public final class SessionController {
             store.send(.pairingConfirmed)
         case .displays(let displays):
             store.update(displays: displays)
+        case .wake(let info):
+            // A session over a VPN or with Wi-Fi off reports nothing useful; keep the last good one.
+            if let hostID = connectionHostID, !info.interfaces.isEmpty, wakeBook[hostID] != info {
+                wakeBook[hostID] = info
+                try? wakeBook.save(to: wakeBookURL)
+            }
         case .streamConfig(let config):
             if config.displayID != nil { store.send(.sourceChanged(nil)) }
             store.send(.connected(config))
@@ -262,8 +336,15 @@ public final class SessionController {
     /// Forgets a Mac; it will need pairing again.
     public func forget(_ host: DiscoveredHost) {
         guard let peer = host.hostID.flatMap(trustStore.peer(hostID:)) else { return }
-        if let hostID = peer.hostID ?? host.hostID { displayPreferences.forget(hostID) }
+        if let hostID = peer.hostID ?? host.hostID {
+            displayPreferences.forget(hostID)
+            wakeBook[hostID] = nil
+            macKinds[hostID] = nil
+            wakeAttempts.cancel(hostID)
+        }
         try? displayPreferences.save(to: displayPreferencesURL)
+        try? wakeBook.save(to: wakeBookURL)
+        try? macKinds.save(to: macKindsURL)
         trustStore.revoke(peer.fingerprint)
         try? trustStore.save(to: trustStoreURL)
         store.send(.hostsChanged(discoveredHosts()))

@@ -20,7 +20,9 @@ struct HostListView: View {
                     if !paired.isEmpty {
                         section("Your Macs") {
                             ForEach(paired) { host in
-                                PairedMacCard(host: host) { controller.select(host) }
+                                PairedMacCard(host: host) {
+                                    if host.isOnline { controller.select(host) } else { controller.wake(host) }
+                                }
                                     .contextMenu {
                                         Button("Forget This Mac", systemImage: "trash", role: .destructive) {
                                             controller.forget(host)
@@ -75,25 +77,48 @@ private struct PairedMacCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 14) {
-                MacGlyph(dimmed: !host.isOnline)
+                MacGlyph(kind: host.kind, size: 56, status: host.glyphStatus)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(host.name).font(.title3.weight(.semibold)).lineLimit(1)
-                    StatusPill(text: host.isOnline ? "Online" : "Offline",
-                               color: host.isOnline ? Brand.online : .gray)
+                    Text(status.text)
+                        .font(.subheadline)
+                        .foregroundStyle(status.color)
                 }
                 Spacer(minLength: 0)
             }
             Button(action: connect) {
-                Label(host.isOnline ? "Connect" : "Not Available", systemImage: host.isOnline ? "play.fill" : "moon.zzz")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                HStack(spacing: 8) {
+                    if host.isWaking { ProgressView().tint(.white) }
+                    Label(action.title, systemImage: action.symbol)
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
             }
             .buttonStyle(.glassProminent)
             .tint(Brand.accent)
-            .disabled(!host.isOnline)
+            .disabled(!host.isOnline && (!host.canWake || host.isWaking))
+            if !host.isOnline && !host.canWake {
+                Text("Open PocketDesk on this Mac. Once you've connected while it's awake, you can wake it from here.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
         .card()
+    }
+
+    private var status: (text: String, color: Color) {
+        if host.isOnline { ("Online", .secondary) }
+        else if host.isWaking { ("Waking…", .orange) }
+        else if host.canWake { ("Asleep", .secondary) }
+        else { ("Offline", .secondary) }
+    }
+
+    private var action: (title: String, symbol: String) {
+        if host.isOnline { ("Connect", "play.fill") }
+        else if host.isWaking { ("Waking…", "power") }
+        else if host.canWake { ("Wake & Connect", "power") }
+        else { ("Not Available", "moon.zzz") }
     }
 }
 
@@ -104,7 +129,7 @@ private struct NearbyMacRow: View {
     var body: some View {
         Button(action: pair) {
             HStack(spacing: 14) {
-                MacGlyph(size: 44)
+                MacGlyph(kind: host.kind, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(host.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
                     Text("Ready to pair").font(.subheadline).foregroundStyle(.secondary)

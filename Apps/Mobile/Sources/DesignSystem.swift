@@ -1,3 +1,5 @@
+import PDClientCore
+import PDProtocol
 import SwiftUI
 
 /// PocketDesk's look: a soft tinted backdrop with Liquid Glass surfaces on top.
@@ -60,20 +62,80 @@ struct StatusPill: View {
     }
 }
 
-/// A Mac glyph in a tinted circle.
+/// The Mac itself, the way Apple draws devices: its own symbol on a quiet tile, with a
+/// small status badge (online, asleep) where Find My or Messages would put one.
 struct MacGlyph: View {
+    enum Status { case none, online, asleep, waking }
+
+    var kind: MacKind?
     var size: CGFloat = 52
-    var dimmed = false
+    var status: Status = .none
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Image(systemName: "laptopcomputer")
-            .font(.system(size: size * 0.42, weight: .medium))
-            .foregroundStyle(dimmed ? AnyShapeStyle(.secondary) : AnyShapeStyle(.white))
+        Image(systemName: kind.symbol)
+            .symbolRenderingMode(.hierarchical)
+            .font(.system(size: size * 0.46, weight: .light))
+            .foregroundStyle(symbolColor)
+            .symbolEffect(.pulse, options: .repeating, isActive: status == .waking)
             .frame(width: size, height: size)
-            .background {
-                Circle().fill(dimmed ? AnyShapeStyle(.quaternary)
-                              : AnyShapeStyle(LinearGradient(colors: [Brand.accent, .purple.opacity(0.85)],
-                                                             startPoint: .topLeading, endPoint: .bottomTrailing)))
+            .background(tile, in: .rect(cornerRadius: size * 0.27, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+                    .strokeBorder(Color.black.opacity(colorScheme == .dark ? 0 : 0.07), lineWidth: 0.5)
             }
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0 : 0.05), radius: size * 0.06, y: size * 0.02)
+            .overlay(alignment: .bottomTrailing) { badge }
+            .accessibilityHidden(true)
+    }
+
+    private var tile: Color { colorScheme == .dark ? Color(white: 0.17) : .white }
+
+    private var symbolColor: Color {
+        let ink = colorScheme == .dark ? Color(white: 0.86) : Color(white: 0.32)
+        return status == .asleep ? ink.opacity(0.45) : ink
+    }
+
+    @ViewBuilder private var badge: some View {
+        let diameter = max(9, size * 0.24)
+        let ring = max(2, diameter * 0.2)
+        switch status {
+        case .online:
+            Circle().fill(Brand.online)
+                .frame(width: diameter, height: diameter)
+                .padding(ring)
+                .background(tile, in: .circle)
+                .offset(x: diameter * 0.35, y: diameter * 0.35)
+        case .asleep:
+            Image(systemName: "moon.fill")
+                .font(.system(size: diameter * 0.6, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: diameter * 1.15, height: diameter * 1.15)
+                .background(Color(white: 0.55), in: .circle)
+                .padding(ring)
+                .background(tile, in: .circle)
+                .offset(x: diameter * 0.4, y: diameter * 0.4)
+        case .none, .waking:
+            EmptyView()
+        }
+    }
+}
+
+extension Optional where Wrapped == MacKind {
+    /// Macs that don't say what they are are drawn as a MacBook, the most common Mac.
+    var symbol: String {
+        switch self {
+        case .laptop, nil: "macbook.gen2"
+        case .imac, .desktop: "desktopcomputer"
+        case .mini: "macmini"
+        case .studio: "macstudio"
+        case .pro: "macpro.gen3"
+        }
+    }
+}
+
+extension DiscoveredHost {
+    var glyphStatus: MacGlyph.Status {
+        if isOnline { .online } else if isWaking { .waking } else { .asleep }
     }
 }

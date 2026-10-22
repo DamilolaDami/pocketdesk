@@ -36,14 +36,17 @@ public actor HostSession {
         public var refineFrames: Int
         /// How often the link is measured and the stream refitted (see `RateController`).
         public var adaptInterval: Duration
+        /// Told to the phone in `helloAck` so it can wake this Mac later.
+        public var wake: WakeInfo?
 
         public init(hostName: String, fps: Int = 60, maxFramesInFlight: Int = 2, refineFrames: Int = 8,
-                    adaptInterval: Duration = .milliseconds(500)) {
+                    adaptInterval: Duration = .milliseconds(500), wake: WakeInfo? = nil) {
             self.hostName = hostName
             self.fps = fps
             self.maxFramesInFlight = maxFramesInFlight
             self.refineFrames = refineFrames
             self.adaptInterval = adaptInterval
+            self.wake = wake
         }
     }
 
@@ -166,7 +169,8 @@ public actor HostSession {
         viewport = hello.viewport
         if hello.mode == .catalog {
             // A quick question from the shortcut editor: no picture, no input, no "connected".
-            try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: [])))
+            try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: [],
+                                                      wake: configuration.wake)))
             while let message = try await messages.next() {
                 switch message {
                 case .listApps, .requestAppIcons: try await answer(message)
@@ -185,7 +189,8 @@ public actor HostSession {
         do {
             // Listing displays already needs Screen Recording, so it's inside the goodbye path.
             let displays = try await frameSource.displays()
-            try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: displays)))
+            try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: displays,
+                                                      wake: configuration.wake)))
             let preferred = hello.preferredDisplayID.flatMap { saved in displays.first { $0.persistentID == saved }?.id }
             do {
                 try await startStreaming(preferred.map(CaptureSource.display))

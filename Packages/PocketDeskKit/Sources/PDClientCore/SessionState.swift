@@ -24,13 +24,23 @@ public struct DiscoveredHost: Sendable, Equatable, Identifiable, Hashable {
     public var isPaired: Bool
     /// `false` for a paired Mac that isn't advertising right now (asleep, app closed, away).
     public var isOnline: Bool
+    /// Offline, but this phone knows how to wake it (it's connected before).
+    public var canWake: Bool
+    /// Magic packets sent; it connects as soon as it shows up.
+    public var isWaking: Bool
+    /// For drawing the right Mac; `nil` for Macs that don't say.
+    public var kind: MacKind?
 
-    public init(id: String, name: String, hostID: UUID? = nil, isPaired: Bool, isOnline: Bool = true) {
+    public init(id: String, name: String, hostID: UUID? = nil, isPaired: Bool, isOnline: Bool = true,
+                canWake: Bool = false, isWaking: Bool = false, kind: MacKind? = nil) {
         self.id = id
         self.name = name
         self.hostID = hostID
         self.isPaired = isPaired
         self.isOnline = isOnline
+        self.canWake = canWake
+        self.isWaking = isWaking
+        self.kind = kind
     }
 }
 

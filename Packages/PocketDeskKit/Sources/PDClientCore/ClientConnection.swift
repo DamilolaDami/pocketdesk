@@ -13,6 +13,8 @@ public enum ClientEvent: Sendable, Equatable {
     case awaitingApproval(code: String)
     case paired(PairedPeer)
     case displays([DisplayInfo])
+    /// How to wake this Mac later (from its `helloAck`).
+    case wake(WakeInfo)
     case streamConfig(StreamConfig)
     case linkQuality(LinkQuality)
     case windows([WindowInfo])
@@ -150,7 +152,9 @@ public actor ClientConnection {
             group.addTask {
                 for try await message in session.controlMessages {
                     switch message {
-                    case .helloAck(let ack): onEvent(.displays(ack.displays))
+                    case .helloAck(let ack):
+                        onEvent(.displays(ack.displays))
+                        if let wake = ack.wake { onEvent(.wake(wake)) }
                     case .displays(let displays): onEvent(.displays(displays))
                     case .streamConfig(let config): onEvent(.streamConfig(config))
                     case .linkQuality(let quality): onEvent(.linkQuality(quality))

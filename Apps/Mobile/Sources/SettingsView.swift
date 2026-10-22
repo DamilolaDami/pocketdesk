@@ -65,7 +65,7 @@ struct SettingsView: View {
                     }
                     ForEach(paired) { mac in
                         HStack(spacing: 12) {
-                            MacGlyph(size: 30, dimmed: !mac.isOnline)
+                            MacGlyph(kind: mac.kind, size: 30, status: mac.glyphStatus)
                             Text(mac.name)
                             Spacer()
                             StatusPill(text: mac.isOnline ? "Online" : "Offline", color: mac.isOnline ? Brand.online : .gray)

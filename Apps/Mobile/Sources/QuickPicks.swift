@@ -153,7 +153,7 @@ struct QuickPickChip: View {
     @State private var favicon: UIImage?
 
     private var website: String? {
-        if case .openURL(let url) = preset.shortcut.action { url } else { nil }
+        preset.shortcut.action.website
     }
 
     var body: some View {

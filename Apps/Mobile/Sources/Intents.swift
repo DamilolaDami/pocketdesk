@@ -25,6 +25,10 @@ struct RunShortcutIntent: AppIntent {
     @Parameter(title: "Shortcut")
     var shortcut: ShortcutEntity
 
+    /// For search shortcuts (`{text}` in the link). Siri asks for it when it's needed.
+    @Parameter(title: "Text", requestValueDialog: "What should it look for?")
+    var text: String?
+
     static var parameterSummary: some ParameterSummary {
         Summary("Run \(\.$shortcut) on my Mac")
     }
@@ -39,8 +43,10 @@ struct RunShortcutIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let preferred = UserDefaults.standard.string(forKey: SettingsKey.defaultMac).flatMap(UUID.init(uuidString:))
         do {
-            let mac = try await AppModel.controller.runInBackground(shortcut.id, preferredHostID: preferred)
+            let mac = try await AppModel.controller.runInBackground(shortcut.id, preferredHostID: preferred, text: text)
             return .result(dialog: "Done: \(shortcut.name) on \(mac).")
+        } catch .needsText {
+            throw $text.needsValueError("What should “\(shortcut.name)” look for?")
         } catch {
             return .result(dialog: "\(error.description)")
         }

@@ -124,7 +124,7 @@ struct ShortcutTile: View {
     @State private var favicon: UIImage?
 
     private var website: String? {
-        if case .openURL(let url) = shortcut.action { url } else { nil }
+        shortcut.action.website
     }
 
     var body: some View {

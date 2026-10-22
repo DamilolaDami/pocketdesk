@@ -33,6 +33,19 @@ import Testing
         #expect(MacAction.steps([.openURL("https://netflix.com"), .setVolume(30)]).needsPicture)
     }
 
+    @Test func searchesAskThenFillTheLink() {
+        let search = MacAction.openURL("https://www.youtube.com/results?search_query={text}")
+        #expect(search.asksForText)
+        #expect(!MacAction.openURL("https://www.youtube.com").asksForText)
+        #expect(search.filling(" lo-fi beats & chill ") == .openURL("https://www.youtube.com/results?search_query=lo-fi%20beats%20%26%20chill"))
+        #expect(search.filling("café") == .openURL("https://www.youtube.com/results?search_query=caf%C3%A9"))
+        #expect(search.summary == "youtube.com · asks first")
+        #expect(search.website == "https://www.youtube.com/results?search_query=")
+        let routine = MacAction.steps([.openURL("https://maps.apple.com/?q={text}"), .wait(milliseconds: 500)])
+        #expect(routine.asksForText)
+        #expect(routine.filling("Soho") == .steps([.openURL("https://maps.apple.com/?q=Soho"), .wait(milliseconds: 500)]))
+    }
+
     @Test func shortcutsSavedBeforeShowsMacStillLoad() throws {
         let json = #"{"id":"11111111-0000-4000-8000-000000000001","name":"Netflix","symbol":"play.tv.fill","color":"red","action":{"openURL":{"_0":"https://www.netflix.com"}}}"#
         let shortcut = try JSONDecoder().decode(Shortcut.self, from: Data(json.utf8))

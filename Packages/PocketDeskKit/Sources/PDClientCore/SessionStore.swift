@@ -58,6 +58,17 @@ public final class SessionStore {
         self.shortcuts = shortcuts
     }
 
+    /// A shortcut waiting for the words it needs (a search, say); the app shows a prompt.
+    public private(set) var textRequest: TextRequest?
+
+    public func ask(forTextFor shortcut: Shortcut, preferredHostID: UUID?) {
+        textRequest = TextRequest(shortcut: shortcut, preferredHostID: preferredHostID)
+    }
+
+    public func clearTextRequest() {
+        textRequest = nil
+    }
+
     /// The target Mac's volume and now playing while live tiles are on screen.
     public private(set) var macStatus: MacStatus?
 
@@ -91,6 +102,12 @@ public final class SessionStore {
     public func dismiss(_ notice: Notice) {
         if self.notice == notice { self.notice = nil }
     }
+}
+
+public struct TextRequest: Sendable, Equatable, Identifiable {
+    public var id = UUID()
+    public var shortcut: Shortcut
+    public var preferredHostID: UUID?
 }
 
 public struct Notice: Sendable, Equatable, Identifiable {

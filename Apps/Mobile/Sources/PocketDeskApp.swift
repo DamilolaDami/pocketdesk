@@ -78,6 +78,13 @@ struct RootView: View {
             return notice.kind == .done ? .success : .warning
         }
         .task { controller.startDiscovery() }
+        // A search shortcut, from a tile, widget or the stream: ask, then run it.
+        .alert(controller.store.textRequest?.shortcut.name ?? "", isPresented: Binding(
+            get: { controller.store.textRequest != nil },
+            set: { if !$0 { controller.store.clearTextRequest() } }
+        ), presenting: controller.store.textRequest) { request in
+            TextRequestFields(controller: controller, request: request)
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -147,6 +154,30 @@ struct MainTabs: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
+    }
+}
+
+/// The prompt's field and buttons; `Run` stays off until something's typed.
+private struct TextRequestFields: View {
+    let controller: SessionController
+    let request: TextRequest
+    @State private var text = ""
+
+    var body: some View {
+        TextField("What to look for", text: $text)
+            .submitLabel(.go)
+            .onSubmit(run)
+        Button("Run", action: run)
+            .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
+            .keyboardShortcut(.defaultAction)
+        Button("Cancel", role: .cancel) { controller.store.clearTextRequest() }
+    }
+
+    private func run() {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty else { return }
+        controller.store.clearTextRequest()
+        controller.run(request.shortcut, preferredHostID: request.preferredHostID, text: words)
     }
 }
 

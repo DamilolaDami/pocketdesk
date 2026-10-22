@@ -432,9 +432,14 @@ public final class SessionController {
     /// the last Mac used, else any paired Mac that's online) and runs it once the picture is up.
     /// Returns `false`, with a notice posted, when there's no Mac to run it on.
     @discardableResult
-    public func run(_ shortcut: Shortcut, preferredHostID: UUID? = nil) -> Bool {
+    public func run(_ shortcut: Shortcut, preferredHostID: UUID? = nil, text: String? = nil) -> Bool {
+        if shortcut.action.asksForText, text == nil {
+            store.ask(forTextFor: shortcut, preferredHostID: preferredHostID)
+            return true
+        }
+        let action = text.map(shortcut.action.filling) ?? shortcut.action
         if case .streaming = store.state, let connection {
-            connection.send(.run(shortcut.action))
+            connection.send(.run(action))
             return true
         }
         guard let host = shortcutTarget(preferredHostID: preferredHostID) else {
@@ -445,7 +450,7 @@ public final class SessionController {
             // Nothing to look at (Play / Pause, volume, or set so): run it without the stream.
             Task {
                 do throws(BackgroundRunError) {
-                    let mac = try await runInBackground(shortcut.id, preferredHostID: host.hostID)
+                    let mac = try await runInBackground(shortcut.id, preferredHostID: host.hostID, text: text)
                     store.post(notice: "\(shortcut.name): done on \(mac)", kind: .done)
                 } catch {
                     store.post(notice: error.description)
@@ -458,7 +463,7 @@ public final class SessionController {
         store.send(.startDiscovery)
         store.send(.hostsChanged(discoveredHosts()))
         select(host)
-        pendingAction = shortcut.action
+        pendingAction = action
         return true
     }
 
@@ -627,12 +632,15 @@ public final class SessionController {
     public enum BackgroundRunError: Error, CustomStringConvertible {
         case noSuchShortcut
         case noMac
+        /// It needs words (a search) and none were given.
+        case needsText
         case failed(String)
 
         public var description: String {
             switch self {
             case .noSuchShortcut: "That shortcut isn't in PocketDesk any more."
             case .noMac: "None of your Macs is reachable. Open PocketDesk on your Mac, or check it's awake."
+            case .needsText: "That shortcut needs something to look for."
             case .failed(let reason): reason
             }
         }
@@ -641,10 +649,15 @@ public final class SessionController {
     /// Runs a saved shortcut for Siri, the Shortcuts app or a widget: through the stream if
     /// one is up, otherwise over a short connection with no picture. Waits a few seconds for
     /// the Mac to show up, waking it if this phone knows how. Returns the Mac's name.
-    public func runInBackground(_ id: Shortcut.ID, preferredHostID: UUID?) async throws(BackgroundRunError) -> String {
+    public func runInBackground(_ id: Shortcut.ID, preferredHostID: UUID?,
+                                text: String? = nil) async throws(BackgroundRunError) -> String {
         guard let shortcut = library.shortcuts.first(where: { $0.id == id }) else { throw .noSuchShortcut }
+        if shortcut.action.asksForText, text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+            throw .needsText
+        }
+        let action = text.map(shortcut.action.filling) ?? shortcut.action
         if case .streaming(let host, _, _) = store.state, let connection {
-            connection.send(.run(shortcut.action))
+            connection.send(.run(action))
             return host.name
         }
 
@@ -659,7 +672,7 @@ public final class SessionController {
               let peer = trustStore.peer(hostID: hostID) else { throw .noMac }
         do {
             let identity = try DeviceIdentity.loadOrCreate(label: identityLabel)
-            try await ClientConnection.perform(shortcut.action, endpoint: browsedHost.endpoint,
+            try await ClientConnection.perform(action, endpoint: browsedHost.endpoint,
                                                hostFingerprint: peer.fingerprint, identity: identity,
                                                deviceName: deviceName)
         } catch {

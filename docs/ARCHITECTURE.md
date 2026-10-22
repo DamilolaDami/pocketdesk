@@ -281,6 +281,14 @@ The person at the Mac always knows and controls who is using it:
   could already click it in the Mac's menu bar. Arbitrary shell commands are deliberately not
   an action.
 
+## Shortcuts that ask (no protocol change)
+
+A website shortcut with `{text}` in its link (`MacAction.textPlaceholder`) asks for words when
+it runs: `SessionController.run` puts a `TextRequest` in the store, the app shows a prompt,
+then `MacAction.filling(_:)` percent-encodes the words into every `{text}` (in every step of
+a routine) and the Mac gets a plain link. Siri asks through the intent's optional `text`
+parameter (`needsValueError`). Quick picks include Search YouTube, Netflix, Google and Maps.
+
 ## Live tiles (protocol v12)
 
 - While the Shortcuts tab is on screen and the app is in front, `SessionController.watchStatus`

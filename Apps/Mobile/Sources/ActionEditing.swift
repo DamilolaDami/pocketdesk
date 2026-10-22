@@ -102,7 +102,9 @@ struct ActionDraft: Equatable {
 
     var footer: String {
         switch kind {
-        case .website: "Opens in the Mac's default browser."
+        case .website: website.contains(MacAction.textPlaceholder)
+            ? "Asks what to type each time and puts it where {text} is."
+            : "Opens in the Mac's default browser. To be asked for words each time, put {text} in the link, like youtube.com/results?search_query={text}."
         case .app: "Opens the app, or brings it to the front if it's already running."
         case .macShortcut: "Runs a shortcut from the Shortcuts app on your Mac: HomeKit scenes, Focus, scripts and more."
         case .control: controlID == Self.volumeID ? "Sets the Mac's sound output volume."

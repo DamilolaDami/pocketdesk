@@ -135,6 +135,10 @@ public struct ShortcutPreset: Sendable, Identifiable {
         website("Twitch", "https://www.twitch.tv", symbol: "gamecontroller.fill", color: .purple),
         website("Gmail", "https://mail.google.com", symbol: "envelope.fill", color: .orange),
         website("GitHub", "https://github.com", symbol: "chevron.left.forwardslash.chevron.right", color: .gray),
+        website("Search YouTube", "https://www.youtube.com/results?search_query={text}", symbol: "magnifyingglass", color: .red),
+        website("Search Netflix", "https://www.netflix.com/search?q={text}", symbol: "magnifyingglass", color: .red),
+        website("Search Google", "https://www.google.com/search?q={text}", symbol: "magnifyingglass", color: .blue),
+        website("Find in Maps", "https://maps.apple.com/?q={text}", symbol: "map.fill", color: .green),
         app("Safari", "com.apple.Safari", symbol: "safari.fill", color: .blue),
         app("Music", "com.apple.Music", symbol: "music.note", color: .pink),
         app("Spotify", "com.spotify.client", symbol: "headphones", color: .green),
@@ -185,6 +189,41 @@ public struct ShortcutPreset: Sendable, Identifiable {
 }
 
 extension MacAction {
+    /// Where your words go in a website shortcut: `youtube.com/results?search_query={text}`.
+    public static let textPlaceholder = "{text}"
+
+    /// It needs words before it can run (a search, say): the phone asks first.
+    public var asksForText: Bool {
+        switch self {
+        case .openURL(let url): url.contains(Self.textPlaceholder)
+        case .steps(let steps): steps.contains(where: \.asksForText)
+        default: false
+        }
+    }
+
+    /// With the words in place, URL-encoded; in every step of a routine.
+    public func filling(_ text: String) -> MacAction {
+        switch self {
+        case .openURL(let url):
+            let encoded = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                .addingPercentEncoding(withAllowedCharacters: Self.unreserved) ?? ""
+            return .openURL(url.replacing(Self.textPlaceholder, with: encoded))
+        case .steps(let steps):
+            return .steps(steps.map { $0.filling(text) })
+        default:
+            return self
+        }
+    }
+
+    /// RFC 3986's unreserved characters: everything else is escaped, spaces as `%20`.
+    private static let unreserved = CharacterSet(charactersIn:
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    /// The site, for its favicon, with any placeholder taken out.
+    public var website: String? {
+        if case .openURL(let url) = self { url.replacing(Self.textPlaceholder, with: "") } else { nil }
+    }
+
     /// Whether a tap shows the Mac unless the shortcut says otherwise. Media keys, volume and
     /// Mac Shortcuts you hear or feel, not see; steps need it if any of theirs does.
     public var needsPicture: Bool {
@@ -199,8 +238,11 @@ extension MacAction {
     public var summary: String {
         switch self {
         case .openURL(let string):
-            let host = URL(string: string)?.host() ?? string
-            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+            let template = string.contains(Self.textPlaceholder)
+            let plain = string.replacing(Self.textPlaceholder, with: "")
+            let host = URL(string: plain)?.host() ?? plain
+            let site = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+            return template ? "\(site) · asks first" : site
         case .openApp(_, let name):
             return "Opens \(name)"
         case .keystroke(let code, let modifiers):

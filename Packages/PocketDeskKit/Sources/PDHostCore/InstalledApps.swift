@@ -133,6 +133,10 @@ enum Subprocess {
             return first
         }
         guard exited else { return nil }
+        // The termination handler can run a moment before `Process` itself counts the task
+        // as finished, and reading `terminationStatus` then raises "task still running"
+        // (which aborts the app). It has exited, so this returns at once.
+        process.waitUntilExit()
         func text(_ pipe: Pipe) -> String {
             String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         }

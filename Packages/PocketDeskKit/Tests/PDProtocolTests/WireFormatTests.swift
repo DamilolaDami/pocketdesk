@@ -54,6 +54,7 @@ import Testing
         .media(.volumeDown),
         .runShortcut(id: "7DC33540-3D02-4FB6-A1BC-5A12E2FE3B16", name: "Movie Night"),
         .setVolume(60),
+        .mediaIn(.playPause, player: .spotify),
         .steps([.openURL("https://www.netflix.com"), .wait(milliseconds: 1500), .keystroke(code: 0x03, modifiers: 0x14_0000)]),
     ])
     func actionsRoundTrip(_ action: MacAction) throws {
@@ -68,6 +69,8 @@ import Testing
         #expect(!MacAction.steps(Array(repeating: .media(.mute), count: MacAction.maxSteps + 1)).isValid)
         #expect(!MacAction.steps([.wait(milliseconds: 60_000)]).isValid)
         #expect(!MacAction.setVolume(101).isValid)
+        #expect(MacAction.mediaIn(.next, player: .music).isValid)
+        #expect(!MacAction.mediaIn(.volumeUp, player: .music).isValid) // volume is the Mac's
         #expect(alpn == "pocketdesk/\(protocolVersion)")
     }
 

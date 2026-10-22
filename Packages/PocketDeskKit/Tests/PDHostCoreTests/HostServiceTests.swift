@@ -1,5 +1,6 @@
 #if os(macOS)
 // Uses the macOS host engines (encoder, capture, HostService).
+import AppKit
 import CoreGraphics
 import CoreMedia
 import Foundation
@@ -133,7 +134,9 @@ final class HostServiceTests {
         #expect(input.text == ["héllo"])
         #expect(input.events.suffix(2) == [.key(code: 0x08, isDown: true, modifiers: 1 << 20),
                                            .key(code: 0x08, isDown: false, modifiers: 1 << 20)])
-        #expect(input.releases >= 1) // held keys are let go when the stream stops
+        // Held keys are let go when the stream stops, which can land just after the phone hangs up.
+        for _ in 0..<100 where input.releases == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(input.releases >= 1)
         #expect(input.actions == [.openURL("https://www.netflix.com")])
         #expect(input.sourceFrames.last == CGRect(x: 100, y: 50, width: 800, height: 600))
         #expect(await frames.startedSources == [.display(1), .window(42)])
@@ -430,6 +433,22 @@ final class HostServiceTests {
         #expect(NowPlayingReader.parseHelper(#"{"title":"Netflix","isPlaying":true}"# + "\n")
                 == NowPlaying(title: "Netflix", isPlaying: true))
         #expect(NowPlayingReader.parseHelper("{}\n") == nil)
+    }
+
+    @Test func playersGetTheirOwnCommands() {
+        #expect(MediaPlayer.spotify.command(for: .playPause) == "playpause")
+        #expect(MediaPlayer.music.command(for: .previous) == "previous track")
+        #expect(MediaPlayer.tv.command(for: .mute) == nil)
+    }
+
+    /// A closed player stays closed rather than being launched to take the command.
+    @Test(.enabled(if: NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TV").isEmpty,
+                   "TV is open on this Mac"))
+    func aPlayerThatIsntOpenIsntLaunched() async {
+        await #expect(throws: MacActionError.playerNotOpen("TV")) {
+            try await InputInjector.tell(.tv, .playPause)
+        }
+        #expect(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TV").isEmpty)
     }
 
     @Test func aMissingMacShortcutSaysSo() async {

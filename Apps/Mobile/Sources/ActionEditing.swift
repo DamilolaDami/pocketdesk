@@ -40,6 +40,8 @@ struct ActionDraft: Equatable {
     var shortcutID: String?
     var controlID = ActionDraft.controls[0].id
     var volume: Double = 50
+    /// For Play / Pause, Next and Previous: one player, or `nil` for whatever's playing.
+    var player: MediaPlayer?
     var seconds: Double = 1
 
     static let volumeID = "Set Volume"
@@ -67,6 +69,10 @@ struct ActionDraft: Equatable {
         case .keystroke, .media:
             kind = .control
             controlID = Self.controls.first { $0.shortcut.action == action }?.id ?? Self.controls[0].id
+        case .mediaIn(let key, let player):
+            kind = .control
+            controlID = Self.controls.first { $0.shortcut.action == .media(key) }?.id ?? Self.controls[0].id
+            self.player = player
         case .setVolume(let level):
             kind = .control
             controlID = Self.volumeID
@@ -93,11 +99,19 @@ struct ActionDraft: Equatable {
             shortcutName.trimmingCharacters(in: .whitespaces).isEmpty ? nil
                 : .runShortcut(id: shortcutID, name: shortcutName.trimmingCharacters(in: .whitespaces))
         case .control:
-            controlID == Self.volumeID ? .setVolume(Int(volume.rounded()))
-                : Self.controls.first { $0.id == controlID }?.shortcut.action
+            if controlID == Self.volumeID { .setVolume(Int(volume.rounded())) }
+            else if let key = transportKey, let player { .mediaIn(key, player: player) }
+            else { Self.controls.first { $0.id == controlID }?.shortcut.action }
         case .wait:
             .wait(milliseconds: Int((seconds * 1000).rounded()))
         }
+    }
+
+    /// The chosen control, if it's one a player can take directly.
+    var transportKey: MediaKey? {
+        guard kind == .control, case .media(let key)? = Self.controls.first(where: { $0.id == controlID })?.shortcut.action,
+              key.isTransport else { return nil }
+        return key
     }
 
     var footer: String {
@@ -107,8 +121,12 @@ struct ActionDraft: Equatable {
             : "Opens in the Mac's default browser. To be asked for words each time, put {text} in the link, like youtube.com/results?search_query={text}."
         case .app: "Opens the app, or brings it to the front if it's already running."
         case .macShortcut: "Runs a shortcut from the Shortcuts app on your Mac: HomeKit scenes, Focus, scripts and more."
-        case .control: controlID == Self.volumeID ? "Sets the Mac's sound output volume."
-            : "Presses the keys on the Mac. Play / Pause works on whatever is playing, like Netflix in Safari."
+        case .control:
+            if let player, transportKey != nil {
+                "Goes straight to \(player.name), even if something else is playing. \(player.name) needs to be open; the Mac asks once to allow it."
+            } else if controlID == Self.volumeID { "Sets the Mac's sound output volume." } else {
+                "Presses the keys on the Mac. Play / Pause works on whatever is playing, like Netflix in Safari."
+            }
         case .wait: "Gives the Mac a moment, like letting a page load before going full screen."
         }
     }
@@ -188,6 +206,12 @@ struct ActionFields: View {
                 Text("Set Volume…").tag(ActionDraft.volumeID)
             }
             .pickerStyle(.navigationLink)
+            if draft.transportKey != nil {
+                Picker("Controls", selection: $draft.player) {
+                    Text("Whatever's Playing").tag(MediaPlayer?.none)
+                    ForEach(players, id: \.self) { Text($0.name).tag(MediaPlayer?.some($0)) }
+                }
+            }
             if draft.controlID == ActionDraft.volumeID {
                 HStack(spacing: 12) {
                     Image(systemName: "speaker.fill").foregroundStyle(.secondary)
@@ -200,6 +224,15 @@ struct ActionFields: View {
                 Text("Wait \(draft.seconds.formatted(.number.precision(.fractionLength(0...1)))) s")
             }
         }
+    }
+}
+
+extension ActionFields {
+    /// Players installed on the Mac (all of them until its app list has loaded), plus the
+    /// chosen one so it never vanishes from the picker.
+    fileprivate var players: [MediaPlayer] {
+        let installed = Set(controller.store.macApps.map(\.bundleID))
+        return MediaPlayer.allCases.filter { installed.isEmpty || installed.contains($0.bundleID) || $0 == draft.player }
     }
 }
 

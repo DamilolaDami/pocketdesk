@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 12), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 13), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -275,6 +275,10 @@ The person at the Mac always knows and controls who is using it:
 - **Steps:** `MacAction.steps([MacAction])` runs actions in order and stops at the first that
   fails ("Step 2: …"). One level deep, at most 20 steps, `wait(milliseconds:)` up to 30 s,
   checked on the Mac (`MacAction.isValid`) before anything runs.
+- **Players:** `mediaIn(key, player:)` sends Play / Pause, Next or Previous straight to
+  Music, Spotify or TV with `osascript` (`tell application id … to playpause`), whatever else
+  is playing. It never launches a closed player, and macOS asks once per player before the
+  first command. Browsers can't be addressed, so they stay "whatever's playing" (`media`).
 - **Volume:** `setVolume(0–100)` goes through Core Audio (`SystemVolume`). AppleScript's
   `set volume` silently does nothing from the hardened-runtime host.
 - Running a Mac Shortcut adds no new power: the person at the Mac made it, and a paired phone

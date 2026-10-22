@@ -228,7 +228,7 @@ extension MacAction {
     /// Mac Shortcuts you hear or feel, not see; steps need it if any of theirs does.
     public var needsPicture: Bool {
         switch self {
-        case .media, .setVolume, .wait, .runShortcut: false
+        case .media, .mediaIn, .setVolume, .wait, .runShortcut: false
         case .steps(let steps): steps.contains(where: \.needsPicture)
         case .openURL, .openApp, .keystroke: true
         }
@@ -256,6 +256,8 @@ extension MacAction {
             case .volumeDown: "Volume down"
             case .mute: "Mute"
             }
+        case .mediaIn(let key, let player):
+            return "\(MacAction.media(key).summary) · \(player.name)"
         case .runShortcut(_, let name):
             return "Runs “\(name)”"
         case .setVolume(let level):

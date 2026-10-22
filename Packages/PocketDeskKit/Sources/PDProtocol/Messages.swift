@@ -1,5 +1,5 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 12
+public let protocolVersion: UInt16 = 13
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -69,6 +69,9 @@ public indirect enum MacAction: Codable, Sendable, Equatable, Hashable {
     /// A keyboard media key. Play/Pause controls whatever is playing (Netflix in Safari,
     /// Music, YouTube), whichever app is in front.
     case media(MediaKey)
+    /// Play / Pause, Next or Previous in one player, whatever else is playing. Volume and
+    /// mute are the Mac's, not a player's, so they stay `media`.
+    case mediaIn(MediaKey, player: MediaPlayer)
     /// A shortcut from the Mac's Shortcuts app: by identifier, falling back to the name.
     case runShortcut(id: String?, name: String)
     /// Output volume, 0–100.
@@ -91,6 +94,7 @@ extension MacAction {
                 && steps.allSatisfy { if case .steps = $0 { false } else { $0.isValid } }
         case .wait(let milliseconds): (0...Self.maxWaitMilliseconds).contains(milliseconds)
         case .setVolume(let level): (0...100).contains(level)
+        case .mediaIn(let key, _): key.isTransport
         default: true
         }
     }
@@ -108,6 +112,31 @@ public struct MacShortcut: Codable, Sendable, Equatable, Hashable, Identifiable 
 
 public enum MediaKey: String, Codable, Sendable, Hashable, CaseIterable {
     case playPause, next, previous, volumeUp, volumeDown, mute
+
+    /// The keys a player can be told directly.
+    public var isTransport: Bool { [.playPause, .next, .previous].contains(self) }
+}
+
+/// Players the Mac can address directly (they take AppleScript). Browsers can't: a Netflix
+/// tab only answers the media keys, so it's "whatever's playing".
+public enum MediaPlayer: String, Codable, Sendable, Hashable, CaseIterable {
+    case music, spotify, tv
+
+    public var name: String {
+        switch self {
+        case .music: "Music"
+        case .spotify: "Spotify"
+        case .tv: "TV"
+        }
+    }
+
+    public var bundleID: String {
+        switch self {
+        case .music: "com.apple.Music"
+        case .spotify: "com.spotify.client"
+        case .tv: "com.apple.TV"
+        }
+    }
 }
 
 public struct Hello: Codable, Sendable, Equatable {

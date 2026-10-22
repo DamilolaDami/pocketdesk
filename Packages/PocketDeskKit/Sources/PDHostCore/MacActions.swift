@@ -7,6 +7,8 @@ public indirect enum MacActionError: Error, Equatable, CustomStringConvertible {
     case appNotFound(String)
     case couldNotOpen(String)
     case shortcutFailed(String, reason: String)
+    case playerNotOpen(String)
+    case notAllowedToControl(String)
     case step(Int, MacActionError)
 
     public var description: String {
@@ -15,6 +17,9 @@ public indirect enum MacActionError: Error, Equatable, CustomStringConvertible {
         case .appNotFound(let name): "\(name) isn't installed on this Mac."
         case .couldNotOpen(let name): "The Mac couldn't open \(name)."
         case .shortcutFailed(let name, let reason): "“\(name)” didn't run on the Mac: \(reason)"
+        case .playerNotOpen(let name): "\(name) isn't open on the Mac."
+        case .notAllowedToControl(let name):
+            "The Mac didn't let PocketDesk control \(name). Allow it in System Settings › Privacy & Security › Automation."
         case .step(let number, let error): "Step \(number): \(error)"
         }
     }
@@ -55,6 +60,9 @@ extension InputInjector {
         case .media(let key):
             await Self.press(key)
 
+        case .mediaIn(let key, let player):
+            try await Self.tell(player, key)
+
         case .runShortcut(let id, let name):
             // A shortcut can take a while (or ask a question on the Mac): once it's been
             // running a few seconds, call it started rather than keep the phone waiting.
@@ -90,6 +98,23 @@ extension InputInjector {
         }
     }
 
+    /// Tells one player directly, so it's that app whatever else is playing. Never launches
+    /// it: pausing an app that isn't open shouldn't open it. macOS asks the person at the Mac
+    /// once per player before the first command goes through.
+    static func tell(_ player: MediaPlayer, _ key: MediaKey) async throws {
+        guard let command = player.command(for: key) else { return }
+        let running = await MainActor.run {
+            !NSRunningApplication.runningApplications(withBundleIdentifier: player.bundleID).isEmpty
+        }
+        guard running else { throw MacActionError.playerNotOpen(player.name) }
+        // `osascript` rather than NSAppleScript: the first-time permission prompt can wait for
+        // an answer, and that mustn't block this app. A slow answer counts as sent.
+        let script = "tell application id \"\(player.bundleID)\" to \(command)"
+        guard let result = try? await Subprocess.run("/usr/bin/osascript", ["-e", script], timeout: .seconds(30)) else { return }
+        if result.error.contains("-1743") { throw MacActionError.notAllowedToControl(player.name) }
+        guard result.status == 0 else { throw MacActionError.couldNotOpen(player.name) }
+    }
+
     /// Media keys aren't key codes: the keyboard sends them as system-defined events
     /// (subtype 8, `NX_KEYTYPE_*` in the top half of `data1`), down then up.
     @MainActor
@@ -121,6 +146,17 @@ extension InputInjector {
         return folders
             .map { URL(filePath: $0).appending(path: "\(name).app") }
             .first { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
+    }
+}
+extension MediaPlayer {
+    /// The AppleScript verb each player understands (Music, Spotify and TV share them).
+    func command(for key: MediaKey) -> String? {
+        switch key {
+        case .playPause: "playpause"
+        case .next: "next track"
+        case .previous: "previous track"
+        case .volumeUp, .volumeDown, .mute: nil
+        }
     }
 }
 #endif

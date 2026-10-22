@@ -27,6 +27,8 @@ import Testing
     @Test func stepsAndMacShortcutsDescribeThemselves() {
         #expect(MacAction.runShortcut(id: nil, name: "Focus").summary == "Runs “Focus”")
         #expect(MacAction.setVolume(60).summary == "Volume 60%")
+        #expect(MacAction.mediaIn(.playPause, player: .spotify).summary == "Play / Pause · Spotify")
+        #expect(!MacAction.mediaIn(.next, player: .tv).needsPicture)
         #expect(MacAction.wait(milliseconds: 1500).summary == "Wait 1.5 s")
         #expect(MacAction.steps([.media(.playPause), .setVolume(30)]).summary == "2 steps")
         #expect(!MacAction.steps([.media(.playPause), .setVolume(30)]).needsPicture)

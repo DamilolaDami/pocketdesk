@@ -55,6 +55,7 @@ struct KeyBar: View {
                 Image(systemName: "keyboard.chevron.compact.down")
                     .font(.system(size: 16, weight: .medium))
                     .frame(width: 44, height: 38)
+                    .contentShape(.capsule)
             }
             .buttonStyle(.plain)
             .glassEffect(.regular.interactive(), in: .capsule)
@@ -77,6 +78,7 @@ struct KeyBar: View {
             }
             .frame(minWidth: 40, minHeight: 38)
             .padding(.horizontal, title.map { $0.count > 2 ? 6 : 0 } ?? 0)
+            .contentShape(.rect(cornerRadius: 10))
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 10))
@@ -93,6 +95,7 @@ struct KeyBar: View {
                 .foregroundStyle(state == .off ? Color.primary : .white)
                 .frame(width: 40, height: 38)
                 .background(state == .off ? Color.clear : Color.accentColor, in: .rect(cornerRadius: 10))
+                .contentShape(.rect(cornerRadius: 10))
                 // Locked shows a bar under the glyph, like Caps Lock on the iOS keyboard.
                 .overlay(alignment: .bottom) {
                     if state == .locked {

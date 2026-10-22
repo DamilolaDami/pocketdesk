@@ -565,6 +565,10 @@ public actor HostSession {
                 framesSent: stats.framesSent - last.framesSent, framesDropped: stats.framesDropped - last.framesDropped,
                 averageSendTime: sends > 0 ? sendTime / sends : nil, roundTrip: roundTrip)
             last = stats
+            // For tuning on real devices: `log stream --level debug --predicate 'subsystem == "com.pocketdesk.host"'`.
+            Self.log.debug("""
+                link: \(sample.framesSent) sent, \(sample.framesDropped) dropped,                 send \(sample.averageSendTime.map { $0 / .milliseconds(1) } ?? -1, format: .fixed(precision: 1)) ms,                 rtt \(sample.roundTrip.map { $0 / .milliseconds(1) } ?? -1, format: .fixed(precision: 1)) ms,                 target \(self.streamBitrateKbps) kbps @ \(self.streamFPS) fps
+                """)
             sendTime = .zero
             sends = 0
             roundTrip = nil

@@ -172,6 +172,7 @@ struct StreamScreen: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(tint ?? .primary)
                 .frame(width: 48, height: 48)
+                .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .circle)

@@ -15,6 +15,19 @@ import Testing
         #expect(!MacAction.media(.playPause).needsPicture)
         #expect(netflix.action.needsPicture)
         #expect(spotlight.action.needsPicture)
+        var quiet = netflix
+        quiet.showsMac = false
+        #expect(!quiet.opensStream && quiet.copy().showsMac == false)
+        var watched = Shortcut(name: "Pause", symbol: "pause", color: .red, action: .media(.playPause))
+        #expect(!watched.opensStream)
+        watched.showsMac = true
+        #expect(watched.opensStream)
+    }
+
+    @Test func shortcutsSavedBeforeShowsMacStillLoad() throws {
+        let json = #"{"id":"11111111-0000-4000-8000-000000000001","name":"Netflix","symbol":"play.tv.fill","color":"red","action":{"openURL":{"_0":"https://www.netflix.com"}}}"#
+        let shortcut = try JSONDecoder().decode(Shortcut.self, from: Data(json.utf8))
+        #expect(shortcut.showsMac == nil && shortcut.opensStream)
     }
 
     @Test func startsWithNetflixAndFriends() {

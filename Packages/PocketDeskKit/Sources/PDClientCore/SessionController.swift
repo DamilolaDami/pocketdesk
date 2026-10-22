@@ -437,8 +437,8 @@ public final class SessionController {
             store.post(notice: "Open PocketDesk on a paired Mac to run “\(shortcut.name)”.")
             return false
         }
-        if !shortcut.action.needsPicture {
-            // Nothing to look at (Play / Pause, volume): run it without opening the stream.
+        if !shortcut.opensStream {
+            // Nothing to look at (Play / Pause, volume, or set so): run it without the stream.
             Task {
                 do throws(BackgroundRunError) {
                     let mac = try await runInBackground(shortcut.id, preferredHostID: host.hostID)

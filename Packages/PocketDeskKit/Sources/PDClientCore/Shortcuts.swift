@@ -9,14 +9,22 @@ public struct Shortcut: Codable, Sendable, Equatable, Hashable, Identifiable {
     public var symbol: String
     public var color: ShortcutColor
     public var action: MacAction
+    /// Whether tapping it opens the stream. `nil` (and shortcuts saved before this existed)
+    /// follows the action: media keys run in the background, everything else shows the Mac.
+    public var showsMac: Bool?
 
-    public init(id: UUID = UUID(), name: String, symbol: String, color: ShortcutColor, action: MacAction) {
+    public init(id: UUID = UUID(), name: String, symbol: String, color: ShortcutColor, action: MacAction,
+                showsMac: Bool? = nil) {
         self.id = id
         self.name = name
         self.symbol = symbol
         self.color = color
         self.action = action
+        self.showsMac = showsMac
     }
+
+    /// What a tap does: open the stream, or run quietly and stay put.
+    public var opensStream: Bool { showsMac ?? action.needsPicture }
 
     /// The Mac app this opens, if it opens one by bundle ID (for its icon).
     public var appBundleID: String? {
@@ -25,7 +33,7 @@ public struct Shortcut: Codable, Sendable, Equatable, Hashable, Identifiable {
 
     /// The same shortcut under a new identity, for "Duplicate" and for adding a preset twice.
     public func copy() -> Shortcut {
-        Shortcut(name: name, symbol: symbol, color: color, action: action)
+        Shortcut(name: name, symbol: symbol, color: color, action: action, showsMac: showsMac)
     }
 }
 
@@ -177,7 +185,7 @@ public struct ShortcutPreset: Sendable, Identifiable {
 }
 
 extension MacAction {
-    /// Whether tapping it should open the stream. Media keys you hear, not see.
+    /// Whether a tap shows the Mac unless the shortcut says otherwise. Media keys you hear, not see.
     public var needsPicture: Bool {
         if case .media = self { false } else { true }
     }

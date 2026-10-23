@@ -206,7 +206,8 @@ public final class SessionController {
     private func discoveredHosts() -> [DiscoveredHost] {
         let online = browsed.values.map { host in
             DiscoveredHost(id: host.id, name: macNames[host.hostID] ?? host.name, hostID: host.hostID,
-                           isPaired: host.hostID.flatMap(trustStore.peer(hostID:)) != nil, kind: host.kind,
+                           isPaired: host.hostID.flatMap(trustStore.peer(hostID:)) != nil,
+                           canWake: wakeBook[host.hostID] != nil, kind: host.kind,
                            needsUpdate: DiscoveredHost.Side(macVersion: host.protocolVersion),
                            lastUsed: lastUsed[host.hostID])
         }
@@ -574,6 +575,12 @@ public final class SessionController {
         startDiscovery()
     }
 
+    /// What this iPhone knows about a paired Mac's pairing, for its settings page.
+    public func pairing(of host: DiscoveredHost) -> MacPairing? {
+        guard let peer = host.hostID.flatMap(trustStore.peer(hostID:)) else { return nil }
+        return MacPairing(key: peer.fingerprint.description, pairedAt: peer.pairedAt, macName: peer.name)
+    }
+
     /// Shows a paired Mac under another name on this phone; an empty name goes back to the Mac's own.
     public func rename(_ host: DiscoveredHost, to name: String) {
         guard let hostID = host.hostID else { return }
@@ -738,14 +745,32 @@ public final class SessionController {
                                     : "“\(host.name)” is no longer locked.", kind: .done)
     }
 
-    /// PocketDesk left the screen: locked Macs ask again next time.
-    public func relockAll() {
-        locks.relockAll()
+    /// Locks or unlocks every paired Mac, with one Face ID.
+    public func setAllLocked(_ isLocked: Bool) async {
+        let macs = trustStore.peers.values.compactMap(\.hostID).filter { locks.isLocked($0) != isLocked }
+        guard !macs.isEmpty else { return }
+        guard await authenticate(isLocked ? "Lock your Macs" : "Stop locking your Macs") else { return }
+        for mac in macs { locks.set(mac, locked: isLocked) }
+        try? locks.save(to: locksURL)
+        store.send(.hostsChanged(discoveredHosts()))
+        store.post(notice: isLocked ? "Your Macs are locked. Using one will ask that it's you."
+                                    : "Your Macs are no longer locked.", kind: .done)
+    }
+
+    /// How long PocketDesk may be off screen before locked Macs ask again (0: straight away).
+    nonisolated public static let relockDelayKey = "relockAfter"
+    private var relockDelay: TimeInterval { UserDefaults.standard.double(forKey: Self.relockDelayKey) }
+
+    /// PocketDesk left the screen: locked Macs ask again, now or after the chosen delay.
+    public func appLeftScreen() {
+        locks.left(at: .now, delay: relockDelay)
         store.send(.hostsChanged(discoveredHosts()))
     }
 
     /// Back on screen still showing a locked Mac: Face ID again, or the stream ends.
     public func checkLockOnReturn() {
+        locks.returned(at: .now, delay: relockDelay)
+        store.send(.hostsChanged(discoveredHosts()))
         guard case .streaming(let host, _, _) = store.state, locks.needsUnlock(host.hostID) else { return }
         Task {
             if await !unlock(host) { disconnect() }

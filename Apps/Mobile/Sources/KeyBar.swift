@@ -10,7 +10,12 @@ struct KeyBar: View {
     var sticky = StickyModifiers()
     let tapModifier: (MacModifiers) -> Void
     let tap: (UInt16) -> Void
+    /// A key with ⌘ (the editing keys), whatever the sticky modifiers.
+    let command: (UInt16) -> Void
     let dismiss: () -> Void
+    @AppStorage(SettingsKey.keyBarEditing) private var showsEditing = true
+    @AppStorage(SettingsKey.keyBarNavigation) private var showsNavigation = true
+    @AppStorage(SettingsKey.keyBarFunction) private var showsFunction = true
 
     private static let modifiers: [(MacModifiers, String, String)] = [
         (.control, "⌃", "Control"), (.option, "⌥", "Option"), (.shift, "⇧", "Shift"), (.command, "⌘", "Command"),
@@ -19,6 +24,11 @@ struct KeyBar: View {
         (MacKey.left, "arrow.left", "Left"), (MacKey.up, "arrow.up", "Up"),
         (MacKey.down, "arrow.down", "Down"), (MacKey.right, "arrow.right", "Right"),
     ]
+    /// Undo, Cut, Copy, Paste, as ⌘ and their letter.
+    private static let editing: [(UInt16, String, String)] = [
+        ("z", "arrow.uturn.backward", "Undo"), ("x", "scissors", "Cut"),
+        ("c", "doc.on.doc", "Copy"), ("v", "doc.on.clipboard", "Paste"),
+    ].compactMap { letter, symbol, name in KeyMap.stroke(for: Character(letter)).map { ($0.code, symbol, name) } }
     private static let navigation: [(UInt16, String, String)] = [
         (MacKey.forwardDelete, "delete.forward", "Forward Delete"),
         (MacKey.home, "arrow.up.to.line", "Home"), (MacKey.end, "arrow.down.to.line", "End"),
@@ -38,11 +48,20 @@ struct KeyBar: View {
                         ForEach(Self.arrows, id: \.0) { code, symbol, name in
                             key(symbol: symbol, label: name) { tap(code) }
                         }
-                        ForEach(Self.navigation, id: \.0) { code, symbol, name in
-                            key(symbol: symbol, label: name) { tap(code) }
+                        if showsEditing {
+                            ForEach(Self.editing, id: \.0) { code, symbol, name in
+                                key(symbol: symbol, label: name) { command(code) }
+                            }
                         }
-                        ForEach(Array(MacKey.functionKeys.enumerated()), id: \.offset) { index, code in
-                            key("F\(index + 1)", label: "F\(index + 1)") { tap(code) }
+                        if showsNavigation {
+                            ForEach(Self.navigation, id: \.0) { code, symbol, name in
+                                key(symbol: symbol, label: name) { tap(code) }
+                            }
+                        }
+                        if showsFunction {
+                            ForEach(Array(MacKey.functionKeys.enumerated()), id: \.offset) { index, code in
+                                key("F\(index + 1)", label: "F\(index + 1)") { tap(code) }
+                            }
                         }
                     }
                     .padding(.horizontal, 10)

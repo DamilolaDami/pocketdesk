@@ -36,4 +36,27 @@ struct MacLocksTests {
         locks.forget(studio)
         #expect(!locks.isLocked(studio))
     }
+
+    @Test func relocksOnlyAfterTheDelay() {
+        let mac = UUID()
+        var locks = MacLocks()
+        locks.set(mac, locked: true)
+        let left = Date(timeIntervalSince1970: 1000)
+        locks.left(at: left, delay: 60)
+        #expect(!locks.needsUnlock(mac))
+        locks.returned(at: left.addingTimeInterval(30), delay: 60)
+        #expect(!locks.needsUnlock(mac))
+        // Away again; the clock restarts.
+        locks.left(at: left.addingTimeInterval(100), delay: 60)
+        locks.returned(at: left.addingTimeInterval(170), delay: 60)
+        #expect(locks.needsUnlock(mac))
+    }
+
+    @Test func noDelayRelocksAsItLeaves() {
+        let mac = UUID()
+        var locks = MacLocks()
+        locks.set(mac, locked: true)
+        locks.left(at: .now, delay: 0)
+        #expect(locks.needsUnlock(mac))
+    }
 }

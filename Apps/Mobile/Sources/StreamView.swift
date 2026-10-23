@@ -118,6 +118,7 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private lazy var accessory = KeyBarAccessory(KeyBar(
         tapModifier: { [weak self] modifier in self?.sticky.tap(modifier) },
         tap: { [weak self] code in self?.tapKey(code) },
+        command: { [weak self] code in self?.onTapKey(code, .command) },
         dismiss: { [weak self] in self?.hideKeyboard() }))
     /// Hardware keys down now, with what each was sent as: the key-up must match.
     private var heldKeys: [UIKeyboardHIDUsage: UInt16] = [:]

@@ -2,11 +2,13 @@ import Foundation
 
 /// Macs locked behind Face ID (or the iPhone's passcode). Using a locked Mac (opening it,
 /// running its shortcuts, files, the clipboard) asks first; once unlocked it stays so until
-/// PocketDesk leaves the screen. Pure; `SessionController` does the asking and the saving.
+/// PocketDesk has been off the screen for the chosen delay. Pure; `SessionController` does the asking and the saving.
 struct MacLocks: Codable, Sendable, Equatable {
     private(set) var locked: Set<UUID> = []
     /// Unlocked since the app came to the front; never saved.
     private var unlocked: Set<UUID> = []
+    /// When PocketDesk left the screen; never saved.
+    private var leftAt: Date?
 
     private enum CodingKeys: String, CodingKey { case locked }
 
@@ -35,6 +37,19 @@ struct MacLocks: Codable, Sendable, Equatable {
 
     mutating func relockAll() {
         unlocked = []
+    }
+
+    /// PocketDesk left the screen. With no `delay`, locked Macs lock again straight away.
+    mutating func left(at date: Date, delay: TimeInterval) {
+        if leftAt == nil { leftAt = date }
+        if delay <= 0 { relockAll() }
+    }
+
+    /// Back on screen: locked Macs lock again if it was away at least `delay`.
+    mutating func returned(at date: Date, delay: TimeInterval) {
+        defer { leftAt = nil }
+        guard let leftAt, date.timeIntervalSince(leftAt) >= delay else { return }
+        relockAll()
     }
 
     mutating func forget(_ host: UUID) {

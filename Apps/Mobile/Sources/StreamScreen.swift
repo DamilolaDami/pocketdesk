@@ -21,6 +21,9 @@ struct StreamScreen: View {
     @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
     @AppStorage(SettingsKey.trackpad) private var trackpad = false
     @AppStorage(SettingsKey.streamQuality) private var quality = StreamQuality.best
+    @AppStorage(SettingsKey.hideInSwitcher) private var hideInSwitcher = true
+    @AppStorage(SettingsKey.keyboardOnOpen) private var keyboardOnOpen = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var controlsExpanded = true
     @State private var showsStatus = true
     /// The on-screen keyboard is up (not just the key bar a hardware keyboard leaves).
@@ -33,6 +36,13 @@ struct StreamScreen: View {
         }
         // Not the keyboard's: the control bar rides above the keyboard and its key bar.
         .ignoresSafeArea(.container)
+        // The app switcher shows a snapshot of the screen: not the Mac's, if asked.
+        .overlay {
+            if hideInSwitcher, scenePhase != .active {
+                PrivacyCover(hostName: hostName)
+            }
+        }
+        .onAppear { if keyboardOnOpen { keyboardShown = true } }
     }
 
     private func stream(isLandscape: Bool) -> some View {
@@ -304,3 +314,24 @@ struct WindowPicker: View {
     }
 }
 
+
+/// Stands in for the Mac's screen while PocketDesk isn't in front.
+private struct PrivacyCover: View {
+    let hostName: String
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.ultraThickMaterial)
+            VStack(spacing: 10) {
+                Image(systemName: "lock.display")
+                    .font(.system(size: 40, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text(hostName).font(.headline)
+                Text("Hidden while PocketDesk is in the background").font(.subheadline).foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+            .padding()
+        }
+        .ignoresSafeArea()
+    }
+}

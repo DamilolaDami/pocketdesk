@@ -22,7 +22,7 @@ struct PocketDeskApp: App {
         // prompt, which only makes it inactive).
         .onChange(of: scenePhase) { _, phase in
             switch phase {
-            case .background: controller.relockAll()
+            case .background: controller.appLeftScreen()
             case .active: controller.checkLockOnReturn()
             default: break
             }

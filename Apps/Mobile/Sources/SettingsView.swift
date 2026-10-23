@@ -19,6 +19,15 @@ enum SettingsKey {
     static let autoConnect = "autoConnect"
     /// Same key `SessionController.preferredQuality` reads.
     static let streamQuality = "streamQuality"
+    /// Seconds PocketDesk may be away before locked Macs ask again (`SessionController` reads it).
+    static let relockAfter = SessionController.relockDelayKey
+    /// Cover the Mac's picture when the app isn't in front (the app switcher shows a snapshot).
+    static let hideInSwitcher = "hideInSwitcher"
+    static let keyboardOnOpen = "keyboardOnOpen"
+    /// Which groups of keys the key bar above the keyboard shows.
+    static let keyBarEditing = "keyBarEditing"
+    static let keyBarNavigation = "keyBarNavigation"
+    static let keyBarFunction = "keyBarFunction"
 }
 
 struct SettingsView: View {
@@ -33,6 +42,12 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.trackpad) private var trackpad = false
     @AppStorage(SettingsKey.autoConnect) private var autoConnect = false
     @AppStorage(SettingsKey.streamQuality) private var quality = StreamQuality.best
+    @AppStorage(SettingsKey.relockAfter) private var relockAfter: Double = 0
+    @AppStorage(SettingsKey.hideInSwitcher) private var hideInSwitcher = true
+    @AppStorage(SettingsKey.keyboardOnOpen) private var keyboardOnOpen = false
+    @AppStorage(SettingsKey.keyBarEditing) private var keyBarEditing = true
+    @AppStorage(SettingsKey.keyBarNavigation) private var keyBarNavigation = true
+    @AppStorage(SettingsKey.keyBarFunction) private var keyBarFunction = true
     @State private var showingSiri = false
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
@@ -52,14 +67,6 @@ struct SettingsView: View {
                     } label: {
                         SettingsLabel("Run On", symbol: "laptopcomputer", color: Brand.accent)
                     }
-
-                } header: {
-                    Text("Shortcuts")
-                } footer: {
-                    Text("The Mac a shortcut connects to when you're not already streaming.")
-                }
-
-                Section {
                     Button {
                         showingSiri = true
                     } label: {
@@ -72,8 +79,11 @@ struct SettingsView: View {
                         }
                     }
                     .foregroundStyle(.primary)
+                } header: {
+                    Text("Shortcuts")
+                } footer: {
+                    Text("Run On is the Mac a shortcut connects to when you're not already streaming.")
                 }
-
 
                 Section {
                     Picker(selection: $quality) {
@@ -115,16 +125,65 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle(isOn: Binding(get: { allLocked },
+                                         set: { locked in Task { await controller.setAllLocked(locked) } })) {
+                        SettingsLabel("Lock All Macs", symbol: DeviceOwner.symbol, color: .green)
+                    }
+                    .disabled(paired.isEmpty)
+                    Picker(selection: $relockAfter) {
+                        Text("Immediately").tag(0.0)
+                        Text("After 1 Minute").tag(60.0)
+                        Text("After 5 Minutes").tag(300.0)
+                        Text("After 15 Minutes").tag(900.0)
+                    } label: {
+                        SettingsLabel("Lock Again", symbol: "timer", color: .orange)
+                    }
+                    Toggle(isOn: $hideInSwitcher) {
+                        SettingsLabel("Hide Mac in App Switcher", symbol: "eye.slash.fill", color: .gray)
+                    }
+                } header: {
+                    Text("Privacy & Security")
+                } footer: {
+                    Text("A locked Mac asks for \(DeviceOwner.method) before it's used. Lock Again is how long PocketDesk can be in the background before it asks again. Lock a single Mac from its page below.")
+                }
+
+                Section {
+                    Toggle(isOn: $keyboardOnOpen) {
+                        SettingsLabel("Show Keyboard on Open", symbol: "keyboard.fill", color: .blue)
+                    }
+                    Toggle(isOn: $keyBarEditing) {
+                        SettingsLabel("Undo, Cut, Copy, Paste", symbol: "scissors", color: .indigo)
+                    }
+                    Toggle(isOn: $keyBarNavigation) {
+                        SettingsLabel("Home, End, Page Keys", symbol: "arrow.up.to.line", color: .teal)
+                    }
+                    Toggle(isOn: $keyBarFunction) {
+                        SettingsLabel("Function Keys", symbol: "fn", color: .gray)
+                    }
+                } header: {
+                    Text("Keyboard")
+                } footer: {
+                    Text("Choose what the bar above the keyboard shows. Esc, Tab, ⌃ ⌥ ⇧ ⌘ and the arrows are always there.")
+                }
+
+                Section {
                     if paired.isEmpty {
                         Text("No Macs paired yet.").foregroundStyle(.secondary)
                     }
                     ForEach(paired) { mac in
-                        HStack(spacing: 12) {
-                            MacGlyph(kind: mac.kind, size: 30, status: mac.glyphStatus)
-                            Text(mac.name)
-                            Spacer()
-                            Text(mac.isOnline ? "Online" : mac.canWake ? "Asleep" : "Offline")
-                                .foregroundStyle(.secondary)
+                        NavigationLink {
+                            if let hostID = mac.hostID { MacSettingsView(controller: controller, hostID: hostID) }
+                        } label: {
+                            HStack(spacing: 12) {
+                                MacGlyph(kind: mac.kind, size: 30, status: mac.glyphStatus)
+                                Text(mac.name)
+                                if mac.isLocked {
+                                    Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(mac.isOnline ? "Online" : mac.canWake ? "Asleep" : "Offline")
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .swipeActions {
                             Button("Forget", systemImage: "trash", role: .destructive) { forget(mac) }
@@ -133,7 +192,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Paired Macs")
                 } footer: {
-                    if !paired.isEmpty { Text("Swipe to forget a Mac. It will need pairing again.") }
+                    if !paired.isEmpty { Text("Tap a Mac to rename it, lock it or see its security key.") }
                 }
 
                 Section("About") {
@@ -152,14 +211,29 @@ struct SettingsView: View {
                     } label: {
                         SettingsLabel("How It's Built", symbol: "cpu.fill", color: Brand.accent)
                     }
-                    Link(destination: URL(string: "https://github.com/DamilolaDami/pocketdesk")!) {
-                        HStack {
-                            SettingsLabel("Source Code", symbol: "chevron.left.forwardslash.chevron.right", color: .indigo)
-                            Spacer()
-                            Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-                        }
+                    NavigationLink {
+                        PrivacyView()
+                    } label: {
+                        SettingsLabel("Privacy", symbol: "hand.raised.fill", color: .blue)
+                    }
+                    NavigationLink {
+                        LicensesView()
+                    } label: {
+                        SettingsLabel("Licences", symbol: "doc.text.fill", color: .gray)
+                    }
+                    Link(destination: AppInfo.repository) {
+                        externalRow("Source Code", symbol: "chevron.left.forwardslash.chevron.right", color: .indigo)
                     }
                     .foregroundStyle(.primary)
+                }
+
+                Section {
+                    Link(destination: AppInfo.reportProblemURL) {
+                        externalRow("Report a Problem", symbol: "ladybug.fill", color: .red)
+                    }
+                    .foregroundStyle(.primary)
+                } footer: {
+                    Text("Opens a new issue on GitHub with the app, protocol and iOS versions filled in. Nothing else about you or your Macs is included.")
                 }
             }
             .scrollContentBackground(.hidden)
@@ -169,6 +243,16 @@ struct SettingsView: View {
                 SiriSettingsSheet(shortcuts: controller.store.shortcuts)
                     .presentationDetents([.medium, .large])
             }
+        }
+    }
+
+    private var allLocked: Bool { !paired.isEmpty && paired.allSatisfy(\.isLocked) }
+
+    private func externalRow(_ title: String, symbol: String, color: Color) -> some View {
+        HStack {
+            SettingsLabel(title, symbol: symbol, color: color)
+            Spacer()
+            Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
         }
     }
 
@@ -204,10 +288,6 @@ private struct SettingsLabel: View {
 }
 
 private struct AboutHeader: View {
-    private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–"
-    }
-
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: "iphone.and.arrow.forward.inward")
@@ -218,7 +298,7 @@ private struct AboutHeader: View {
                                            startPoint: .topLeading, endPoint: .bottomTrailing),
                             in: .rect(cornerRadius: 16, style: .continuous))
             Text("PocketDesk").font(.title2.weight(.bold))
-            Text("Version \(version) · Open source").font(.subheadline).foregroundStyle(.secondary)
+            Text("Version \(AppInfo.version) · Open source").font(.subheadline).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
     }

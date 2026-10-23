@@ -1,3 +1,4 @@
+import Foundation
 import PDProtocol
 
 /// How a Mac's connection feels, from its round trip, for the Mac cards.
@@ -94,4 +95,12 @@ extension ClipboardItem {
         let preview = line.count > 40 ? line.prefix(40) + "…" : Substring(line)
         return "Copied “\(preview)” from \(mac)"
     }
+}
+
+/// A paired Mac's pairing: the key this iPhone pinned (short form) and when.
+public struct MacPairing: Sendable, Equatable {
+    public var key: String
+    public var pairedAt: Date
+    /// The Mac's own name, before any renaming on this iPhone.
+    public var macName: String
 }

@@ -11,6 +11,11 @@ struct HostListView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showingLinkEntry = false
     @State private var renaming: DiscoveredHost?
+    /// The Mac the file pickers and browser are for.
+    @State private var filesHost: DiscoveredHost?
+    @State private var choosingPhotos = false
+    @State private var choosingFiles = false
+    @State private var browsingFiles = false
     @State private var newName = ""
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
@@ -62,6 +67,10 @@ struct HostListView: View {
                     Button("Pair with Link", systemImage: "link") { showingLinkEntry = true }
                 }
             }
+            .sendToMac(controller, hostID: filesHost?.hostID, photos: $choosingPhotos, files: $choosingFiles)
+            .sheet(isPresented: $browsingFiles) {
+                MacFilesBrowser(controller: controller, hostID: filesHost?.hostID) { browsingFiles = false }
+            }
             .sheet(isPresented: $showingLinkEntry) {
                 PairWithLinkSheet(controller: controller) { showingLinkEntry = false }
             }
@@ -93,6 +102,22 @@ struct HostListView: View {
             Button("Use in Trackpad Mode", systemImage: "cursorarrow") {
                 trackpad = true
                 controller.select(host)
+            }
+        }
+        if host.isOnline, host.needsUpdate == nil {
+            Section {
+                Button("Send Photos…", systemImage: "photo.on.rectangle") {
+                    filesHost = host
+                    choosingPhotos = true
+                }
+                Button("Send Files…", systemImage: "doc.badge.arrow.up") {
+                    filesHost = host
+                    choosingFiles = true
+                }
+                Button("Mac Files…", systemImage: "folder") {
+                    filesHost = host
+                    browsingFiles = true
+                }
             }
         }
         Button("Rename…", systemImage: "pencil") {

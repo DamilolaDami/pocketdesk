@@ -63,6 +63,7 @@ targets:
       - package: PocketDeskKit
         product: PDClientCore
       - target: PocketDeskWidgets
+      - target: PocketDeskShare
     info:
       path: Apps/Mobile/Info.plist
       properties:
@@ -101,3 +102,30 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.app.widgets
         CODE_SIGN_ENTITLEMENTS: Apps/Widgets/PocketDeskWidgets.entitlements
+
+  # Share sheet: sends photos and files to a Mac's Downloads folder, without opening the app.
+  PocketDeskShare:
+    type: app-extension
+    platform: iOS
+    sources: [Apps/Share/Sources]
+    dependencies:
+      - package: PocketDeskKit
+        product: PDClientCore
+    info:
+      path: Apps/Share/Info.plist
+      properties:
+        CFBundleDisplayName: PocketDesk
+        NSLocalNetworkUsageDescription: PocketDesk finds your Mac on the local network.
+        NSBonjourServices: [_pocketdesk._udp]
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsImageWithMaxCount: 20
+              NSExtensionActivationSupportsMovieWithMaxCount: 20
+              NSExtensionActivationSupportsFileWithMaxCount: 20
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.app.share
+        CODE_SIGN_ENTITLEMENTS: Apps/Share/PocketDeskShare.entitlements

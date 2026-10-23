@@ -1,5 +1,5 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 15
+public let protocolVersion: UInt16 = 16
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -60,6 +60,25 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     case menuBar(MenuBar?)
     /// Phone → host: choose a menu item. A fresh `menuBar` follows.
     case pressMenuItem(MenuPress)
+    /// Phone → host: a file for the Mac's Downloads folder. The Mac answers `fileAccepted`.
+    case sendFile(FileOffer)
+    /// The receiver is ready: send from `offset` (past 0 when resuming a cut-off transfer).
+    case fileAccepted(id: UInt64, offset: UInt64)
+    /// Phone → host: a file from a shared folder. The Mac answers `fileOffer`, then sends it.
+    case getFile(FileRequest)
+    /// Host → phone: the file `getFile` asked for is coming, this big.
+    case fileOffer(FileOffer)
+    /// Phone → host, on a stream of its own: one `FileChunk`, base64 (that stream carries JSON).
+    case fileData(String)
+    /// The receiver has this much of the file (see `FileChunk.window`).
+    case fileProgress(id: UInt64, received: UInt64)
+    /// Host → phone: saved in the Mac's Downloads folder under this name.
+    case fileSaved(id: UInt64, name: String)
+    /// Either side: the transfer stopped (or is being cancelled), and why.
+    case fileFailed(id: UInt64, reason: String)
+    /// Phone → host: what's in a shared folder (`FolderPath.shared`: which folders are shared).
+    case listFiles(FolderPath)
+    case fileList(FileList)
     case ping(UInt64)
     case pong(UInt64)
     case bye(reason: String)

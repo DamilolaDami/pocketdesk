@@ -32,7 +32,8 @@ let package = Package(
         .testTarget(name: "PDProtocolTests", dependencies: ["PDProtocol"]),
         .testTarget(name: "PDSecurityTests", dependencies: ["PDSecurity"]),
         .testTarget(name: "PDTransportTests", dependencies: ["PDTransport"]),
-        .testTarget(name: "PDHostCoreTests", dependencies: ["PDHostCore", "PDTransport"]),
+        // Also runs the phone's file transfers against a real host session.
+        .testTarget(name: "PDHostCoreTests", dependencies: ["PDHostCore", "PDTransport", "PDClientCore"]),
         // Uses the host's encoder to produce real HEVC for the client's assembler/decoder.
         .testTarget(name: "PDClientCoreTests", dependencies: ["PDClientCore", "PDHostCore", "PDSecurity"]),
     ]

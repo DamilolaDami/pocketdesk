@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The app keeps its paired Macs in the shared container. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.pocketdesk.app</string>
+	</array>
+	<!-- The same TLS identity as the app, so the Macs it paired with recognize this. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.pocketdesk.app</string>
+	</array>
+</dict>
+</plist>

@@ -54,6 +54,9 @@ public struct HostState: Sendable, Equatable {
             }
         case .sessionEnded(let peer):
             next.connected.removeAll { $0.id == peer }
+        case .fileReceived:
+            // A notification says so; the menu has nothing to show for it.
+            break
         }
         return next
     }

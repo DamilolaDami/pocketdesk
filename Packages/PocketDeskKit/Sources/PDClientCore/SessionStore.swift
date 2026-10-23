@@ -47,6 +47,21 @@ public final class SessionStore {
         self.windows = windows
     }
 
+    /// Files being sent to a Mac. Updated at most every megabyte, so never per frame.
+    public private(set) var transfers: [FileTransferStatus] = []
+
+    public func update(transfer: FileTransferStatus) {
+        if let index = transfers.firstIndex(where: { $0.id == transfer.id }) {
+            transfers[index] = transfer
+        } else {
+            transfers.append(transfer)
+        }
+    }
+
+    public func finishTransfer(_ id: UUID) {
+        transfers.removeAll { $0.id == id }
+    }
+
     /// The stream quality in effect (the setting, or Battery Saver in Low Power Mode).
     public private(set) var quality = StreamQuality.best
 
@@ -140,6 +155,35 @@ public struct StreamStats: Sendable, Equatable {
     public var bitrateKbps: Double = 0
 
     public init() {}
+}
+
+/// A file on its way to the Mac.
+public struct FileTransferStatus: Sendable, Equatable, Identifiable {
+    public var id: UUID
+    public var name: String
+    public var macName: String
+    public var isUpload: Bool
+    /// Which of how many being sent together.
+    public var position: Int
+    public var count: Int
+    public var done: UInt64 = 0
+    public var total: UInt64 = 0
+
+    public var fraction: Double { total == 0 ? 0 : Double(done) / Double(total) }
+}
+
+/// A file to send: a copy the app made (from Photos, Files or the share sheet) or the file itself.
+public struct OutgoingFile: Sendable, Equatable {
+    public var url: URL
+    public var name: String
+    /// A copy made for sending, deleted once it's sent.
+    public var isTemporary: Bool
+
+    public init(url: URL, name: String? = nil, isTemporary: Bool = false) {
+        self.url = url
+        self.name = name ?? url.lastPathComponent
+        self.isTemporary = isTemporary
+    }
 }
 
 public enum MenusState: Sendable, Equatable {

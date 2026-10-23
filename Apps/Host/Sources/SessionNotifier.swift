@@ -1,3 +1,4 @@
+import AppKit
 import PDHostCore
 import PDSecurity
 import UserNotifications
@@ -12,6 +13,8 @@ final class SessionNotifier: NSObject, UNUserNotificationCenterDelegate {
     /// Notification ID → what its buttons act on.
     private var sessions: [String: Fingerprint] = [:]
     private var approvals: [String: UUID] = [:]
+    /// Files received, so clicking the notification shows them in Finder.
+    private var files: [String: URL] = [:]
 
     private enum Category {
         static let session = "session"
@@ -64,6 +67,11 @@ final class SessionNotifier: NSObject, UNUserNotificationCenterDelegate {
         case .approvalResolved(let id):
             approvals["approval-\(id)"] = nil
             center.removeDeliveredNotifications(withIdentifiers: ["approval-\(id)"])
+        case .fileReceived(let deviceName, let url):
+            let id = "file-\(UUID())"
+            files[id] = url
+            post(id: id, category: nil, title: "“\(deviceName)” sent \(url.lastPathComponent)",
+                 body: "It's in your Downloads folder.")
         default:
             break
         }
@@ -98,6 +106,8 @@ final class SessionNotifier: NSObject, UNUserNotificationCenterDelegate {
             if let peer = sessions[id] { await controller.disconnect(peer) }
         case Action.allow, Action.deny:
             if let approval = approvals[id] { await controller.resolveApproval(approval, accepted: action == Action.allow) }
+        case UNNotificationDefaultActionIdentifier:
+            if let url = files.removeValue(forKey: id) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         default:
             break
         }

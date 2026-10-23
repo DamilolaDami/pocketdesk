@@ -11,6 +11,9 @@ import Synchronization
 /// - input:   QUIC datagrams, `InputEvent` binary
 /// - video:   unidirectional stream opened by the host, `VideoFrameHeader` + payload
 /// - audio:   separate unidirectional stream, `AudioFrameHeader` + raw AAC-LC
+/// - files:   host → client, a unidirectional stream of binary `FileChunk`s; client → host, a
+///            second bidirectional stream of `ControlMessage.fileData` (the host reads every
+///            stream the phone opens as JSON messages)
 ///
 /// The connection's lifetime is structured: it lives while the listener's or
 /// `QUICClient.connect`'s handler runs. `close()` stops this session's readers.
@@ -24,19 +27,27 @@ public final class QUICPeerSession: PeerSession {
     public let videoFrames: AsyncThrowingStream<(VideoFrameHeader, [UInt8]), any Error>
 
     public let audioFrames: AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>
+    public let fileChunks: AsyncThrowingStream<FileChunk, any Error>
 
     private let control: ControlStream
     private let datagrams: OnFirstUse<QUIC.Datagrams<QUICDatagram>>
     /// Host only, opened on first use (see `accept`).
     private let video: OnFirstUse<QUIC.Stream<QUICStream>>?
     private let audio: OnFirstUse<QUIC.Stream<QUICStream>>?
+    /// Host: its files stream. Client: its second stream for file data.
+    private let hostFiles: OnFirstUse<QUIC.Stream<QUICStream>>?
+    private let clientFiles: OnFirstUse<ControlStream>?
     private let readers: Mutex<[Task<Void, Never>]>
     private let finishAll: @Sendable () -> Void
 
     private init(peer: Fingerprint, control: ControlStream, datagrams: OnFirstUse<QUIC.Datagrams<QUICDatagram>>,
                  video: OnFirstUse<QUIC.Stream<QUICStream>>?, audio: OnFirstUse<QUIC.Stream<QUICStream>>?,
+                 hostFiles: OnFirstUse<QUIC.Stream<QUICStream>>?, clientFiles: OnFirstUse<ControlStream>?,
                  channels: Channels, readers: [Task<Void, Never>]) {
         self.peer = peer
+        self.hostFiles = hostFiles
+        self.clientFiles = clientFiles
+        self.fileChunks = channels.files.stream
         self.control = control
         self.datagrams = datagrams
         self.audioFrames = channels.audio.stream
@@ -58,6 +69,7 @@ public final class QUICPeerSession: PeerSession {
         if video == nil {
             Retired.keep(control)
             Retired.keep(datagrams)
+            if let clientFiles { Retired.keep(clientFiles) }
         }
     }
 
@@ -69,9 +81,23 @@ public final class QUICPeerSession: PeerSession {
         let channels = Channels()
         let firstStream = AsyncStream<ControlStream>.makeStream()
 
+        // The phone's first stream is its control stream; a later one carries file data.
+        let controlOpened = Mutex(false)
         let controlReader = Task {
             do {
                 try await connection.inboundStreams(prepending: { stream in Coder(ControlMessage.self, using: .json) { stream } }) { stream in
+                    let isControl = controlOpened.withLock { opened in
+                        defer { opened = true }
+                        return !opened
+                    }
+                    guard isControl else {
+                        for try await message in stream.messages {
+                            guard case .fileData(let text) = message.content, let data = Data(base64Encoded: text),
+                                  let chunk = try? FileChunk(decoding: data) else { continue }
+                            channels.files.continuation.yield(chunk)
+                        }
+                        return
+                    }
                     firstStream.continuation.yield(stream)
                     firstStream.continuation.finish()
                     for try await message in stream.messages {
@@ -82,6 +108,7 @@ public final class QUICPeerSession: PeerSession {
             } catch {
                 channels.control.continuation.finish(throwing: error)
             }
+            channels.files.continuation.finish()
             firstStream.continuation.finish()
         }
 
@@ -124,6 +151,7 @@ public final class QUICPeerSession: PeerSession {
 
         return QUICPeerSession(peer: peer, control: control, datagrams: OnFirstUse { datagrams },
                                video: OnFirstUse { try await open(0) }, audio: OnFirstUse { try await open(1) },
+                               hostFiles: OnFirstUse { try await open(2) }, clientFiles: nil,
                                channels: channels, readers: [controlReader, inputReader])
     }
 
@@ -148,8 +176,17 @@ public final class QUICPeerSession: PeerSession {
                 try await connection.inboundStreams { stream in
                     defer { Retired.keep(stream) } // see `deinit`
                     let tag = try await stream.receive(exactly: 1).content
-                    guard let kind = tag.first, kind <= 1 else { throw WireError.unknownTag }
+                    guard let kind = tag.first, kind <= 2 else { throw WireError.unknownTag }
                     while true {
+                        if kind == 2 {
+                            let header = try await stream.receive(exactly: FileChunk.headerSize).content
+                            // Length is bytes 16..<20, little-endian.
+                            let length = header.dropFirst(16).prefix(4).reversed().reduce(0) { $0 << 8 | Int($1) }
+                            guard length <= FileChunk.size else { throw WireError.invalidValue }
+                            let payload = length == 0 ? Data() : try await stream.receive(exactly: length).content
+                            channels.files.continuation.yield(try FileChunk(decoding: header + payload))
+                            continue
+                        }
                         if kind == 1 {
                             let bytes = try await stream.receive(exactly: AudioFrameHeader.encodedSize).content
                             let header = try AudioFrameHeader(decoding: bytes)
@@ -165,11 +202,13 @@ public final class QUICPeerSession: PeerSession {
                 }
                 channels.audio.continuation.finish()
                 channels.video.continuation.finish()
+                channels.files.continuation.finish()
             } catch {
                 Logger(subsystem: "com.pocketdesk", category: "transport")
                     .error("Media streams ended: \(String(describing: error), privacy: .public)")
                 channels.audio.continuation.finish(throwing: error)
                 channels.video.continuation.finish(throwing: error)
+                channels.files.continuation.finish(throwing: error)
             }
         }
         // The host may hang up while we're still setting up (e.g. it can't capture the
@@ -180,8 +219,11 @@ public final class QUICPeerSession: PeerSession {
             throw error
         }
 
+        let files = OnFirstUse(keptAfterClose: true) {
+            try await connection.openStream { stream in Coder(ControlMessage.self, using: .json) { stream } }
+        }
         return QUICPeerSession(peer: host, control: control, datagrams: OnFirstUse(keptAfterClose: true) { datagrams },
-                               video: nil, audio: nil,
+                               video: nil, audio: nil, hostFiles: nil, clientFiles: files,
                                channels: channels, readers: [controlReader, videoReader])
     }
 
@@ -217,6 +259,16 @@ public final class QUICPeerSession: PeerSession {
         try await Self.sendWhole(bytes, on: try await audio.value)
     }
 
+    public func send(chunk: FileChunk) async throws {
+        if let hostFiles {
+            try await Self.sendWhole(chunk.encoded(), on: try await hostFiles.value)
+        } else if let clientFiles {
+            try await clientFiles.value.send(.fileData(Data(chunk.encoded()).base64EncodedString()))
+        } else {
+            throw TransportError.wrongRole
+        }
+    }
+
     /// Sends one frame even if the caller is cancelled midway (the host restarts its pumps
     /// on every source or size change): half a frame would corrupt the stream's framing.
     private static func sendWhole(_ bytes: [UInt8], on stream: QUIC.Stream<QUICStream>) async throws {
@@ -243,6 +295,8 @@ public final class QUICPeerSession: PeerSession {
         await datagrams.close()
         await video?.close()
         await audio?.close()
+        await hostFiles?.close()
+        await clientFiles?.close()
     }
 }
 
@@ -288,7 +342,7 @@ private enum Retired {
     static func keep(_ object: any Sendable) { objects.withLock { $0.append(object) } }
 }
 
-/// The four inbound channels, created before the readers that feed them.
+/// The five inbound channels, created before the readers that feed them.
 private struct Channels: Sendable {
     let audio = AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>.makeStream(bufferingPolicy: .bufferingNewest(8))
     let control = AsyncThrowingStream<ControlMessage, any Error>.makeStream()
@@ -297,9 +351,12 @@ private struct Channels: Sendable {
     // encoded frame here corrupts everything until the next keyframe (smeared, ghosted video).
     // Pacing is the host's job: it drops frames before encoding when the network is behind.
     let video = AsyncThrowingStream<(VideoFrameHeader, [UInt8]), any Error>.makeStream(bufferingPolicy: .unbounded)
+    // Bounded by the transfers themselves: a sender stays within `FileChunk.window`.
+    let files = AsyncThrowingStream<FileChunk, any Error>.makeStream(bufferingPolicy: .unbounded)
 
     var finish: @Sendable () -> Void {
-        { [control, input, video, audio] in
+        { [control, input, video, audio, files] in
+            files.continuation.finish()
             audio.continuation.finish()
             control.continuation.finish()
             input.continuation.finish()

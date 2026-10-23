@@ -11,6 +11,8 @@ public final class LoopbackSession: PeerSession {
 
     public let audioFrames: AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error>
     private let peerAudio: AsyncThrowingStream<Audio, any Error>.Continuation
+    public let fileChunks: AsyncThrowingStream<FileChunk, any Error>
+    private let peerFiles: AsyncThrowingStream<FileChunk, any Error>.Continuation
 
     private let peerControl: AsyncThrowingStream<ControlMessage, any Error>.Continuation
     private let peerInput: AsyncThrowingStream<InputEvent, any Error>.Continuation
@@ -19,13 +21,15 @@ public final class LoopbackSession: PeerSession {
     private init(
         receiving streams: (AsyncThrowingStream<ControlMessage, any Error>,
                             AsyncThrowingStream<InputEvent, any Error>,
-                            AsyncThrowingStream<Video, any Error>, AsyncThrowingStream<Audio, any Error>),
+                            AsyncThrowingStream<Video, any Error>, AsyncThrowingStream<Audio, any Error>,
+                            AsyncThrowingStream<FileChunk, any Error>),
         sendingTo peer: (AsyncThrowingStream<ControlMessage, any Error>.Continuation,
                          AsyncThrowingStream<InputEvent, any Error>.Continuation,
-                         AsyncThrowingStream<Video, any Error>.Continuation, AsyncThrowingStream<Audio, any Error>.Continuation)
+                         AsyncThrowingStream<Video, any Error>.Continuation, AsyncThrowingStream<Audio, any Error>.Continuation,
+                         AsyncThrowingStream<FileChunk, any Error>.Continuation)
     ) {
-        (controlMessages, inputEvents, videoFrames, audioFrames) = streams
-        (peerControl, peerInput, peerVideo, peerAudio) = peer
+        (controlMessages, inputEvents, videoFrames, audioFrames, fileChunks) = streams
+        (peerControl, peerInput, peerVideo, peerAudio, peerFiles) = peer
     }
 
     /// Returns two connected ends: whatever one sends, the other receives.
@@ -38,13 +42,17 @@ public final class LoopbackSession: PeerSession {
         let toHostControl = AsyncThrowingStream<ControlMessage, any Error>.makeStream()
         let toHostInput = AsyncThrowingStream<InputEvent, any Error>.makeStream()
         let toHostVideo = AsyncThrowingStream<Video, any Error>.makeStream()
+        let toClientFiles = AsyncThrowingStream<FileChunk, any Error>.makeStream()
+        let toHostFiles = AsyncThrowingStream<FileChunk, any Error>.makeStream()
 
         let host = LoopbackSession(
-            receiving: (toHostControl.stream, toHostInput.stream, toHostVideo.stream, toHostAudio.stream),
-            sendingTo: (toClientControl.continuation, toClientInput.continuation, toClientVideo.continuation, toClientAudio.continuation))
+            receiving: (toHostControl.stream, toHostInput.stream, toHostVideo.stream, toHostAudio.stream, toHostFiles.stream),
+            sendingTo: (toClientControl.continuation, toClientInput.continuation, toClientVideo.continuation, toClientAudio.continuation,
+                        toClientFiles.continuation))
         let client = LoopbackSession(
-            receiving: (toClientControl.stream, toClientInput.stream, toClientVideo.stream, toClientAudio.stream),
-            sendingTo: (toHostControl.continuation, toHostInput.continuation, toHostVideo.continuation, toHostAudio.continuation))
+            receiving: (toClientControl.stream, toClientInput.stream, toClientVideo.stream, toClientAudio.stream, toClientFiles.stream),
+            sendingTo: (toHostControl.continuation, toHostInput.continuation, toHostVideo.continuation, toHostAudio.continuation,
+                        toHostFiles.continuation))
         return (host, client)
     }
 
@@ -58,7 +66,10 @@ public final class LoopbackSession: PeerSession {
         try yield((header, payload), to: peerAudio)
     }
 
+    public func send(chunk: FileChunk) async throws { try yield(chunk, to: peerFiles) }
+
     public func close() async {
+        peerFiles.finish()
         peerAudio.finish()
         peerControl.finish()
         peerInput.finish()

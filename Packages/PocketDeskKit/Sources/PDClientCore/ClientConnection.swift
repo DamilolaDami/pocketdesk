@@ -24,6 +24,8 @@ public enum ClientEvent: Sendable, Equatable {
     case macStatus(MacStatus)
     /// The frontmost Mac app's menus (after `watchMenus`); `nil` when they can't be read.
     case menuBar(MenuBar?)
+    /// File transfers over this stream (`nil` once it ends).
+    case files(MacFiles?)
     /// Something to tell the person without ending the session (a shortcut that failed).
     case notice(String)
     case ended(reason: String?)
@@ -159,11 +161,19 @@ public actor ClientConnection {
                                     inputs: AsyncStream<InputEvent>, outbox: AsyncStream<ControlMessage>,
                                     onEvent: @escaping @Sendable (ClientEvent) -> Void,
                                     hostReason: HostReason, playbackID: UUID) async throws {
+        let files = MacFiles(send: { try await session.send($0) }, sendChunk: { try await session.send(chunk: $0) })
+        onEvent(.files(files))
+        defer {
+            onEvent(.files(nil))
+            Task { await files.end() }
+        }
         // Whichever channel ends first ends the session.
         try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
                 for try await message in session.controlMessages {
                     switch message {
+                    case .fileAccepted, .fileOffer, .fileProgress, .fileSaved, .fileFailed, .fileList:
+                        await files.receive(message)
                     case .helloAck(let ack):
                         onEvent(.displays(ack.displays))
                         if let wake = ack.wake { onEvent(.wake(wake)) }
@@ -181,11 +191,16 @@ public actor ClientConnection {
                     case .ping(let value): try await session.send(.pong(value))
                     case .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon,
-                         .listMacShortcuts, .macShortcuts, .watchStatus, .watchMenus, .pressMenuItem, .setQuality:
+                         .listMacShortcuts, .macShortcuts, .watchStatus, .watchMenus, .pressMenuItem, .setQuality,
+                         .sendFile, .getFile, .fileData, .listFiles:
                         continue
                     }
                 }
                 return "control"
+            }
+            group.addTask {
+                for try await chunk in session.fileChunks { await files.receive(chunk) }
+                return "files"
             }
             group.addTask {
                 for try await (header, payload) in session.videoFrames {
@@ -375,6 +390,98 @@ extension ClientConnection {
                 }
             }
             if let failure { throw ClientError.hostEnded(failure) }
+        }
+    }
+}
+
+/// A connection with no picture for browsing and transferring files; it stays open until
+/// `close()` or the Mac goes away.
+public final class FilesConnection: Sendable {
+    public let files: MacFiles
+    private let closing: AsyncStream<Void>.Continuation
+    private let opening: OpeningFiles
+
+    fileprivate init(files: MacFiles, closing: AsyncStream<Void>.Continuation, opening: OpeningFiles) {
+        self.files = files
+        self.closing = closing
+        self.opening = opening
+    }
+
+    /// Says goodbye, and hangs up if the Mac doesn't within a few seconds.
+    public func close() {
+        closing.finish()
+        let opening = opening
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            opening.task.withLock { $0 }?.cancel()
+        }
+    }
+}
+
+extension ClientConnection {
+    /// Opens a connection with no picture for files (`FilesConnection`). Returns once the Mac
+    /// has said hello.
+    public static func openFiles(endpoint: NWEndpoint, hostFingerprint: Fingerprint, identity: DeviceIdentity,
+                                 deviceName: String) async throws -> FilesConnection {
+        let (closed, closing) = AsyncStream<Void>.makeStream()
+        let ready = OpeningFiles()
+        return try await withCheckedThrowingContinuation { continuation in
+            ready.continuation.withLock { $0 = continuation }
+            let task = Task {
+                do {
+                    try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+                        let files = MacFiles(send: { try await session.send($0) }, sendChunk: { try await session.send(chunk: $0) })
+                        try await session.send(.hello(Hello(deviceName: deviceName, viewport: Viewport(width: 0, height: 0, scale: 1),
+                                                            mode: .catalog)))
+                        try await withThrowingTaskGroup(of: String.self) { group in
+                            group.addTask {
+                                for try await message in session.controlMessages {
+                                    switch message {
+                                    case .helloAck:
+                                        ready.resume(.success(FilesConnection(files: files, closing: closing, opening: ready)))
+                                    case .bye(let reason): throw ClientError.hostEnded(reason)
+                                    case .ping(let value): try await session.send(.pong(value))
+                                    case _ where MacFiles.handles(message): await files.receive(message)
+                                    default: continue
+                                    }
+                                }
+                                return "control"
+                            }
+                            group.addTask {
+                                for try await chunk in session.fileChunks { await files.receive(chunk) }
+                                return "files"
+                            }
+                            group.addTask {
+                                for await _ in closed {}
+                                try await session.send(.bye(reason: "done"))
+                                return "bye"
+                            }
+                            defer { group.cancelAll() }
+                            // The Mac hangs up after the bye (or on its own); then it's over.
+                            while let channel = try await group.next(), channel != "control" {}
+                        }
+                        await files.end()
+                    }
+                    ready.resume(.failure(TransportError.closed))
+                } catch {
+                    ready.resume(.failure(error))
+                }
+            }
+            ready.task.withLock { $0 = task }
+        }
+    }
+}
+
+/// `openFiles` resumes its caller once, when the Mac says hello or the connection fails.
+private final class OpeningFiles: Sendable {
+    let continuation = Mutex<CheckedContinuation<FilesConnection, any Error>?>(nil)
+    /// The connection's task, for `FilesConnection.close` to cancel.
+    let task = Mutex<Task<Void, Never>?>(nil)
+
+    func resume(_ result: Result<FilesConnection, any Error>) {
+        continuation.withLock { continuation in
+            continuation?.resume(with: result)
+            continuation = nil
         }
     }
 }

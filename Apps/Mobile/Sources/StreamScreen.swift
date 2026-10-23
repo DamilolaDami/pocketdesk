@@ -13,6 +13,9 @@ struct StreamScreen: View {
     @State private var showingDisplays = false
     @State private var showingShortcuts = false
     @State private var showingMenus = false
+    @State private var choosingPhotos = false
+    @State private var choosingFiles = false
+    @State private var browsingFiles = false
     @AppStorage(SettingsKey.startInLandscape) private var startInLandscape = false
     @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
     @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
@@ -94,6 +97,10 @@ struct StreamScreen: View {
                 WindowPicker(controller: controller) { showingWindows = false }
                     .presentationDetents([.medium, .large])
             }
+            .sendToMac(controller, hostID: nil, photos: $choosingPhotos, files: $choosingFiles)
+            .sheet(isPresented: $browsingFiles) {
+                MacFilesBrowser(controller: controller, hostID: nil) { browsingFiles = false }
+            }
             .sheet(isPresented: $showingMenus) {
                 MenusSheet(controller: controller) { showingMenus = false }
                     .presentationDetents([.medium, .large])
@@ -155,6 +162,11 @@ struct StreamScreen: View {
                     Label("Quality: \(controller.store.quality.name)", systemImage: "sparkles.tv")
                 }
                 .pickerStyle(.menu)
+            }
+            Section {
+                Button("Send Photos…", systemImage: "photo.on.rectangle") { choosingPhotos = true }
+                Button("Send Files…", systemImage: "doc.badge.arrow.up") { choosingFiles = true }
+                Button("Mac Files…", systemImage: "folder") { browsingFiles = true }
             }
             Section {
                 // Not used often enough for the bar, which needs the room for Menus.

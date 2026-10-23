@@ -35,6 +35,8 @@ public enum HostEvent: Sendable, Equatable {
     case sessionStarted(peer: Fingerprint, deviceName: String)
     case sessionStreaming(peer: Fingerprint, config: StreamConfig, window: WindowInfo?)
     case sessionEnded(peer: Fingerprint)
+    /// A phone sent a file; it's in Downloads at `url`.
+    case fileReceived(deviceName: String, url: URL)
 }
 
 /// The host's long-running service: identity, listener (advertised over Bonjour), pinned
@@ -245,6 +247,8 @@ public actor HostService: PairingAuthority {
                 onEvent(.sessionStarted(peer: peer, deviceName: deviceName))
             case .streaming(let peer, let config, let window):
                 onEvent(.sessionStreaming(peer: peer, config: config, window: window))
+            case .fileReceived(_, let deviceName, let url):
+                onEvent(.fileReceived(deviceName: deviceName, url: url))
             }
         }
         let id = UUID()

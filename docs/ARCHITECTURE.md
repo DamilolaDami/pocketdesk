@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 15), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 16), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -322,6 +322,36 @@ parameter (`needsValueError`). Quick picks include Search YouTube, Netflix, Goog
   the bundled helper (tests, command line) the reader asks MediaRemote directly.
 - Tiles: Play / Pause shows the title and artist and swaps between play and pause; volume tiles
   show the level or "Muted".
+
+## Files (protocol v16)
+
+Photos and files go to the Mac's Downloads folder; the phone browses and fetches files from the
+folders the Mac shares.
+
+- **Channel**: file data never rides the control stream, so a big file can't hold up keys.
+  Mac → phone: a unidirectional stream tagged `2` carrying binary `FileChunk`s (21-byte header +
+  up to 256 KB). Phone → Mac: a second stream the phone opens; the host reads every phone stream
+  as JSON messages, so chunks go as `ControlMessage.fileData` (base64), and its reader routes
+  them to `PeerSession.fileChunks` instead of the control channel.
+- **Flow control and progress**: the receiver acknowledges with `fileProgress` at least every
+  1 MB; `FileSender` stays within `FileChunk.window` (4 MB) of the last acknowledgement, which
+  bounds memory on both sides (the channels themselves are unbounded).
+- **Resume**: `FileReceiver` keeps a part file under the transfer ID and answers with where to
+  carry on. Fetches use `FileEntry.transferID` (a hash of path, size and date), so fetching the
+  same file again resumes; uploads resume when retried with the same ID.
+- **Sending** (`sendFile` → `fileAccepted(offset)` → chunks → `fileSaved`): saved under a safe,
+  unused name (`FileOffer.safeName`, "name 2"…) and quarantined like an AirDrop. The Mac shows a
+  notification; clicking it reveals the file in Finder.
+- **Browsing** (`listFiles` / `getFile` → `fileOffer` → chunks): only Desktop, Documents and
+  Downloads, each off until switched on in the menu bar panel (which also triggers macOS's
+  folder-access prompt then, not while you're away). `SharedFolders.url(for:)` takes names
+  only and refuses anything that resolves outside the shared folder, links included.
+- **Outside a stream**: `ClientConnection.openFiles` holds a catalog-mode connection (no video)
+  while the browser is open or files are sending; on the Mac, "Ask Before Each Connection"
+  applies to files as it does to shortcuts.
+- **Share sheet**: the `PocketDeskShare` extension sends to the most recently used Mac. It uses
+  the app's TLS identity (same keychain access group) and its pairings, which now live in the
+  App Group container (`SharedStorage`, moved there on first launch).
 
 ## Mac menus on the phone (protocol v14)
 

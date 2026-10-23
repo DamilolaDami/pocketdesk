@@ -44,6 +44,8 @@ public actor HostSession {
         public var statusInterval: Duration
         /// How often the frontmost app is checked while the phone shows its menus.
         public var menusInterval: Duration
+        /// Where received files go, and which folders the phone may browse.
+        var files: HostFileTransfers.Folders = .standard
 
         public init(hostName: String, fps: Int = 60, maxFramesInFlight: Int = 2, refineFrames: Int = 8,
                     adaptInterval: Duration = .milliseconds(500), wake: WakeInfo? = nil,
@@ -64,6 +66,8 @@ public actor HostSession {
     public enum Event: Sendable {
         case connected(peer: Fingerprint, deviceName: String)
         case streaming(peer: Fingerprint, config: StreamConfig, window: WindowInfo?)
+        /// The phone sent a file; it's in Downloads at `url`.
+        case fileReceived(peer: Fingerprint, deviceName: String, url: URL)
     }
 
     public struct Stats: Sendable, Equatable {
@@ -89,6 +93,8 @@ public actor HostSession {
     private var clipboardTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var menusTask: Task<Void, Never>?
+    private var files: HostFileTransfers?
+    private var filesTask: Task<Void, Never>?
     /// Set after a menu item is pressed: its menus may have changed even if the app didn't.
     private var menusStale = false
     /// The Mac clipboard's change count as last sent or written; anything newer goes out.
@@ -192,6 +198,13 @@ public actor HostSession {
         }
         audioEnabled = hello.audioEnabled
         quality = hello.quality
+        let files = HostFileTransfers(session: session, peer: peer, folders: configuration.files) { [onEvent, peer] url in
+            onEvent(.fileReceived(peer: peer, deviceName: hello.deviceName, url: url))
+        }
+        self.files = files
+        filesTask = Task { [session] in
+            do { for try await chunk in session.fileChunks { await files.handle(chunk) } } catch {}
+        }
         viewport = hello.viewport
         if hello.mode == .catalog {
             // A quick question from the shortcut editor, or a shortcut run from Siri or a widget:
@@ -212,6 +225,20 @@ public actor HostSession {
                         continue
                     }
                     try await run(action)
+                case _ where HostFileTransfers.handles(message):
+                    // Files are using the Mac too.
+                    if allowed == nil { allowed = await pairing.allowSession(peer: peer, deviceName: hello.deviceName) }
+                    guard allowed == true else {
+                        if case .listFiles(let path) = message {
+                            try await session.send(.fileList(FileList(path: path, entries: [], problem: "The Mac didn't allow this.")))
+                        } else if case .sendFile(let offer) = message {
+                            try await session.send(.fileFailed(id: offer.id, reason: "The Mac didn't allow this."))
+                        } else if case .getFile(let request) = message {
+                            try await session.send(.fileFailed(id: request.id, reason: "The Mac didn't allow this."))
+                        }
+                        continue
+                    }
+                    await files.handle(message)
                 case .bye: return
                 default: continue
                 }
@@ -305,6 +332,8 @@ public actor HostSession {
             case .watchMenus(let watch):
                 menusTask?.cancel()
                 menusTask = watch ? Task { await self.watchMenus() } : nil
+            case .sendFile, .getFile, .fileProgress, .fileFailed, .listFiles:
+                await files.handle(message)
             case .pressMenuItem(let press):
                 do {
                     try await menus.press(press)
@@ -324,7 +353,8 @@ public actor HostSession {
             case .bye:
                 return
             case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
-                 .actionFailed, .apps, .appIcon, .macShortcuts, .macStatus, .menuBar:
+                 .actionFailed, .apps, .appIcon, .macShortcuts, .macStatus, .menuBar,
+                 .fileAccepted, .fileOffer, .fileData, .fileSaved, .fileList:
                 continue
             }
         }
@@ -670,6 +700,10 @@ public actor HostSession {
         statusTask = nil
         menusTask?.cancel()
         menusTask = nil
+        filesTask?.cancel()
+        filesTask = nil
+        await files?.stop()
+        files = nil
         if let clipboardTask {
             clipboardTask.cancel()
             await clipboardTask.value

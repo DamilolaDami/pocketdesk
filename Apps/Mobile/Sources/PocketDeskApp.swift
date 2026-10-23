@@ -60,6 +60,12 @@ struct RootView: View {
                 }
         }
         .overlay(alignment: .top) {
+            // Files on their way to a Mac, from any screen (and the share sheet's handoff).
+            TransfersBanner(transfers: controller.store.transfers)
+                .opacity(controller.store.notice == nil ? 1 : 0)
+                .animation(.smooth, value: controller.store.transfers.isEmpty)
+        }
+        .overlay(alignment: .top) {
             if let notice = controller.store.notice {
                 NoticeBanner(notice: notice)
                     .padding(.horizontal, 16)

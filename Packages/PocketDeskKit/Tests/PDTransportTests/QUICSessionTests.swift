@@ -86,6 +86,42 @@ struct QUICSessionTests {
         #expect(await received.messages.contains(.bye(reason: "done")))
     }
 
+    /// Files go on streams of their own both ways, and the phone's doesn't end the control stream.
+    @Test func fileChunksFlowBothWays() async throws {
+        defer { removeIdentities() }
+        let phone = phoneIdentity.fingerprint
+        let listener = try QUICHostListener(identity: hostIdentity, advertise: nil) { $0 == phone }
+        let big = [UInt8]((0..<FileChunk.size).map { UInt8(truncatingIfNeeded: $0) })
+
+        let server = Task {
+            try await listener.run { session in
+                var controls = session.controlMessages.makeAsyncIterator()
+                guard case .hello = try await controls.next() else { return }
+                var chunks = session.fileChunks.makeAsyncIterator()
+                let first = try #require(try await chunks.next())
+                let second = try #require(try await chunks.next())
+                try await session.send(chunk: FileChunk(id: 2, offset: 0, bytes: [9, 9], isLast: true))
+                try await session.send(.fileSaved(id: first.id, name: "got \(first.bytes.count + second.bytes.count)"))
+                // Still listening on the control stream.
+                if case .bye = try await controls.next() { return }
+            }
+        }
+        defer { server.cancel() }
+
+        let port = try await waitForPort(listener)
+        try await QUICClient.connect(to: .hostPort(host: "127.0.0.1", port: .init(rawValue: port)!),
+                                     identity: phoneIdentity, host: hostIdentity.fingerprint) { session in
+            try await session.send(.hello(Hello(deviceName: "Phone", viewport: Viewport(width: 400, height: 800, scale: 3))))
+            try await session.send(chunk: FileChunk(id: 1, offset: 0, bytes: big, isLast: false))
+            try await session.send(chunk: FileChunk(id: 1, offset: UInt64(big.count), bytes: [], isLast: true))
+            var chunks = session.fileChunks.makeAsyncIterator()
+            #expect(try await chunks.next() == FileChunk(id: 2, offset: 0, bytes: [9, 9], isLast: true))
+            var controls = session.controlMessages.makeAsyncIterator()
+            #expect(try await controls.next() == .fileSaved(id: 1, name: "got \(big.count)"))
+            try await session.send(.bye(reason: "done"))
+        }
+    }
+
     @Test func hostRejectsUnpinnedPhone() async throws {
         defer { removeIdentities() }
         let listener = try QUICHostListener(identity: hostIdentity, advertise: nil) { _ in false }

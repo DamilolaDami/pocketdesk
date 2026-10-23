@@ -98,20 +98,22 @@ public final class SessionController {
     private var catalogFetchedAt: [UUID: ContinuousClock.Instant] = [:]
     private var heldKey: (code: UInt16, task: Task<Void, Never>)?
     private var statusTask: Task<Void, Never>?
+    /// File transfers over the stream, while there is one.
+    private var streamFiles: MacFiles?
     /// Follows Low Power Mode, which switches the stream to Battery Saver.
     private var powerStateTask: Task<Void, Never>?
     /// Screens showing live status (the Macs tab, the Shortcuts tab): it stops when none are.
     private var statusWatchers: Set<String> = []
 
     public init(identityLabel: String = "com.pocketdesk.phone.identity",
-                trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json"),
+                trustStoreURL: URL = SharedStorage.url("paired-macs.json"),
                 shortcutsURL: URL = ShortcutLibrary.sharedURL,
                 cacheDirectory: URL = URL.cachesDirectory.appending(path: "PocketDesk"),
-                displayPreferencesURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/displays.json"),
-                wakeBookURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/wake.json"),
-                macKindsURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/mac-kinds.json"),
-                macNamesURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/mac-names.json"),
-                lastUsedURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/last-used.json")) {
+                displayPreferencesURL: URL = SharedStorage.url("displays.json"),
+                wakeBookURL: URL = SharedStorage.url("wake.json"),
+                macKindsURL: URL = SharedStorage.url("mac-kinds.json"),
+                macNamesURL: URL = SharedStorage.url("mac-names.json"),
+                lastUsedURL: URL = SharedStorage.url("last-used.json")) {
         self.macNamesURL = macNamesURL
         self.macNames = (try? PerMac.load(from: macNamesURL)) ?? PerMac()
         self.lastUsedURL = lastUsedURL
@@ -365,6 +367,8 @@ public final class SessionController {
             store.update(macStatus: status)
         case .notice(let text):
             store.post(notice: text)
+        case .files(let files):
+            streamFiles = files
         case .ended(let reason):
             stopKeyRepeat()
             activeConnectionID = nil
@@ -550,7 +554,7 @@ public final class SessionController {
                     let mac = try await runInBackground(shortcut.id, preferredHostID: host.hostID, text: text)
                     store.post(notice: "\(shortcut.name): done on \(mac)", kind: .done)
                 } catch {
-                    store.post(notice: error.description)
+                    store.post(notice: String(describing: error))
                 }
             }
             return true
@@ -700,6 +704,93 @@ public final class SessionController {
     private func iconURL(_ bundleID: String) -> URL {
         // Bundle IDs are reverse-DNS; keep only filename-safe characters anyway.
         cacheDirectory.appending(path: "app-icons/\(bundleID.filter { $0.isLetter || $0.isNumber || ".-_".contains($0) }).png")
+    }
+
+    // MARK: Files
+
+    /// File transfers with a Mac: the stream's when streaming from it (or `hostID` is `nil`),
+    /// otherwise a connection of its own, which `close` hangs up.
+    public struct FilesLink: Sendable {
+        public let files: MacFiles
+        public let macName: String
+        public let close: @Sendable () -> Void
+    }
+
+    public enum FilesError: Error, CustomStringConvertible {
+        case noMac
+        case failed(String)
+
+        public var description: String {
+            switch self {
+            case .noMac: "None of your Macs is reachable. Open PocketDesk on your Mac, or check it's awake."
+            case .failed(let reason): reason
+            }
+        }
+    }
+
+    public func openFiles(on hostID: UUID?) async throws(FilesError) -> FilesLink {
+        if case .streaming(let host, _, _) = store.state, let streamFiles, hostID == nil || hostID == host.hostID {
+            return FilesLink(files: streamFiles, macName: host.name, close: {})
+        }
+        guard let host = shortcutTarget(preferredHostID: hostID), let macID = host.hostID,
+              let browsedHost = browsed[host.id], let peer = trustStore.peer(hostID: macID) else { throw .noMac }
+        let identity: DeviceIdentity
+        do { identity = try DeviceIdentity.loadOrCreate(label: identityLabel) } catch {
+            throw .failed("Couldn't load this phone's identity: \(error)")
+        }
+        do {
+            let connection = try await ClientConnection.openFiles(endpoint: browsedHost.endpoint, hostFingerprint: peer.fingerprint,
+                                                                  identity: identity, deviceName: deviceName)
+            return FilesLink(files: connection.files, macName: host.name, close: { connection.close() })
+        } catch {
+            throw .failed(ClientConnection.describe(error))
+        }
+    }
+
+    /// Sends files to a Mac's Downloads folder one after another, showing progress in the
+    /// store. Returns the names the Mac saved them under.
+    @discardableResult
+    public func send(_ items: [OutgoingFile], to hostID: UUID?) async throws(FilesError) -> [String] {
+        guard !items.isEmpty else { return [] }
+        let link = try await openFiles(on: hostID)
+        defer { link.close() }
+        var saved: [String] = []
+        for (index, item) in items.enumerated() {
+            let id = UUID()
+            store.update(transfer: FileTransferStatus(id: id, name: item.name, macName: link.macName, isUpload: true,
+                                                      position: index + 1, count: items.count))
+            do {
+                for try await progress in await link.files.upload(item.url, name: item.name) {
+                    switch progress {
+                    case .transferring(let done, let total):
+                        store.update(transfer: FileTransferStatus(id: id, name: item.name, macName: link.macName, isUpload: true,
+                                                                  position: index + 1, count: items.count, done: done, total: total))
+                    case .saved(let name): saved.append(name)
+                    case .downloaded: break
+                    }
+                }
+                store.finishTransfer(id)
+            } catch {
+                store.finishTransfer(id)
+                throw .failed("“\(item.name)” didn't reach \(link.macName): \(error)")
+            }
+        }
+        return saved
+    }
+
+    /// `send(_:to:)` for buttons: says how it went in a notice.
+    public func sendInBackground(_ items: [OutgoingFile], to hostID: UUID?) {
+        Task {
+            do {
+                let saved = try await send(items, to: hostID)
+                guard !saved.isEmpty else { return }
+                store.post(notice: saved.count == 1 ? "Sent “\(saved[0])” to Downloads on your Mac"
+                                                    : "Sent \(saved.count) items to Downloads on your Mac", kind: .done)
+            } catch {
+                store.post(notice: String(describing: error))
+            }
+            for item in items where item.isTemporary { try? FileManager.default.removeItem(at: item.url) }
+        }
     }
 
     // MARK: Library

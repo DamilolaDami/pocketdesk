@@ -25,12 +25,14 @@ public final class ThrottledSession: PeerSession {
     public var inputEvents: AsyncThrowingStream<InputEvent, any Error> { inner.inputEvents }
     public var videoFrames: AsyncThrowingStream<(VideoFrameHeader, [UInt8]), any Error> { inner.videoFrames }
     public var audioFrames: AsyncThrowingStream<(AudioFrameHeader, [UInt8]), any Error> { inner.audioFrames }
+    public var fileChunks: AsyncThrowingStream<FileChunk, any Error> { inner.fileChunks }
 
     public func send(_ message: ControlMessage) async throws { try await inner.send(message) }
     public func send(_ input: InputEvent) async throws { try await inner.send(input) }
     public func send(audio header: AudioFrameHeader, payload: [UInt8]) async throws {
         try await inner.send(audio: header, payload: payload)
     }
+    public func send(chunk: FileChunk) async throws { try await inner.send(chunk: chunk) }
 
     public func send(frame header: VideoFrameHeader, payload: [UInt8]) async throws {
         let bitsPerSecond = bitsPerSecond.load(ordering: .relaxed)

@@ -1,4 +1,5 @@
 import PDHostCore
+import PDProtocol
 import PDSecurity
 import SwiftUI
 
@@ -8,6 +9,7 @@ struct MenuContent: View {
     @State private var permissions = HostPermissions.current()
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var askBeforeConnecting = false
+    @State private var sharedFolders = SharedFolders.current.enabled
     /// `nil` until checked, or if `pmset` couldn't say.
     @State private var wakeForNetworkAccess: Bool?
     @Environment(\.openWindow) private var openWindow
@@ -123,6 +125,20 @@ struct MenuContent: View {
                     controller.askBeforeConnecting = ask
                     askBeforeConnecting = ask
                 }))
+                // Paired phones can browse these and fetch files from them.
+                Menu("Share Files with Phones") {
+                    ForEach(SharedFolder.allCases, id: \.self) { folder in
+                        Toggle(folder.name, isOn: Binding(get: { sharedFolders.contains(folder) }, set: { shared in
+                            SharedFolders.setShared(folder, shared)
+                            sharedFolders = SharedFolders.current.enabled
+                            // Reading it now brings up macOS's "allow access" prompt while
+                            // you're here, not later while you're away using your phone.
+                            if shared, let url = SharedFolders.userLocations[folder] {
+                                _ = try? FileManager.default.contentsOfDirectory(atPath: url.path)
+                            }
+                        }))
+                    }
+                }
                 Divider()
                 Button("Quit PocketDesk") { NSApplication.shared.terminate(nil) }
                     .keyboardShortcut("q")

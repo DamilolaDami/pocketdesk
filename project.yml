@@ -50,6 +50,8 @@ targets:
     type: library.dynamic
     platform: macOS
     sources: [Apps/NowPlaying]
+    dependencies:
+      - sdk: ImageIO.framework
     settings:
       base:
         EXECUTABLE_PREFIX: ""

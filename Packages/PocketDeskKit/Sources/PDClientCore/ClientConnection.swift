@@ -15,6 +15,8 @@ public enum ClientEvent: Sendable, Equatable {
     case displays([DisplayInfo])
     /// How to wake this Mac later (from its `helloAck`).
     case wake(WakeInfo)
+    /// Its desktop picture, JPEG (from its `helloAck`).
+    case wallpaper(Data)
     /// Something copied on the Mac.
     case clipboard(ClipboardItem)
     case streamConfig(StreamConfig)
@@ -177,6 +179,7 @@ public actor ClientConnection {
                     case .helloAck(let ack):
                         onEvent(.displays(ack.displays))
                         if let wake = ack.wake { onEvent(.wake(wake)) }
+                        if let wallpaper = ack.wallpaper.flatMap({ Data(base64Encoded: $0) }) { onEvent(.wallpaper(wallpaper)) }
                     case .displays(let displays): onEvent(.displays(displays))
                     case .streamConfig(let config): onEvent(.streamConfig(config))
                     case .linkQuality(let quality): onEvent(.linkQuality(quality))
@@ -334,8 +337,19 @@ extension ClientConnection {
 extension ClientConnection {
     /// A connection with no video that just listens: the Mac's status now and on every
     /// change, for live tiles. Runs until cancelled or the Mac goes away.
+    public enum StatusUpdate: Sendable, Equatable {
+        case status(MacStatus)
+        /// A round trip to the Mac and back.
+        case latency(Duration)
+        /// Its desktop picture, JPEG.
+        case wallpaper(Data)
+    }
+
+    /// The Mac's status as it changes, and a round-trip time every `pingInterval` (a Mac too
+    /// old to answer pings just never sends one).
     public static func watchStatus(endpoint: NWEndpoint, hostFingerprint: Fingerprint, identity: DeviceIdentity,
-                                   deviceName: String) -> AsyncThrowingStream<MacStatus, any Error> {
+                                   deviceName: String, pingInterval: Duration = .seconds(2))
+        -> AsyncThrowingStream<StatusUpdate, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -344,10 +358,25 @@ extension ClientConnection {
                         try await session.send(.hello(Hello(deviceName: deviceName, viewport: Viewport(width: 0, height: 0, scale: 1),
                                                             mode: .catalog)))
                         try await session.send(.watchStatus)
+                        let clock = ContinuousClock()
+                        let start = clock.now
+                        let pinger = Task {
+                            while !Task.isCancelled {
+                                try? await session.send(.ping(UInt64((clock.now - start) / .microseconds(1))))
+                                try? await Task.sleep(for: pingInterval)
+                            }
+                        }
+                        defer { pinger.cancel() }
                         // Cancelling ends this wait and closes the connection, which stops the Mac's polling.
                         while let message = try await control.next() {
                             switch message {
-                            case .macStatus(let status): continuation.yield(status)
+                            case .macStatus(let status): continuation.yield(.status(status))
+                            case .helloAck(let ack):
+                                if let wallpaper = ack.wallpaper.flatMap({ Data(base64Encoded: $0) }) {
+                                    continuation.yield(.wallpaper(wallpaper))
+                                }
+                            case .pong(let sent):
+                                continuation.yield(.latency(clock.now - start - .microseconds(Int64(sent))))
                             case .ping(let value): try await session.send(.pong(value))
                             case .bye(let reason): throw ClientError.hostEnded(reason)
                             default: continue

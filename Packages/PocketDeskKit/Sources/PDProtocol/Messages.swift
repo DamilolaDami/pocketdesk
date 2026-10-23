@@ -258,12 +258,19 @@ public struct HelloAck: Codable, Sendable, Equatable {
     public var displays: [DisplayInfo]
     /// How to wake this Mac from sleep later. Sent only inside the encrypted session.
     public var wake: WakeInfo?
+    /// The desktop picture, as base64 JPEG at most `wallpaperSize` pixels wide, for drawing this
+    /// Mac on the phone. Optional, so phones and Macs without it still understand each other.
+    public var wallpaper: String?
 
-    public init(version: UInt16 = protocolVersion, hostName: String, displays: [DisplayInfo], wake: WakeInfo? = nil) {
+    public static let wallpaperSize = 480
+
+    public init(version: UInt16 = protocolVersion, hostName: String, displays: [DisplayInfo], wake: WakeInfo? = nil,
+                wallpaper: String? = nil) {
         self.version = version
         self.hostName = hostName
         self.displays = displays
         self.wake = wake
+        self.wallpaper = wallpaper
     }
 }
 
@@ -421,11 +428,28 @@ public struct MacStatus: Codable, Sendable, Equatable {
     public var muted: Bool?
     /// `nil` when nothing is playing, or when macOS won't say.
     public var nowPlaying: NowPlaying?
+    /// `nil` on a Mac without one (or from a Mac that doesn't send it).
+    public var battery: MacBattery?
 
-    public init(volume: Int? = nil, muted: Bool? = nil, nowPlaying: NowPlaying? = nil) {
+    public init(volume: Int? = nil, muted: Bool? = nil, nowPlaying: NowPlaying? = nil, battery: MacBattery? = nil) {
         self.volume = volume
         self.muted = muted
         self.nowPlaying = nowPlaying
+        self.battery = battery
+    }
+}
+
+public struct MacBattery: Codable, Sendable, Equatable {
+    /// 0–100.
+    public var level: Int
+    public var isCharging: Bool
+    /// Plugged in, charging or not (full, or holding at a limit).
+    public var onPower: Bool
+
+    public init(level: Int, isCharging: Bool, onPower: Bool) {
+        self.level = level
+        self.isCharging = isCharging
+        self.onPower = onPower
     }
 }
 
@@ -433,11 +457,33 @@ public struct NowPlaying: Codable, Sendable, Equatable {
     public var title: String
     public var artist: String?
     public var isPlaying: Bool
+    /// The cover, as base64 JPEG at most `artworkSize` pixels on a side, when the player has one.
+    /// Optional, so phones and Macs without it still understand each other.
+    public var artwork: String?
+    /// The Mac app playing it (Spotify, Music, or the browser a video is in), to show and open.
+    public var app: PlayerApp?
 
-    public init(title: String, artist: String? = nil, isPlaying: Bool) {
+    public static let artworkSize = 240
+
+    public init(title: String, artist: String? = nil, isPlaying: Bool, artwork: String? = nil, app: PlayerApp? = nil) {
         self.title = title
         self.artist = artist
         self.isPlaying = isPlaying
+        self.artwork = artwork
+        self.app = app
+    }
+}
+
+public struct PlayerApp: Codable, Sendable, Equatable {
+    public var bundleID: String
+    public var name: String
+    /// Base64 PNG of its icon, `MacApp`-sized.
+    public var icon: String?
+
+    public init(bundleID: String, name: String, icon: String? = nil) {
+        self.bundleID = bundleID
+        self.name = name
+        self.icon = icon
     }
 }
 

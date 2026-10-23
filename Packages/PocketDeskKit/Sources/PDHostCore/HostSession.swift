@@ -38,6 +38,8 @@ public actor HostSession {
         public var adaptInterval: Duration
         /// Told to the phone in `helloAck` so it can wake this Mac later.
         public var wake: WakeInfo?
+        /// The desktop picture for `helloAck`, so the phone can draw this Mac.
+        public var wallpaper: String?
         /// How often the Mac's clipboard is checked for something new to send.
         public var clipboardInterval: Duration
         /// How often volume and now playing are checked for a phone watching them.
@@ -50,7 +52,8 @@ public actor HostSession {
         public init(hostName: String, fps: Int = 60, maxFramesInFlight: Int = 2, refineFrames: Int = 8,
                     adaptInterval: Duration = .milliseconds(500), wake: WakeInfo? = nil,
                     clipboardInterval: Duration = .milliseconds(500), statusInterval: Duration = .seconds(1),
-                    menusInterval: Duration = .milliseconds(500)) {
+                    menusInterval: Duration = .milliseconds(500), wallpaper: String? = nil) {
+            self.wallpaper = wallpaper
             self.clipboardInterval = clipboardInterval
             self.menusInterval = menusInterval
             self.statusInterval = statusInterval
@@ -210,13 +213,15 @@ public actor HostSession {
             // A quick question from the shortcut editor, or a shortcut run from Siri or a widget:
             // no picture, no input, no "connected".
             try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: [],
-                                                      wake: configuration.wake)))
+                                                      wake: configuration.wake, wallpaper: configuration.wallpaper)))
             var allowed: Bool?
             defer { statusTask?.cancel() }
             while let message = try await messages.next() {
                 switch message {
                 case .listApps, .requestAppIcons, .listMacShortcuts: try await answer(message)
                 case .watchStatus: startWatchingStatus()
+                // The Mac cards show the round trip.
+                case .ping(let value): try await session.send(.pong(value))
                 case .run(let action):
                     // Running something is using the Mac: "Ask Before Each Connection" applies.
                     if allowed == nil { allowed = await pairing.allowSession(peer: peer, deviceName: hello.deviceName) }
@@ -255,7 +260,7 @@ public actor HostSession {
             // Listing displays already needs Screen Recording, so it's inside the goodbye path.
             let displays = try await frameSource.displays()
             try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: displays,
-                                                      wake: configuration.wake)))
+                                                      wake: configuration.wake, wallpaper: configuration.wallpaper)))
             let preferred = hello.preferredDisplayID.flatMap { saved in displays.first { $0.persistentID == saved }?.id }
             do {
                 try await startStreaming(preferred.map(CaptureSource.display))

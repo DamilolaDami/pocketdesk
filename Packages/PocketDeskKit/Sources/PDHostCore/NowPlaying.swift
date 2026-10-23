@@ -29,13 +29,28 @@ enum NowPlayingReader {
         return parseHelper(result.output)
     }
 
-    /// One JSON line: `{"title": …, "artist": …, "isPlaying": true}`, or `{}`.
+    /// One JSON line: `{"title": …, "artist": …, "isPlaying": true, "artwork": base64 JPEG}`, or `{}`.
     static func parseHelper(_ output: String) -> NowPlaying? {
         guard let line = output.split(whereSeparator: \.isNewline).last,
               let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
               let title = json["title"] as? String, !title.isEmpty else { return nil }
         return NowPlaying(title: title, artist: json["artist"] as? String,
-                          isPlaying: (json["isPlaying"] as? Bool) ?? ((json["isPlaying"] as? Int) ?? 0 > 0))
+                          isPlaying: (json["isPlaying"] as? Bool) ?? ((json["isPlaying"] as? Int) ?? 0 > 0),
+                          artwork: (json["artwork"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                          app: (json["app"] as? String).flatMap(app(at:)))
+    }
+
+    /// The app at a bundle path, by its ID and the name Finder shows.
+    static func app(at path: String) -> PlayerApp? {
+        guard let bundleID = Bundle(path: path)?.bundleIdentifier else { return nil }
+        let name = FileManager.default.displayName(atPath: path)
+        return PlayerApp(bundleID: bundleID, name: name.hasSuffix(".app") ? String(name.dropLast(4)) : name)
+    }
+
+    /// The player's cover shrunk to `NowPlaying.artworkSize` as base64 JPEG (covers can be
+    /// megabytes, and this goes out every time the status changes).
+    static func artwork(from data: Data) -> String? {
+        JPEGThumbnail.base64(from: data, maxPixels: NowPlaying.artworkSize)
     }
     private typealias GetInfo = @convention(c) (DispatchQueue, @escaping @Sendable (CFDictionary?) -> Void) -> Void
 
@@ -66,7 +81,8 @@ enum NowPlayingReader {
         guard let title = info["kMRMediaRemoteNowPlayingInfoTitle"] as? String, !title.isEmpty else { return nil }
         let artist = (info["kMRMediaRemoteNowPlayingInfoArtist"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let rate = info["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? Double ?? 0
-        return NowPlaying(title: title, artist: artist, isPlaying: rate > 0)
+        let artwork = (info["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data).flatMap(Self.artwork)
+        return NowPlaying(title: title, artist: artist, isPlaying: rate > 0, artwork: artwork)
     }
 }
 

@@ -191,11 +191,22 @@ final class ClientConnectionTests {
         }
         let updates = ClientConnection.watchStatus(
             endpoint: .hostPort(host: "127.0.0.1", port: .init(rawValue: try #require(port))!),
-            hostFingerprint: service.identity.fingerprint, identity: phone, deviceName: "Test iPhone")
-        var iterator = updates.makeAsyncIterator()
-        let status = try #require(try await iterator.next())
+            hostFingerprint: service.identity.fingerprint, identity: phone, deviceName: "Test iPhone",
+            pingInterval: .milliseconds(50))
+        var status: MacStatus?
+        var latency: Duration?
+        for try await update in updates {
+            switch update {
+            case .status(let update): status = update
+            case .latency(let update): latency = update
+            case .wallpaper(let jpeg): #expect(!jpeg.isEmpty)
+            }
+            if status != nil, latency != nil { break }
+        }
         // This Mac's real output volume (every Mac has a default output device).
-        #expect(status.volume.map { (0...100).contains($0) } ?? true)
+        #expect(try #require(status).volume.map { (0...100).contains($0) } ?? true)
+        // Over loopback, well under a second.
+        #expect(try #require(latency) < .seconds(1))
     }
 
     @Test func catalogListsAppsAndIconsWithoutStreaming() async throws {

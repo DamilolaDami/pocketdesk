@@ -238,7 +238,8 @@ public actor HostService: PairingAuthority {
         let started = StartedFlag()
         let hostSession = HostSession(
             session: ThrottledSession.fromEnvironment(session), peer: peer,
-            configuration: .init(hostName: configuration.hostName, wake: WakeAddresses.current()),
+            configuration: .init(hostName: configuration.hostName, wake: WakeAddresses.current(),
+                                 wallpaper: await DesktopWallpaper.current()),
             frameSource: makeFrameSource(), input: input, pairing: self, clipboard: clipboard
         ) { [onEvent, started] event in
             switch event {

@@ -80,6 +80,8 @@ import Testing
             .macStatus(MacStatus(volume: 60, muted: false,
                                  nowPlaying: NowPlaying(title: "Stranger Things", artist: "Netflix", isPlaying: true))),
             .macStatus(MacStatus()),
+            .macStatus(MacStatus(nowPlaying: NowPlaying(title: "Song", isPlaying: false, artwork: "AAAA"),
+                                 battery: MacBattery(level: 82, isCharging: true, onPower: true))),
         ]
         for message in messages {
             #expect(try JSONDecoder().decode(ControlMessage.self, from: JSONEncoder().encode(message)) == message)
@@ -110,6 +112,7 @@ import Testing
         let messages: [ControlMessage] = [
             .hello(Hello(deviceName: "Phone", viewport: Viewport(width: 400, height: 800, scale: 3), preferredDisplayID: "monitor-uuid")),
             .helloAck(HelloAck(hostName: "Mac", displays: [display])),
+            .helloAck(HelloAck(hostName: "Mac", displays: [display], wallpaper: "AAAA")),
             .listDisplays, .displays([display]), .selectDisplay(2),
             .streamConfig(StreamConfig(codec: .hevc, width: 2560, height: 1440, fps: 60, bitrateKbps: 10_000, displayID: 2)),
         ]

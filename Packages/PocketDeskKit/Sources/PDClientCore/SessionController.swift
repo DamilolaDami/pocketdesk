@@ -132,6 +132,7 @@ public final class SessionController {
         self.library = (try? ShortcutLibrary.load(from: shortcutsURL)) ?? ShortcutLibrary()
         store.update(shortcuts: library.shortcuts)
         store.update(quality: quality)
+        loadWallpapers()
         powerStateTask = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: .NSProcessInfoPowerStateDidChange) {
                 self?.qualityChanged()
@@ -331,6 +332,8 @@ public final class SessionController {
             store.send(.pairingConfirmed)
         case .displays(let displays):
             store.update(displays: displays)
+        case .wallpaper(let jpeg):
+            if let hostID = connectionHostID { save(wallpaper: jpeg, for: hostID) }
         case .wake(let info):
             // A session over a VPN or with Wi-Fi off reports nothing useful; keep the last good one.
             if let hostID = connectionHostID, !info.interfaces.isEmpty, wakeBook[hostID] != info {
@@ -511,6 +514,8 @@ public final class SessionController {
             macNames[hostID] = nil
             lastUsed[hostID] = nil
             wakeAttempts.cancel(hostID)
+            try? FileManager.default.removeItem(at: wallpaperURL(hostID))
+            store.update(wallpaper: nil, for: hostID)
         }
         try? displayPreferences.save(to: displayPreferencesURL)
         try? wakeBook.save(to: wakeBookURL)
@@ -551,7 +556,8 @@ public final class SessionController {
             // Nothing to look at (Play / Pause, volume, or set so): run it without the stream.
             Task {
                 do throws(BackgroundRunError) {
-                    let mac = try await runInBackground(shortcut.id, preferredHostID: host.hostID, text: text)
+                    // Not by ID: the Mac cards' Play / Pause and volume aren't saved shortcuts.
+                    let mac = try await runInBackground(shortcut, preferredHostID: host.hostID, text: text)
                     store.post(notice: "\(shortcut.name): done on \(mac)", kind: .done)
                 } catch {
                     store.post(notice: String(describing: error))
@@ -597,8 +603,16 @@ public final class SessionController {
                     let updates = ClientConnection.watchStatus(endpoint: browsedHost.endpoint, hostFingerprint: peer.fingerprint,
                                                                identity: identity, deviceName: deviceName)
                     do {
-                        for try await status in updates { store.update(macStatus: status) }
+                        for try await update in updates {
+                            switch update {
+                            case .status(let status): store.update(macStatus: status)
+                            case .latency(let latency): store.update(macLatency: latency)
+                            case .wallpaper(let jpeg): save(wallpaper: jpeg, for: hostID)
+                            }
+                        }
                     } catch {}
+                    // Gone: no stale "4 ms" while it reconnects.
+                    store.update(macLatency: nil)
                 }
                 try? await Task.sleep(for: .seconds(3))
             }
@@ -611,6 +625,32 @@ public final class SessionController {
         statusTask?.cancel()
         statusTask = nil
         store.update(macStatus: nil)
+        store.update(macLatency: nil)
+    }
+
+    // MARK: Wallpapers
+
+    private var wallpapersDirectory: URL { cacheDirectory.appending(path: "Wallpapers") }
+
+    private func wallpaperURL(_ hostID: UUID) -> URL {
+        wallpapersDirectory.appending(path: "\(hostID.uuidString).jpg")
+    }
+
+    /// Kept so a Mac that's asleep or away still looks like itself.
+    private func loadWallpapers() {
+        let files = (try? FileManager.default.contentsOfDirectory(at: wallpapersDirectory, includingPropertiesForKeys: nil)) ?? []
+        for file in files {
+            guard let hostID = UUID(uuidString: file.deletingPathExtension().lastPathComponent),
+                  let jpeg = try? Data(contentsOf: file) else { continue }
+            store.update(wallpaper: jpeg, for: hostID)
+        }
+    }
+
+    private func save(wallpaper jpeg: Data, for hostID: UUID) {
+        guard store.wallpapers[hostID] != jpeg else { return }
+        store.update(wallpaper: jpeg, for: hostID)
+        try? FileManager.default.createDirectory(at: wallpapersDirectory, withIntermediateDirectories: true)
+        try? jpeg.write(to: wallpaperURL(hostID), options: .atomic)
     }
 
     // MARK: The Mac's apps
@@ -847,6 +887,12 @@ public final class SessionController {
     public func runInBackground(_ id: Shortcut.ID, preferredHostID: UUID?,
                                 text: String? = nil) async throws(BackgroundRunError) -> String {
         guard let shortcut = library.shortcuts.first(where: { $0.id == id }) else { throw .noSuchShortcut }
+        return try await runInBackground(shortcut, preferredHostID: preferredHostID, text: text)
+    }
+
+    /// `runInBackground(_:preferredHostID:text:)` for a shortcut that needn't be saved.
+    public func runInBackground(_ shortcut: Shortcut, preferredHostID: UUID?,
+                                text: String? = nil) async throws(BackgroundRunError) -> String {
         if shortcut.action.asksForText, text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
             throw .needsText
         }

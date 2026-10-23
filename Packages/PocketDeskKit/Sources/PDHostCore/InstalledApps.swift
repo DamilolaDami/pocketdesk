@@ -74,9 +74,27 @@ public struct InstalledApps: AppCatalogSource {
         return NSBitmapImageRep(cgImage: output).representation(using: .png, properties: [:])
     }
 }
+/// The playing app's icon, drawn once per app: status goes out every second.
+actor PlayerIcons {
+    static let shared = PlayerIcons()
+    private var icons: [String: String] = [:]
+
+    func icon(bundleID: String, from catalog: InstalledApps) async -> String? {
+        if let icon = icons[bundleID] { return icon }
+        let icon = await catalog.iconPNG(bundleID: bundleID)?.base64EncodedString()
+        icons[bundleID] = icon
+        return icon
+    }
+}
+
 extension InstalledApps {
     public func status() async -> MacStatus {
-        MacStatus(volume: SystemVolume.get(), muted: SystemVolume.isMuted(), nowPlaying: await NowPlayingReader.current())
+        var playing = await NowPlayingReader.current()
+        if let bundleID = playing?.app?.bundleID {
+            playing?.app?.icon = await PlayerIcons.shared.icon(bundleID: bundleID, from: self)
+        }
+        return MacStatus(volume: SystemVolume.get(), muted: SystemVolume.isMuted(), nowPlaying: playing,
+                         battery: BatteryReader.current())
     }
 
     /// `shortcuts list --show-identifiers` prints "Name (UUID)" per line.

@@ -35,8 +35,12 @@ struct HostListView: View {
                     if !paired.isEmpty {
                         section("Your Macs") {
                             ForEach(paired) { host in
+                                let watched = host.hostID != nil && host.hostID == statusHostID
                                 PairedMacCard(host: host,
-                                              status: host.hostID != nil && host.hostID == statusHostID ? controller.store.macStatus : nil,
+                                              status: watched ? controller.store.macStatus : nil,
+                                              latency: watched ? controller.store.macLatency : nil,
+                                              wallpaper: host.hostID.flatMap { controller.store.wallpapers[$0] },
+                                              openOnMac: { open($0, on: host) },
                                               control: { control($0, on: host) }) {
                                     if host.isOnline { controller.select(host) } else { controller.wake(host) }
                                 }
@@ -129,6 +133,13 @@ struct HostListView: View {
         }
     }
 
+    /// The playing app, brought forward on the Mac without opening the stream.
+    private func open(_ app: PlayerApp, on host: DiscoveredHost) {
+        let shortcut = Shortcut(name: app.name, symbol: "play.square.stack", color: .gray,
+                                action: .openApp(bundleID: app.bundleID, name: app.name), showsMac: false)
+        controller.run(shortcut, preferredHostID: host.hostID)
+    }
+
     /// Play / Pause and volume from the card, without opening the stream.
     private func control(_ key: MediaKey, on host: DiscoveredHost) {
         let shortcut = Shortcut(name: key.title, symbol: key.symbol, color: .gray, action: .media(key), showsMac: false)
@@ -173,31 +184,51 @@ private extension MediaKey {
 
 private struct PairedMacCard: View {
     let host: DiscoveredHost
-    /// The Mac's volume and now playing, when the app is watching this one.
+    /// The Mac's volume, battery and now playing, when the app is watching this one.
     let status: MacStatus?
+    /// The last round trip to it, likewise.
+    let latency: Duration?
+    /// Its desktop picture, as last seen.
+    let wallpaper: Data?
+    let openOnMac: (PlayerApp) -> Void
     let control: (MediaKey) -> Void
     let connect: () -> Void
+    @AppStorage("macCardPlayerExpanded") private var playerExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) {
-                MacGlyph(kind: host.kind, size: 56, status: host.glyphStatus)
+                MacPreview(kind: host.kind, wallpaper: wallpaper, status: host.glyphStatus, height: 48)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(host.name).font(.title3.weight(.semibold)).lineLimit(1)
+                    HStack(spacing: 8) {
+                        if host.isOnline, host.needsUpdate == nil {
+                            Circle().fill(Brand.online).frame(width: 9, height: 9)
+                        }
+                        Text(host.name)
+                            .font(.title3.weight(.semibold))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     HStack(spacing: 0) {
-                        Text(state.text).foregroundStyle(state.color)
+                        if host.needsUpdate == nil, !host.isOnline, host.canWake, !host.isWaking {
+                            Image(systemName: "moon.zzz.fill").padding(.trailing, 4)
+                        }
+                        Text(state.text)
                         if let lastUsed = host.lastUsed, host.needsUpdate == nil {
                             Text(" · Used \(lastUsed, format: .relative(presentation: .named))")
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    .foregroundStyle(state.color)
                     .font(.subheadline)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 }
                 Spacer(minLength: 0)
             }
-            if host.isOnline, host.needsUpdate == nil, let status {
-                LiveStatusRow(status: status, control: control)
+            if live {
+                MacVitals(latency: latency, battery: status?.battery)
             }
             Button(action: connect) {
                 HStack(spacing: 8) {
@@ -216,9 +247,17 @@ private struct PairedMacCard: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            if live, let status {
+                LiveStatusRow(status: status, expanded: $playerExpanded, openOnMac: openOnMac, control: control)
+            }
         }
         .card()
+        .animation(.smooth, value: playerExpanded)
+        .animation(.smooth, value: status == nil)
     }
+
+    /// Online, current, and the one being watched.
+    private var live: Bool { host.isOnline && host.needsUpdate == nil && status != nil }
 
     private var hint: String? {
         switch host.needsUpdate {
@@ -232,7 +271,7 @@ private struct PairedMacCard: View {
         if host.needsUpdate != nil { ("Needs Update", .orange) }
         else if host.isOnline { ("Online", .secondary) }
         else if host.isWaking { ("Waking…", .orange) }
-        else if host.canWake { ("Asleep", .secondary) }
+        else if host.canWake { ("Asleep", .indigo) }
         else { ("Offline", .secondary) }
     }
 
@@ -245,53 +284,193 @@ private struct PairedMacCard: View {
     }
 }
 
-/// What's playing and the volume, with play/pause and volume buttons.
-private struct LiveStatusRow: View {
-    let status: MacStatus
-    let control: (MediaKey) -> Void
+/// The link and the battery, at a glance.
+private struct MacVitals: View {
+    let latency: Duration?
+    let battery: MacBattery?
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: status.nowPlaying == nil ? "speaker.wave.2.fill" : "music.note")
-                .font(.title3)
-                .foregroundStyle(Brand.accent)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(status.nowPlaying?.title ?? "Nothing playing")
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        HStack(spacing: 8) {
+            if let latency {
+                let grade = ConnectionGrade(latency: latency)
+                vital(Image(systemName: "wifi", variableValue: grade.bars),
+                      "\(grade.title) · \(latency.latencyText)",
+                      color: grade == .poor ? .orange : .primary)
+                    .accessibilityLabel("Connection \(grade.title), \(latency.latencyText) round trip")
+            } else {
+                vital(Image(systemName: "wifi"), "Measuring…", color: .secondary)
             }
-            Spacer(minLength: 4)
-            button(.volumeDown)
-            button(.volumeUp)
-            if status.nowPlaying != nil {
-                button(.playPause, symbol: status.nowPlaying?.isPlaying == true ? "pause.fill" : "play.fill")
+            if let battery {
+                vital(Image(systemName: battery.symbol), "\(battery.level)%",
+                      color: battery.isLow ? .red : battery.isCharging ? .green : .primary)
+                    .accessibilityLabel("Battery \(battery.text)")
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func vital(_ icon: Image, _ text: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            icon.foregroundStyle(color)
+            Text(text).foregroundStyle(.secondary).contentTransition(.numericText())
+        }
+        .font(.footnote.weight(.medium).monospacedDigit())
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.1), in: .capsule)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// What's playing (with its cover when the player has one): play / pause at hand, and the
+/// rest of the controls a tap away so the card's main button stays the main thing.
+private struct LiveStatusRow: View {
+    let status: MacStatus
+    @Binding var expanded: Bool
+    let openOnMac: (PlayerApp) -> Void
+    let control: (MediaKey) -> Void
+    @Environment(\.openURL) private var openURL
+    @State private var choosingWhere = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if let app = status.nowPlaying?.app {
+                PlayerSource(app: app) { choosingWhere = true }
+                    .confirmationDialog("Open \(app.name)", isPresented: $choosingWhere, titleVisibility: .visible) {
+                        if let url = app.phoneURL.flatMap(URL.init(string:)) {
+                            Button("On This iPhone") {
+                                openURL(url) { opened in
+                                    if !opened { openOnMac(app) }
+                                }
+                            }
+                        }
+                        Button("On Your Mac") { openOnMac(app) }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text(app.phoneURL == nil ? "Bring \(app.name) to the front on your Mac."
+                                                 : "Carry on in \(app.name) here, or bring it to the front on your Mac.")
+                    }
+            }
+            HStack(spacing: 12) {
+                Artwork(nowPlaying: status.nowPlaying)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(status.nowPlaying?.title ?? "Nothing playing")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                }
+                Spacer(minLength: 0)
+                if status.nowPlaying != nil {
+                    button(.playPause, symbol: status.nowPlaying?.isPlaying == true ? "pause.fill" : "play.fill")
+                }
+                Button { expanded.toggle() } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(expanded ? 180 : 0))
+                        .frame(width: 32, height: 40)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(expanded ? "Fewer Controls" : "More Controls")
+            }
+            if expanded {
+                HStack {
+                    button(.volumeDown)
+                    Spacer(minLength: 0)
+                    button(.mute, symbol: status.muted == true ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    Spacer(minLength: 0)
+                    if status.nowPlaying != nil {
+                        button(.previous)
+                        Spacer(minLength: 0)
+                        button(.next)
+                        Spacer(minLength: 0)
+                    }
+                    button(.volumeUp)
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(12)
-        .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 14))
+        .padding(10)
+        .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 16))
+        .clipShape(.rect(cornerRadius: 16))
     }
 
     private var detail: String {
-        // Room for one: who's playing, else the volume (the buttons already say it's volume).
         let volume = status.muted == true ? "Muted" : status.volume.map { "Volume \($0)%" }
-        return status.nowPlaying?.artist ?? volume ?? ""
+        return [status.nowPlaying?.artist, volume].compactMap(\.self).joined(separator: " · ")
     }
 
     private func button(_ key: MediaKey, symbol: String? = nil) -> some View {
         Button { control(key) } label: {
             Image(systemName: symbol ?? key.symbol)
                 .font(.body.weight(.semibold))
-                .frame(width: 36, height: 36)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 40, height: 40)
                 .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .circle)
         .accessibilityLabel(key.title)
+    }
+}
+
+/// "Playing in Spotify", with the app's icon: tap to open it.
+private struct PlayerSource: View {
+    let app: PlayerApp
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 8) {
+                if let icon = app.icon.flatMap({ Data(base64Encoded: $0) }).flatMap(UIImage.init(data:)) {
+                    Image(uiImage: icon).resizable().scaledToFit().frame(width: 20, height: 20)
+                } else {
+                    Image(systemName: "app.fill").foregroundStyle(.secondary).frame(width: 20, height: 20)
+                }
+                (Text("Playing in ").foregroundStyle(.secondary) + Text(app.name).fontWeight(.semibold))
+                    .font(.footnote)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Brand.accent)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Playing in \(app.name)")
+        .accessibilityHint("Opens \(app.name) on this iPhone or on your Mac.")
+    }
+}
+
+/// The cover the Mac sent, else a quiet note tile.
+private struct Artwork: View {
+    let nowPlaying: NowPlaying?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Image(systemName: nowPlaying == nil ? "speaker.wave.2.fill" : "music.note")
+                    .font(.title3)
+                    .foregroundStyle(Brand.accent)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Brand.accent.opacity(0.12))
+            }
+        }
+        .frame(width: 44, height: 44)
+        .clipShape(.rect(cornerRadius: 9, style: .continuous))
+        .accessibilityHidden(true)
+    }
+
+    private var image: UIImage? {
+        nowPlaying?.artwork.flatMap { Data(base64Encoded: $0) }.flatMap(UIImage.init(data:))
     }
 }
 

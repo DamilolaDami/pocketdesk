@@ -106,6 +106,20 @@ public final class SessionStore {
         if self.macStatus != macStatus { self.macStatus = macStatus }
     }
 
+    /// Each paired Mac's desktop picture (JPEG), as last seen, for drawing it.
+    public private(set) var wallpapers: [UUID: Data] = [:]
+
+    public func update(wallpaper: Data?, for hostID: UUID) {
+        if wallpapers[hostID] != wallpaper { wallpapers[hostID] = wallpaper }
+    }
+
+    /// The last round trip to that Mac, a sample every couple of seconds while it's watched.
+    public private(set) var macLatency: Duration?
+
+    public func update(macLatency: Duration?) {
+        if self.macLatency != macLatency { self.macLatency = macLatency }
+    }
+
     /// The target Mac's Shortcuts-app shortcuts, for "Run Mac Shortcut".
     public private(set) var macShortcuts: [MacShortcut] = []
 

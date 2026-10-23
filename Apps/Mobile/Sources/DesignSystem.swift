@@ -140,3 +140,131 @@ extension DiscoveredHost {
         if isOnline { .online } else if isWaking { .waking } else { .asleep }
     }
 }
+
+/// The Mac itself, drawn: a MacBook, an iMac, or a display on a stand for Macs without a
+/// screen, showing its own desktop picture. Asleep, the screen goes dark.
+struct MacPreview: View {
+    var kind: MacKind?
+    /// The desktop picture, JPEG, as last seen.
+    var wallpaper: Data?
+    var status: MacGlyph.Status = .none
+    var height: CGFloat = 120
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Group {
+            switch kind {
+            case .laptop, nil: laptop
+            case .imac: imac
+            case .mini, .studio, .pro, .desktop: display
+            }
+        }
+        .frame(height: height)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.4 : 0.12), radius: height * 0.06, y: height * 0.03)
+        .accessibilityHidden(true)
+    }
+
+    // MARK: Shapes
+
+    private var laptop: some View {
+        let screenHeight = height * 0.9
+        let width = screenHeight * 1.5
+        return VStack(spacing: 0) {
+            screen(width: width, height: screenHeight, bezel: screenHeight * 0.045, corner: screenHeight * 0.06,
+                   frame: Color(white: 0.12))
+            // The base: wider than the lid, with the notch for opening it.
+            ZStack(alignment: .top) {
+                UnevenRoundedRectangle(bottomLeadingRadius: height * 0.05, bottomTrailingRadius: height * 0.05)
+                    .fill(aluminium)
+                    .frame(width: width * 1.16, height: height * 0.07)
+                UnevenRoundedRectangle(bottomLeadingRadius: height * 0.02, bottomTrailingRadius: height * 0.02)
+                    .fill(.black.opacity(0.18))
+                    .frame(width: width * 0.16, height: height * 0.022)
+            }
+        }
+    }
+
+    private var imac: some View {
+        let screenHeight = height * 0.62
+        let width = screenHeight * 16 / 9 + height * 0.06
+        return VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                screen(width: width, height: screenHeight, bezel: height * 0.03, corner: height * 0.05,
+                       frame: Color(white: colorScheme == .dark ? 0.9 : 0.97), roundBottom: false)
+                // The chin, in the iMac's colour.
+                UnevenRoundedRectangle(bottomLeadingRadius: height * 0.05, bottomTrailingRadius: height * 0.05)
+                    .fill(Brand.accent.opacity(0.55).gradient)
+                    .frame(width: width, height: height * 0.13)
+            }
+            stand(width: width * 0.22, neck: height * 0.17)
+        }
+    }
+
+    private var display: some View {
+        let screenHeight = height * 0.72
+        let width = screenHeight * 16 / 9
+        return VStack(spacing: 0) {
+            screen(width: width, height: screenHeight, bezel: height * 0.03, corner: height * 0.04, frame: aluminium)
+            stand(width: width * 0.24, neck: height * 0.2)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            // The Mac that drives it, beside the stand.
+            Image(systemName: kind.symbol)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: height * 0.17, weight: .light))
+                .foregroundStyle(Color(white: colorScheme == .dark ? 0.8 : 0.45))
+                .offset(x: height * 0.22)
+        }
+    }
+
+    private func stand(width: CGFloat, neck: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(aluminium.opacity(0.9)).frame(width: width * 0.8, height: neck)
+            Capsule().fill(aluminium).frame(width: width * 1.25, height: max(3, height * 0.035))
+        }
+    }
+
+    private func screen(width: CGFloat, height screenHeight: CGFloat, bezel: CGFloat, corner: CGFloat,
+                        frame: Color, roundBottom: Bool = true) -> some View {
+        let outer = UnevenRoundedRectangle(topLeadingRadius: corner, bottomLeadingRadius: roundBottom ? corner : 0,
+                                           bottomTrailingRadius: roundBottom ? corner : 0, topTrailingRadius: corner,
+                                           style: .continuous)
+        return outer
+            .fill(frame)
+            .frame(width: width, height: screenHeight)
+            .overlay {
+                picture
+                    .frame(width: width - bezel * 2, height: screenHeight - bezel * 2)
+                    .clipShape(.rect(cornerRadius: max(1, corner - bezel), style: .continuous))
+            }
+    }
+
+    // MARK: The picture
+
+    private var picture: some View {
+        ZStack {
+            if let image = wallpaper.flatMap(UIImage.init(data:)) {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                // Until the Mac has sent its own: something Mac-like.
+                LinearGradient(colors: [Brand.accent, .purple, .orange.opacity(0.8)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+            switch status {
+            case .asleep:
+                Color.black.opacity(0.82)
+                Image(systemName: "moon.zzz.fill")
+                    .font(.system(size: height * 0.16, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+            case .waking:
+                Color.black.opacity(0.55)
+                ProgressView().tint(.white)
+            case .online, .none:
+                EmptyView()
+            }
+        }
+        .animation(.smooth, value: status)
+    }
+
+    private var aluminium: Color { Color(white: colorScheme == .dark ? 0.62 : 0.8) }
+}

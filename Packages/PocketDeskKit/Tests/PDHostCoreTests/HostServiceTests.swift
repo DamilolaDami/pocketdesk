@@ -433,6 +433,50 @@ final class HostServiceTests {
         #expect(NowPlayingReader.parseHelper(#"{"title":"Netflix","isPlaying":true}"# + "\n")
                 == NowPlaying(title: "Netflix", isPlaying: true))
         #expect(NowPlayingReader.parseHelper("{}\n") == nil)
+        // The app playing it, by its bundle; a helper process inside a browser is the browser.
+        #expect(NowPlayingReader.parseHelper(#"{"title":"Song","isPlaying":true,"app":"/System/Applications/Music.app"}"#)?.app
+                == PlayerApp(bundleID: "com.apple.Music", name: "Music"))
+        #expect(NowPlayingReader.app(at: "/nowhere/Missing.app") == nil)
+        #expect(NowPlayingReader.parseHelper(#"{"title":"Song","isPlaying":false,"artwork":"AAAA"}"# + "\n")?.artwork == "AAAA")
+    }
+
+    @Test func readsTheInternalBattery() {
+        let ups: [String: Any] = ["Type": "UPS", "Current Capacity": 50, "Max Capacity": 100]
+        let builtIn: [String: Any] = ["Type": "InternalBattery", "Current Capacity": 41, "Max Capacity": 50,
+                                       "Is Charging": true, "Power Source State": "AC Power"]
+        #expect(BatteryReader.parse([ups, builtIn]) == MacBattery(level: 82, isCharging: true, onPower: true))
+        #expect(BatteryReader.parse([ups]) == nil)
+        #expect(BatteryReader.parse([["Type": "InternalBattery", "Current Capacity": 30, "Max Capacity": 100,
+                                      "Power Source State": "Battery Power"]])
+                == MacBattery(level: 30, isCharging: false, onPower: false))
+    }
+
+    @Test func shrinksArtwork() throws {
+        // A big cover, as players hand them over, comes out small enough to send every update.
+        let big = try #require(CGContext(data: nil, width: 1200, height: 1200, bitsPerComponent: 8, bytesPerRow: 0,
+                                         space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        big.setFillColor(CGColor(red: 0.9, green: 0.2, blue: 0.4, alpha: 1))
+        big.fill(CGRect(x: 0, y: 0, width: 1200, height: 1200))
+        let cover = try #require(big.makeImage())
+        let png = try #require(NSBitmapImageRep(cgImage: cover).representation(using: .png, properties: [:]))
+        let artwork = try #require(NowPlayingReader.artwork(from: png))
+        let jpeg = try #require(Data(base64Encoded: artwork))
+        let image = try #require(NSBitmapImageRep(data: jpeg))
+        #expect(image.pixelsWide == NowPlaying.artworkSize && image.pixelsHigh == NowPlaying.artworkSize)
+        #expect(NowPlayingReader.parse(["kMRMediaRemoteNowPlayingInfoTitle": "Song",
+                                        "kMRMediaRemoteNowPlayingInfoArtworkData": png])?.artwork == artwork)
+        #expect(NowPlayingReader.artwork(from: Data("not an image".utf8)) == nil)
+
+        // The desktop picture, from its file, comes out at the phone's size.
+        let file = URL.temporaryDirectory.appending(path: "wallpaper-\(UUID().uuidString).png")
+        try png.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let wallpaper = try #require(DesktopWallpaper.thumbnail(of: file))
+        let wallpaperJPEG = try #require(Data(base64Encoded: wallpaper))
+        let small = try #require(NSBitmapImageRep(data: wallpaperJPEG))
+        #expect(small.pixelsWide == HelloAck.wallpaperSize)
+        #expect(DesktopWallpaper.thumbnail(of: URL.temporaryDirectory.appending(path: "missing.png")) == nil)
     }
 
     @Test func playersGetTheirOwnCommands() {

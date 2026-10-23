@@ -147,6 +147,11 @@ struct SettingsView: View {
                     } label: {
                         SettingsLabel("Encryption", symbol: "lock.shield.fill", color: .green)
                     }
+                    NavigationLink {
+                        HowItsBuiltView()
+                    } label: {
+                        SettingsLabel("How It's Built", symbol: "cpu.fill", color: Brand.accent)
+                    }
                     Link(destination: URL(string: "https://github.com/DamilolaDami/pocketdesk")!) {
                         HStack {
                             SettingsLabel("Source Code", symbol: "chevron.left.forwardslash.chevron.right", color: .indigo)

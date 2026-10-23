@@ -5,7 +5,11 @@ import UniformTypeIdentifiers
 
 /// "PocketDesk" in the share sheet: sends what's shared to a Mac's Downloads folder.
 final class ShareViewController: UIViewController {
-    private let controller = SessionController()
+    private let controller: SessionController = {
+        let controller = SessionController()
+        controller.authenticate = DeviceOwner.authenticate
+        return controller
+    }()
 
     override func viewDidLoad() {
         super.viewDidLoad()

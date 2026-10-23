@@ -6,6 +6,7 @@ struct PocketDeskApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var controller = AppModel.controller
     @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         PocketDeskShortcuts.updateAppShortcutParameters()
@@ -16,6 +17,15 @@ struct PocketDeskApp: App {
             RootView(controller: controller)
                 .tint(Brand.accent)
                 .onOpenURL { url in open(url) }
+        }
+        // Locked Macs ask again once PocketDesk has left the screen (not for Face ID's own
+        // prompt, which only makes it inactive).
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: controller.relockAll()
+            case .active: controller.checkLockOnReturn()
+            default: break
+            }
         }
     }
 

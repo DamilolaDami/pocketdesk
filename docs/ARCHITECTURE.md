@@ -367,7 +367,17 @@ The Macs tab does things without opening a stream, over short catalog connection
   answers `clipboard`, or `actionFailed` when nothing's copied). Both count as using the Mac,
   so "Ask Before Each Connection" applies, once per connection.
 
-The status, artwork and wallpaper fields are optional; only `getClipboard` needed the bump.
+On these connections the Mac confirms each `run` or `clipboard` with `actionDone` (or
+`actionFailed`), and the phone waits for it before its `bye`: an answer sent just before the
+Mac hangs up could otherwise be lost.
+
+The status, artwork and wallpaper fields are optional; `getClipboard` and `actionDone` needed
+the bump.
+
+**Locked Macs** (phone only, `MacLocks`): a Mac can be locked behind Face ID or the passcode.
+`SessionController` asks (through the app's `authenticate`) before anything uses a locked
+Mac (connecting, waking, shortcuts, files, the clipboard) and keeps it unlocked until the app
+leaves the screen. Siri and widgets that can't ask fail with "locked" rather than skip it.
 
 ## Mac menus on the phone (protocol v14)
 

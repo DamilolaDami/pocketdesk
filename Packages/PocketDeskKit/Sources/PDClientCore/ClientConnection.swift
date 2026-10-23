@@ -188,6 +188,7 @@ public actor ClientConnection {
                     case .windows(let windows): onEvent(.windows(windows))
                     case .menuBar(let bar): onEvent(.menuBar(bar))
                     case .actionFailed(let reason): onEvent(.notice(reason))
+                    case .actionDone: continue
                     case .bye(let reason):
                         hostReason.value = reason
                         throw ClientError.hostEnded(reason)
@@ -408,17 +409,7 @@ extension ClientConnection {
             default: throw ClientError.unexpectedMessage
             }
             try await session.send(.run(action))
-            try await session.send(.bye(reason: "done"))
-            // The Mac answers only on failure, then hangs up after our bye.
-            var failure: String?
-            while let message = try? await control.next() {
-                switch message {
-                case .actionFailed(let reason): failure = reason
-                case .ping(let value): try? await session.send(.pong(value))
-                default: continue
-                }
-            }
-            if let failure { throw ClientError.hostEnded(failure) }
+            try await awaitDone(&control, on: session)
         }
     }
 }
@@ -431,17 +422,7 @@ extension ClientConnection {
         try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
             var control = try await openQuietly(session, deviceName: deviceName)
             try await session.send(.clipboard(item))
-            try await session.send(.bye(reason: "done"))
-            // As with `perform`: the Mac answers only on failure, then hangs up.
-            var failure: String?
-            while let message = try? await control.next() {
-                switch message {
-                case .actionFailed(let reason): failure = reason
-                case .ping(let value): try? await session.send(.pong(value))
-                default: continue
-                }
-            }
-            if let failure { throw ClientError.hostEnded(failure) }
+            try await awaitDone(&control, on: session)
         }
     }
 
@@ -471,6 +452,27 @@ extension ClientConnection {
     /// The Mac's clipboard, out of the connection's closure.
     private final class Answer: Sendable {
         let item = Mutex<ClipboardItem?>(nil)
+    }
+
+    /// Waits for the Mac to say the action is done (or why not), then says goodbye: the
+    /// answer comes before anyone hangs up, so it can't be lost as the connection closes.
+    private static func awaitDone(_ control: inout AsyncThrowingStream<ControlMessage, any Error>.Iterator,
+                                  on session: some PeerSession) async throws {
+        var failure: String? = "The Mac went away before it was done."
+        answer: while let message = try await control.next() {
+            switch message {
+            case .actionDone:
+                failure = nil
+                break answer
+            case .actionFailed(let reason), .bye(let reason):
+                failure = reason
+                break answer
+            case .ping(let value): try await session.send(.pong(value))
+            default: continue
+            }
+        }
+        try? await session.send(.bye(reason: "done"))
+        if let failure { throw ClientError.hostEnded(failure) }
     }
 
     /// Says hello for a connection with no picture; returns once the Mac has answered.

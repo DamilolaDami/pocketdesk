@@ -96,7 +96,7 @@ import Testing
             MenuItem(path: [2, 3], title: "Show Sidebar", isEnabled: false, isChecked: true),
         ])
         let messages: [ControlMessage] = [
-            .watchMenus(true), .watchMenus(false), .menuBar(nil), .getClipboard,
+            .watchMenus(true), .watchMenus(false), .menuBar(nil), .getClipboard, .actionDone,
             .menuBar(MenuBar(appName: "Safari", bundleID: "com.apple.Safari", menus: [file])),
             .pressMenuItem(MenuPress(path: [2, 0], title: "New Window")),
             .setQuality(.batterySaver),

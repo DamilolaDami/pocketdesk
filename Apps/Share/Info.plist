@@ -43,6 +43,8 @@
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
 	</dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>PocketDesk uses Face ID to unlock Macs you've locked.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PocketDesk finds your Mac on the local network.</string>
 	<key>PDAppGroup</key>

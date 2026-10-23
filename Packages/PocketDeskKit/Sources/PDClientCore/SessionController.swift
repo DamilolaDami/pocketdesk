@@ -57,6 +57,11 @@ public final class SessionController {
     private let displayPreferencesURL: URL
     private var displayPreferences: DisplayPreferences
     private let wakeBookURL: URL
+    private let locksURL: URL
+    private var locks: MacLocks
+    /// Asks for Face ID (or the passcode) with this reason; the app supplies it. Without one,
+    /// a locked Mac can't be unlocked.
+    public var authenticate: @MainActor (_ reason: String) async -> Bool = { _ in false }
     private var wakeBook: PerMac<WakeInfo>
     private let macKindsURL: URL
     private var macKinds: PerMac<MacKind>
@@ -114,7 +119,10 @@ public final class SessionController {
                 wakeBookURL: URL = SharedStorage.url("wake.json"),
                 macKindsURL: URL = SharedStorage.url("mac-kinds.json"),
                 macNamesURL: URL = SharedStorage.url("mac-names.json"),
-                lastUsedURL: URL = SharedStorage.url("last-used.json")) {
+                lastUsedURL: URL = SharedStorage.url("last-used.json"),
+                locksURL: URL = SharedStorage.url("locked-macs.json")) {
+        self.locksURL = locksURL
+        self.locks = (try? MacLocks.load(from: locksURL)) ?? MacLocks()
         self.macNamesURL = macNamesURL
         self.macNames = (try? PerMac.load(from: macNamesURL)) ?? PerMac()
         self.lastUsedURL = lastUsedURL
@@ -209,7 +217,12 @@ public final class SessionController {
                                isWaking: peer.hostID.map(wakeAttempts.waking.contains) ?? false,
                                kind: macKinds[peer.hostID], lastUsed: lastUsed[peer.hostID])
             }
-        return DiscoveredHost.ordered(online + offline)
+        return DiscoveredHost.ordered((online + offline).map { host in
+            var host = host
+            host.isLocked = locks.isLocked(host.hostID)
+            host.needsUnlock = locks.needsUnlock(host.hostID)
+            return host
+        })
     }
 
     // MARK: Connecting
@@ -222,6 +235,10 @@ public final class SessionController {
                                             : "Update PocketDesk on this iPhone to use \(host.name).")
             return
         }
+        if host.isPaired, locks.needsUnlock(host.hostID) {
+            Task { if await unlock(host) { select(host) } }
+            return
+        }
         lastHost = host
         store.send(.select(host))
         guard host.isPaired, let browsedHost = browsed[host.id],
@@ -232,6 +249,10 @@ public final class SessionController {
     /// Sends magic packets to a sleeping Mac, then connects as soon as it shows up.
     public func wake(_ host: DiscoveredHost) {
         guard let hostID = host.hostID, !host.isOnline else { return }
+        if locks.needsUnlock(hostID) {
+            Task { if await unlock(host) { wake(host) } }
+            return
+        }
         guard let info = wakeBook[hostID] else {
             store.post(notice: "Connect to \(host.name) once while it's awake, so this iPhone learns how to wake it.")
             return
@@ -444,7 +465,7 @@ public final class SessionController {
         }
         Task {
             do throws(FilesError) {
-                let target = try quietTarget(hostID)
+                let target = try await quietTarget(hostID)
                 do {
                     try await ClientConnection.paste(item, endpoint: target.endpoint, hostFingerprint: target.fingerprint,
                                                      identity: target.identity, deviceName: deviceName)
@@ -462,7 +483,7 @@ public final class SessionController {
     public func copyFromMac(_ hostID: UUID?) {
         Task {
             do throws(FilesError) {
-                let target = try quietTarget(hostID)
+                let target = try await quietTarget(hostID)
                 let item: ClipboardItem
                 do {
                     item = try await ClientConnection.copy(endpoint: target.endpoint, hostFingerprint: target.fingerprint,
@@ -478,11 +499,12 @@ public final class SessionController {
         }
     }
 
-    /// A Mac to reach without streaming, and how.
-    private func quietTarget(_ hostID: UUID?) throws(FilesError)
+    /// A Mac to reach without streaming, and how (unlocked first if it's locked).
+    private func quietTarget(_ hostID: UUID?) async throws(FilesError)
         -> (name: String, endpoint: NWEndpoint, fingerprint: Fingerprint, identity: DeviceIdentity) {
         guard let host = shortcutTarget(preferredHostID: hostID), let macID = host.hostID,
               let browsedHost = browsed[host.id], let peer = trustStore.peer(hostID: macID) else { throw .noMac }
+        guard await unlock(host) else { throw .locked(host.name) }
         do {
             return (host.name, browsedHost.endpoint, peer.fingerprint, try DeviceIdentity.loadOrCreate(label: identityLabel))
         } catch {
@@ -567,6 +589,8 @@ public final class SessionController {
             lastUsed[hostID] = nil
             wakeAttempts.cancel(hostID)
             try? FileManager.default.removeItem(at: wallpaperURL(hostID))
+            locks.forget(hostID)
+            try? locks.save(to: locksURL)
             store.update(wallpaper: nil, for: hostID)
         }
         try? displayPreferences.save(to: displayPreferencesURL)
@@ -603,6 +627,10 @@ public final class SessionController {
         guard let host = shortcutTarget(preferredHostID: preferredHostID) else {
             store.post(notice: "Open PocketDesk on a paired Mac to run “\(shortcut.name)”.")
             return false
+        }
+        if locks.needsUnlock(host.hostID) {
+            Task { if await unlock(host) { run(shortcut, preferredHostID: host.hostID, text: text) } }
+            return true
         }
         if !shortcut.opensStream {
             // Nothing to look at (Play / Pause, volume, or set so): run it without the stream.
@@ -678,6 +706,45 @@ public final class SessionController {
         statusTask = nil
         store.update(macStatus: nil)
         store.update(macLatency: nil)
+    }
+
+    // MARK: Locks
+
+    /// Asks for Face ID if `host` is locked and hasn't been unlocked since the app came to
+    /// the front. `true` when it may be used.
+    public func unlock(_ host: DiscoveredHost) async -> Bool {
+        guard let hostID = host.hostID, locks.needsUnlock(hostID) else { return true }
+        guard await authenticate("Unlock “\(host.name)”") else { return false }
+        locks.unlock(hostID)
+        store.send(.hostsChanged(discoveredHosts()))
+        return true
+    }
+
+    /// Locks or unlocks `host` behind Face ID. Either way asks first: locking proves Face ID
+    /// works before it's needed, and unlocking mustn't be open to whoever holds the phone.
+    public func setLocked(_ host: DiscoveredHost, _ isLocked: Bool) async {
+        guard let hostID = host.hostID, locks.isLocked(hostID) != isLocked else { return }
+        let reason = isLocked ? "Lock “\(host.name)”" : "Stop locking “\(host.name)”"
+        guard await authenticate(reason) else { return }
+        locks.set(hostID, locked: isLocked)
+        try? locks.save(to: locksURL)
+        store.send(.hostsChanged(discoveredHosts()))
+        store.post(notice: isLocked ? "“\(host.name)” is locked. Using it will ask that it's you."
+                                    : "“\(host.name)” is no longer locked.", kind: .done)
+    }
+
+    /// PocketDesk left the screen: locked Macs ask again next time.
+    public func relockAll() {
+        locks.relockAll()
+        store.send(.hostsChanged(discoveredHosts()))
+    }
+
+    /// Back on screen still showing a locked Mac: Face ID again, or the stream ends.
+    public func checkLockOnReturn() {
+        guard case .streaming(let host, _, _) = store.state, locks.needsUnlock(host.hostID) else { return }
+        Task {
+            if await !unlock(host) { disconnect() }
+        }
     }
 
     // MARK: Wallpapers
@@ -811,10 +878,12 @@ public final class SessionController {
     public enum FilesError: Error, CustomStringConvertible {
         case noMac
         case failed(String)
+        case locked(String)
 
         public var description: String {
             switch self {
             case .noMac: "None of your Macs is reachable. Open PocketDesk on your Mac, or check it's awake."
+            case .locked(let mac): "“\(mac)” stays locked."
             case .failed(let reason): reason
             }
         }
@@ -826,6 +895,7 @@ public final class SessionController {
         }
         guard let host = shortcutTarget(preferredHostID: hostID), let macID = host.hostID,
               let browsedHost = browsed[host.id], let peer = trustStore.peer(hostID: macID) else { throw .noMac }
+        guard await unlock(host) else { throw .locked(host.name) }
         let identity: DeviceIdentity
         do { identity = try DeviceIdentity.loadOrCreate(label: identityLabel) } catch {
             throw .failed("Couldn't load this phone's identity: \(error)")
@@ -921,6 +991,8 @@ public final class SessionController {
         case noMac
         /// It needs words (a search) and none were given.
         case needsText
+        /// Locked behind Face ID, and it wasn't given.
+        case locked(String)
         case failed(String)
 
         public var description: String {
@@ -928,6 +1000,7 @@ public final class SessionController {
             case .noSuchShortcut: "That shortcut isn't in PocketDesk any more."
             case .noMac: "None of your Macs is reachable. Open PocketDesk on your Mac, or check it's awake."
             case .needsText: "That shortcut needs something to look for."
+            case .locked(let mac): "“\(mac)” is locked. Open PocketDesk to unlock it."
             case .failed(let reason): reason
             }
         }
@@ -963,6 +1036,7 @@ public final class SessionController {
         }
         guard let host, let hostID = host.hostID, let browsedHost = browsed[host.id],
               let peer = trustStore.peer(hostID: hostID) else { throw .noMac }
+        guard await unlock(host) else { throw .locked(host.name) }
         do {
             let identity = try DeviceIdentity.loadOrCreate(label: identityLabel)
             try await ClientConnection.perform(action, endpoint: browsedHost.endpoint,

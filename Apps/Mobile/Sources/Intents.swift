@@ -8,6 +8,7 @@ import WidgetKit
 enum AppModel {
     static let controller: SessionController = {
         let controller = SessionController()
+        controller.authenticate = DeviceOwner.authenticate
         controller.onShortcutsChanged = {
             WidgetCenter.shared.reloadAllTimelines()
             ControlCenter.shared.reloadAllControls()

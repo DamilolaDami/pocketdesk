@@ -121,18 +121,22 @@ struct HostListView: View {
                 Button("Copy from Mac", systemImage: "doc.on.doc") { controller.copyFromMac(host.hostID) }
             }
             Section {
+                // A locked Mac asks before the picker, not after the picking.
                 Button("Send Photos…", systemImage: "photo.on.rectangle") {
-                    filesHost = host
-                    choosingPhotos = true
+                    afterUnlocking(host) { choosingPhotos = true }
                 }
                 Button("Send Files…", systemImage: "doc.badge.arrow.up") {
-                    filesHost = host
-                    choosingFiles = true
+                    afterUnlocking(host) { choosingFiles = true }
                 }
                 Button("Mac Files…", systemImage: "folder") {
-                    filesHost = host
-                    browsingFiles = true
+                    afterUnlocking(host) { browsingFiles = true }
                 }
+            }
+        }
+        if host.isPaired {
+            Button(host.isLocked ? "Remove \(DeviceOwner.method) Lock" : "Lock with \(DeviceOwner.method)",
+                   systemImage: host.isLocked ? "lock.open" : "lock") {
+                Task { await controller.setLocked(host, !host.isLocked) }
             }
         }
         Button("Rename…", systemImage: "pencil") {
@@ -142,6 +146,11 @@ struct HostListView: View {
         Button("Forget This Mac", systemImage: "trash", role: .destructive) {
             controller.forget(host)
         }
+    }
+
+    private func afterUnlocking(_ host: DiscoveredHost, _ then: @escaping () -> Void) {
+        filesHost = host
+        Task { if await controller.unlock(host) { then() } }
     }
 
     /// The playing app, brought forward on the Mac without opening the stream.
@@ -217,6 +226,12 @@ private struct PairedMacCard<Actions: View>: View {
                         if host.isOnline, host.needsUpdate == nil {
                             Circle().fill(Brand.online).frame(width: 9, height: 9)
                         }
+                        if host.isLocked {
+                            Image(systemName: host.needsUnlock ? "lock.fill" : "lock.open.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel(host.needsUnlock ? "Locked" : "Unlocked")
+                        }
                         Text(host.name)
                             .font(.title3.weight(.semibold))
                             .lineLimit(2)
@@ -280,7 +295,7 @@ private struct PairedMacCard<Actions: View>: View {
     }
 
     /// Online, current, and the one being watched.
-    private var live: Bool { host.isOnline && host.needsUpdate == nil && status != nil }
+    private var live: Bool { host.isOnline && host.needsUpdate == nil && !host.needsUnlock && status != nil }
 
     private var hint: String? {
         switch host.needsUpdate {
@@ -300,6 +315,7 @@ private struct PairedMacCard<Actions: View>: View {
 
     private var action: (title: String, symbol: String) {
         if host.needsUpdate != nil { ("Update Needed", "arrow.down.circle") }
+        else if host.isOnline, host.needsUnlock { ("Unlock & Use", DeviceOwner.symbol) }
         else if host.isOnline { ("Use This Mac", "play.fill") }
         else if host.isWaking { ("Waking…", "power") }
         else if host.canWake { ("Wake & Use", "power") }

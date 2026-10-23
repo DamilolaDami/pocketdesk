@@ -37,6 +37,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan the pairing code shown on your Mac.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>PocketDesk uses Face ID to unlock Macs you've locked.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PocketDesk finds your Mac on the local network.</string>
 	<key>PDAppGroup</key>

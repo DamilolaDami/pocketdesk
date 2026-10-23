@@ -89,6 +89,7 @@ targets:
         NSLocalNetworkUsageDescription: PocketDesk finds your Mac on the local network.
         NSBonjourServices: [_pocketdesk._udp]
         NSCameraUsageDescription: Scan the pairing code shown on your Mac.
+        NSFaceIDUsageDescription: PocketDesk uses Face ID to unlock Macs you've locked.
         CFBundleURLTypes:
           - CFBundleURLName: com.pocketdesk.pair
             CFBundleURLSchemes: [pocketdesk]
@@ -138,7 +139,7 @@ targets:
     configFiles:
       Debug: Config/Signing.xcconfig
       Release: Config/Signing.xcconfig
-    sources: [Apps/Share/Sources]
+    sources: [Apps/Share/Sources, Apps/Shared/DeviceOwner.swift]
     dependencies:
       - package: PocketDeskKit
         product: PDClientCore
@@ -149,6 +150,7 @@ targets:
         PDAppGroup: group.$(BUNDLE_ID_PREFIX).app
         NSLocalNetworkUsageDescription: PocketDesk finds your Mac on the local network.
         NSBonjourServices: [_pocketdesk._udp]
+        NSFaceIDUsageDescription: PocketDesk uses Face ID to unlock Macs you've locked.
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController

@@ -226,7 +226,7 @@ public actor HostSession {
                 case .ping(let value): try await session.send(.pong(value))
                 case .run(let action):
                     guard try await allow() else { continue }
-                    try await run(action)
+                    if try await run(action) { try await session.send(.actionDone) }
                 // Paste to Mac and Copy from Mac on the phone's Mac cards.
                 case .clipboard(let item):
                     guard try await allow() else { continue }
@@ -235,6 +235,7 @@ public actor HostSession {
                         continue
                     }
                     _ = await clipboard.write(item)
+                    try await session.send(.actionDone)
                 case .getClipboard:
                     guard try await allow() else { continue }
                     try await sendClipboard()
@@ -339,7 +340,7 @@ public actor HostSession {
             case .key(let press):
                 input.inject(.key(code: press.code, isDown: press.isDown, modifiers: press.modifiers))
             case .run(let action):
-                try await run(action)
+                _ = try await run(action)
             case .listApps, .requestAppIcons, .listMacShortcuts:
                 try await answer(message)
             case .watchStatus:
@@ -368,7 +369,7 @@ public actor HostSession {
             case .bye:
                 return
             case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
-                 .actionFailed, .apps, .appIcon, .macShortcuts, .macStatus, .menuBar,
+                 .actionFailed, .actionDone, .apps, .appIcon, .macShortcuts, .macStatus, .menuBar,
                  .fileAccepted, .fileOffer, .fileData, .fileSaved, .fileList:
                 continue
             }
@@ -433,15 +434,18 @@ public actor HostSession {
     }
 
     /// A phone shortcut; one that can't be done says why.
-    private func run(_ action: MacAction) async throws {
+    /// Does `action`; one that can't be done says why. `true` when it was done.
+    private func run(_ action: MacAction) async throws -> Bool {
         guard action.isValid else {
             try await session.send(.actionFailed("That shortcut has too many steps or too long a wait."))
-            return
+            return false
         }
         do {
             try await input.perform(action)
+            return true
         } catch {
             try await session.send(.actionFailed(String(describing: error)))
+            return false
         }
     }
 

@@ -35,6 +35,10 @@ public struct DiscoveredHost: Sendable, Equatable, Identifiable, Hashable {
     public var needsUpdate: Side?
     /// When this phone last streamed from it.
     public var lastUsed: Date?
+    /// Locked behind Face ID on this iPhone.
+    public var isLocked = false
+    /// Locked, and not unlocked since PocketDesk came to the front: using it asks first.
+    public var needsUnlock = false
 
     public enum Side: Sendable, Hashable {
         case mac, phone

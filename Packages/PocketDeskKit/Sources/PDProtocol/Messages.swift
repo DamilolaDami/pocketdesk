@@ -44,6 +44,10 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     case run(MacAction)
     /// Host → phone: a `run` that couldn't be done, in words for the person.
     case actionFailed(String)
+    /// Host → phone, on a connection with no picture: the `run` or `clipboard` is done. The
+    /// phone waits for this (or `actionFailed`) before saying goodbye, so the answer can't be
+    /// lost as the connection closes.
+    case actionDone
     /// The Mac's installed apps, for picking one in the shortcut editor.
     case listApps
     case apps([MacApp])

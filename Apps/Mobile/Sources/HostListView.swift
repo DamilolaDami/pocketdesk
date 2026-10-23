@@ -43,7 +43,10 @@ struct HostListView: View {
                                               openOnMac: { open($0, on: host) },
                                               menu: { menu(for: host) },
                                               control: { control($0, on: host) }) {
-                                    if host.isOnline { controller.select(host) } else { controller.wake(host) }
+                                    // Unlocking only opens the card (player, vitals, menu); streaming is
+                                    // the next tap.
+                                    if host.isOnline, host.needsUnlock { Task { await controller.unlock(host) } }
+                                    else if host.isOnline { controller.select(host) } else { controller.wake(host) }
                                 }
                                 // Lift the whole card, not just its button.
                                 .contentShape(.contextMenuPreview, .rect(cornerRadius: Brand.cornerRadius))
@@ -315,7 +318,7 @@ private struct PairedMacCard<Actions: View>: View {
 
     private var action: (title: String, symbol: String) {
         if host.needsUpdate != nil { ("Update Needed", "arrow.down.circle") }
-        else if host.isOnline, host.needsUnlock { ("Unlock & Use", DeviceOwner.symbol) }
+        else if host.isOnline, host.needsUnlock { ("Unlock", DeviceOwner.symbol) }
         else if host.isOnline { ("Use This Mac", "play.fill") }
         else if host.isWaking { ("Waking…", "power") }
         else if host.canWake { ("Wake & Use", "power") }

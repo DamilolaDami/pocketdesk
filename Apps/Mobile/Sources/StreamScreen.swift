@@ -293,8 +293,9 @@ struct WindowPicker: View {
 }
 
 private extension ClipboardItem {
-    /// The first text or image the paste button handed over; images go as PNG.
-    init?(_ providers: [NSItemProvider]) async {
+    /// The first text or image the paste button handed over; images go as PNG. On the main
+    /// actor, where the button hands them over: item providers can't be sent between threads.
+    @MainActor init?(_ providers: [NSItemProvider]) async {
         for provider in providers {
             if provider.canLoadObject(ofClass: NSString.self) {
                 let text: String? = await withCheckedContinuation { done in

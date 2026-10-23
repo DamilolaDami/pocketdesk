@@ -1,5 +1,5 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 17
+public let protocolVersion: UInt16 = 18
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -67,6 +67,9 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     case menuBar(MenuBar?)
     /// Phone → host: choose a menu item. A fresh `menuBar` follows.
     case pressMenuItem(MenuPress)
+    /// Host → phone: where the text caret is, after typing moved it, so a zoomed-in view can
+    /// keep it on screen.
+    case caret(Caret)
     /// Phone → host: a file for the Mac's Downloads folder. The Mac answers `fileAccepted`.
     case sendFile(FileOffer)
     /// The receiver is ready: send from `offset` (past 0 when resuming a cut-off transfer).
@@ -551,5 +554,19 @@ public struct MenuPress: Codable, Sendable, Equatable {
     public init(path: [Int], title: String) {
         self.path = path
         self.title = title
+    }
+}
+
+/// The text caret, normalized like `InputEvent` points (0...1 across the streamed picture,
+/// top-left origin). `height` is the line's height on the same scale.
+public struct Caret: Codable, Sendable, Equatable {
+    public var x: Float
+    public var y: Float
+    public var height: Float
+
+    public init(x: Float, y: Float, height: Float) {
+        self.x = x
+        self.y = y
+        self.height = height
     }
 }

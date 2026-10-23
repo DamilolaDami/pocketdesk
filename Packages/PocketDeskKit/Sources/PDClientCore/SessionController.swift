@@ -10,6 +10,9 @@ import PDTransport
 public final class SessionController {
     public let store = SessionStore()
     public let display = VideoDisplay()
+    /// The stream view's: where the Mac's caret moved, to keep it in a zoomed-in view. Not
+    /// through the store, which redraws for every change.
+    public var onCaret: (Caret) -> Void = { _ in }
     /// Set by the app before connecting (screen size in points + scale, device name).
     public var viewport = Viewport(width: 402, height: 874, scale: 3)
     public var deviceName = "iPhone"
@@ -388,6 +391,8 @@ public final class SessionController {
             store.update(windows: windows)
         case .menuBar(let bar):
             store.update(menus: bar.map(MenusState.ready) ?? .unavailable)
+        case .caret(let caret):
+            onCaret(caret)
         case .macStatus(let status):
             store.update(macStatus: status)
         case .notice(let text):

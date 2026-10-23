@@ -65,4 +65,16 @@ struct ZoomViewportTests {
         viewport.viewSize = CGSize(width: 200, height: 400)
         #expect(viewport.offset == CGPoint(x: -200, y: -400))
     }
+
+    @Test func revealKeepsThePointAboveTheKeyboard() {
+        var viewport = ZoomViewport(viewSize: size)
+        viewport.zoom(to: 2, about: CGPoint(x: 200, y: 400))
+        // Shown at y 720; with 300 points of keyboard, the view ends at 500.
+        viewport.reveal(CGPoint(x: 200, y: 560), margin: 40, obscuredBottom: 300)
+        #expect(viewport.screenPoint(CGPoint(x: 200, y: 560)).y == 460)
+        // Already in view: nothing moves.
+        let before = viewport
+        viewport.reveal(CGPoint(x: 200, y: 520), margin: 40, obscuredBottom: 300)
+        #expect(viewport == before)
+    }
 }

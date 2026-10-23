@@ -46,6 +46,8 @@ public actor HostSession {
         public var statusInterval: Duration
         /// How often the frontmost app is checked while the phone shows its menus.
         public var menusInterval: Duration
+        /// How long after a keystroke the caret is read: the app needs a moment to move it.
+        public var caretDelay: Duration = .milliseconds(60)
         /// Where received files go, and which folders the phone may browse.
         var files: HostFileTransfers.Folders = .standard
 
@@ -88,6 +90,7 @@ public actor HostSession {
     private let catalog: any AppCatalogSource
     private let clipboard: any ClipboardSink
     private let menus: any MenuBarSource
+    private let caret: any CaretSource
     private let onEvent: @Sendable (Event) -> Void
 
     private var audioEnabled = true
@@ -96,6 +99,10 @@ public actor HostSession {
     private var clipboardTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var menusTask: Task<Void, Never>?
+    private var caretTask: Task<Void, Never>?
+    private var lastCaret: Caret?
+    /// The streamed picture in global display points, to place the caret on it.
+    private var sourceFrame: CGRect?
     private var files: HostFileTransfers?
     private var filesTask: Task<Void, Never>?
     /// Whether the person at the Mac allowed this connection-with-no-picture to do things.
@@ -141,10 +148,11 @@ public actor HostSession {
     public init(session: any PeerSession, peer: Fingerprint, configuration: Configuration,
                 frameSource: any FrameSource, input: any InputSink, pairing: any PairingAuthority,
                 catalog: any AppCatalogSource = InstalledApps(), clipboard: any ClipboardSink = MacPasteboard(),
-                menus: any MenuBarSource = AccessibilityMenus(),
+                menus: any MenuBarSource = AccessibilityMenus(), caret: any CaretSource = AccessibilityCaret(),
                 onEvent: @escaping @Sendable (Event) -> Void = { _ in }) {
         self.catalog = catalog
         self.menus = menus
+        self.caret = caret
         self.clipboard = clipboard
         self.session = session
         self.peer = peer
@@ -337,8 +345,10 @@ public actor HostSession {
                 }
             case .insertText(let text):
                 input.insertText(text)
+                followCaret()
             case .key(let press):
                 input.inject(.key(code: press.code, isDown: press.isDown, modifiers: press.modifiers))
+                if press.isDown { followCaret() }
             case .run(let action):
                 _ = try await run(action)
             case .listApps, .requestAppIcons, .listMacShortcuts:
@@ -369,7 +379,7 @@ public actor HostSession {
             case .bye:
                 return
             case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
-                 .actionFailed, .actionDone, .apps, .appIcon, .macShortcuts, .macStatus, .menuBar,
+                 .actionFailed, .actionDone, .apps, .appIcon, .macShortcuts, .macStatus, .menuBar, .caret,
                  .fileAccepted, .fileOffer, .fileData, .fileSaved, .fileList:
                 continue
             }
@@ -412,6 +422,20 @@ public actor HostSession {
                 last = status
             }
             try? await Task.sleep(for: configuration.statusInterval)
+        }
+    }
+
+    /// Reads the caret once typing settles and tells the phone if it moved. Each keystroke
+    /// starts over, so a burst of typing costs one read.
+    private func followCaret() {
+        caretTask?.cancel()
+        caretTask = Task {
+            try? await Task.sleep(for: configuration.caretDelay)
+            guard !Task.isCancelled, let source = sourceFrame,
+                  let frame = await caret.caretFrame(), let found = Caret(frame: frame, in: source),
+                  !Task.isCancelled, found != lastCaret else { return }
+            lastCaret = found
+            try? await session.send(.caret(found))
         }
     }
 
@@ -538,6 +562,8 @@ public actor HostSession {
         refinesLeft = 0
         self.encoder = encoder
         input.setSourceFrame(resolved.screenFrame)
+        sourceFrame = resolved.screenFrame
+        lastCaret = nil
 
         // The phone learns the new size before the first frame of the new generation.
         try await session.send(.streamConfig(config))
@@ -740,6 +766,8 @@ public actor HostSession {
         statusTask = nil
         menusTask?.cancel()
         menusTask = nil
+        caretTask?.cancel()
+        caretTask = nil
         filesTask?.cancel()
         filesTask = nil
         await files?.stop()

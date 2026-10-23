@@ -99,6 +99,7 @@ import Testing
             .watchMenus(true), .watchMenus(false), .menuBar(nil), .getClipboard, .actionDone,
             .menuBar(MenuBar(appName: "Safari", bundleID: "com.apple.Safari", menus: [file])),
             .pressMenuItem(MenuPress(path: [2, 0], title: "New Window")),
+            .caret(Caret(x: 0.25, y: 0.5, height: 0.02)),
             .setQuality(.batterySaver),
             .hello(Hello(deviceName: "Phone", viewport: Viewport(width: 400, height: 800, scale: 3), quality: .balanced)),
         ]

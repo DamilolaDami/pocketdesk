@@ -20,6 +20,8 @@ struct StreamView: UIViewRepresentable {
         view.onTapKey = { [controller] in controller.tapKey($0, modifiers: $1) }
         view.onKey = { [controller] in controller.sendKey($0, isDown: $1, modifiers: $2) }
         view.onHideKeyboard = { keyboardShown = false }
+        // Weak: a view that's gone just ignores it, and the next stream's view replaces it.
+        controller.onCaret = { [weak view] in view?.reveal($0) }
         return view
     }
 
@@ -38,6 +40,8 @@ struct StreamView: UIViewRepresentable {
 
 /// Gestures → `InputEvent`s. Direct touch (touch where you want the pointer):
 /// - tap: click · long press: right-click · one-finger drag: click-drag
+/// - zoomed in, one finger looks around instead (pan with a flick of momentum); hold, then
+///   drag to click-drag, or hold and let go to right-click
 /// - two-finger pan: scroll; zoomed in, it moves the picture first and scrolls the Mac
 ///   only with what's left past its edges
 /// - keyboard (`UIKeyInput`): text, return, delete
@@ -46,6 +50,7 @@ struct StreamView: UIViewRepresentable {
 /// - pinch: zoom the picture on the phone (pans with the fingers); nothing is sent to the Mac
 /// - two-finger double-tap: toggle a comfortable zoom; nothing is sent to the Mac
 /// - two-finger tap: right-click · three-finger swipe: Mission Control, App Exposé, Spaces
+/// - zoomed in, the view follows the Mac's text caret as you type, keeping it above the keyboard
 ///
 /// Trackpad mode (`isTrackpad`) moves the pointer like a laptop trackpad instead, with a ring
 /// showing where it is; a zoomed-in view follows it:
@@ -70,6 +75,13 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private let longPress = UILongPressGestureRecognizer()
     /// The last finger position of a press-and-drag, which reports locations, not steps.
     private var lastPressLocation: CGPoint = .zero
+    /// Zoomed in, direct touch: this one-finger drag moves the view, not the Mac's pointer.
+    private var isLookingAround = false
+    /// Zoomed in, direct touch: where a hold started, and whether it has become a click-drag.
+    private var holdStart: (x: Float, y: Float)?
+    private var isHoldDragging = false
+    /// How far a held finger must move before the hold becomes a click-drag, not a right-click.
+    private static let holdDragDistance: CGFloat = 8
     /// How close to the view's edge the pointer can get before a zoomed-in view follows it.
     private static let followMargin: CGFloat = 48
 
@@ -79,7 +91,7 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             cursorRing.isHidden = !isTrackpad
             // Holding to start a drag should come sooner than a right-click needs to.
             longPress.minimumPressDuration = isTrackpad ? 0.3 : 0.5
-            if isTrackpad { followPointer() }
+            if isTrackpad { followPointer() } else { applyZoom() }
         }
     }
     var onInput: (InputEvent) -> Void = { _ in }
@@ -165,11 +177,27 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     /// The on-screen keyboard is showing, not just the key bar over a hardware keyboard.
     private var softKeyboardUp = false
+    /// How much of the view's bottom the keyboard (or just its key bar) covers.
+    private var keyboardCover: CGFloat = 0
 
     @objc private func keyboardFrameChanged(_ note: Notification) {
         guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
               let screen = window?.windowScene?.screen.bounds else { return }
-        softKeyboardUp = screen.intersection(frame).height > 150
+        let shown = screen.intersection(frame)
+        softKeyboardUp = shown.height > 150
+        keyboardCover = shown.isNull ? 0 : max(0, bounds.maxY - convert(shown, from: nil).minY)
+    }
+
+    /// Zoomed in: pans to keep the Mac's caret on screen, clear of the keyboard, as you type.
+    func reveal(_ caret: Caret) {
+        guard viewport.isZoomed, videoSize != .zero else { return }
+        let rect = VideoGeometry.contentRect(videoSize: videoSize, in: content.bounds.size)
+        let point = CGPoint(x: rect.minX + CGFloat(caret.x) * rect.width, y: rect.minY + CGFloat(caret.y) * rect.height)
+        let lineHeight = CGFloat(caret.height) * rect.height * viewport.zoom
+        let before = viewport
+        viewport.reveal(point, margin: Self.followMargin + lineHeight / 2, obscuredBottom: keyboardCover)
+        guard viewport != before else { return }
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) { self.applyZoom() }
     }
 
     override func didMoveToWindow() {
@@ -242,6 +270,8 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     }
 
     private func applyZoom() {
+        // Zoomed in, holding is how to drag on the Mac: make it come a little sooner.
+        if !isTrackpad { longPress.minimumPressDuration = viewport.isZoomed ? 0.4 : 0.5 }
         content.layer.position = .zero
         content.transform = viewport.transform
         cursorRing.center = viewport.screenPoint(pointerInContent)
@@ -300,6 +330,7 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     @objc private func longPressed(_ recognizer: UILongPressGestureRecognizer) {
         guard isTrackpad else {
+            if viewport.isZoomed || holdStart != nil { return heldZoomedIn(recognizer) }
             guard recognizer.state == .began, let point = target(recognizer) else { return }
             return click(.right, at: point)
         }
@@ -309,9 +340,7 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         case .began:
             lastPressLocation = location
             onInput(.button(.left, isDown: true, x: pointer.x, y: pointer.y))
-            if UserDefaults.standard.object(forKey: SettingsKey.haptics) as? Bool ?? true {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            }
+            haptic()
         case .changed:
             movePointer(by: CGPoint(x: location.x - lastPressLocation.x, y: location.y - lastPressLocation.y))
             lastPressLocation = location
@@ -319,6 +348,46 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             onInput(.button(.left, isDown: false, x: pointer.x, y: pointer.y))
         default:
             break
+        }
+    }
+
+    /// Zoomed in, a one-finger drag looks around, so a hold is how to reach the Mac: move to
+    /// click-drag (select text, move a window), or let go without moving to right-click.
+    private func heldZoomedIn(_ recognizer: UILongPressGestureRecognizer) {
+        let location = recognizer.location(in: self)
+        switch recognizer.state {
+        case .began:
+            guard let point = target(recognizer) else { return }
+            holdStart = point
+            isHoldDragging = false
+            lastPressLocation = location
+            haptic()
+        case .changed:
+            guard let start = holdStart, let (x, y) = point(recognizer, clamped: true) else { return }
+            if !isHoldDragging {
+                guard hypot(location.x - lastPressLocation.x, location.y - lastPressLocation.y) >= Self.holdDragDistance else { return }
+                isHoldDragging = true
+                onInput(.pointerMove(x: start.x, y: start.y))
+                onInput(.button(.left, isDown: true, x: start.x, y: start.y))
+            }
+            pointer = TrackpadPointer(x: x, y: y)
+            onInput(.pointerMove(x: x, y: y))
+        case .ended, .cancelled, .failed:
+            defer { holdStart = nil; isHoldDragging = false }
+            guard let start = holdStart else { return }
+            if isHoldDragging {
+                onInput(.button(.left, isDown: false, x: pointer.x, y: pointer.y))
+            } else if recognizer.state == .ended {
+                click(.right, at: start)
+            }
+        default:
+            break
+        }
+    }
+
+    private func haptic() {
+        if UserDefaults.standard.object(forKey: SettingsKey.haptics) as? Bool ?? true {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
     }
 
@@ -338,6 +407,8 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             if [.began, .changed].contains(recognizer.state) { movePointer(by: delta) }
             return
         }
+        if recognizer.state == .began { isLookingAround = viewport.isZoomed }
+        if isLookingAround { return lookAround(recognizer) }
         guard let (x, y) = point(recognizer, clamped: true) else { return }
         pointer = TrackpadPointer(x: x, y: y)
         switch recognizer.state {
@@ -352,6 +423,39 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             break
         }
     }
+
+    /// Zoomed in: one finger moves the view like a photo, stopping at the picture's edges,
+    /// and a flick carries on for a moment. Nothing reaches the Mac.
+    private func lookAround(_ recognizer: UIPanGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            // Catch a view still gliding from the last flick where it is now.
+            if let shown = content.layer.presentation()?.affineTransform() {
+                content.layer.removeAllAnimations()
+                cursorRing.layer.removeAllAnimations()
+                _ = viewport.pan(by: CGVector(dx: shown.tx - viewport.offset.x, dy: shown.ty - viewport.offset.y))
+                applyZoom()
+            }
+            recognizer.setTranslation(.zero, in: self)
+        case .changed:
+            let delta = recognizer.translation(in: self)
+            recognizer.setTranslation(.zero, in: self)
+            _ = viewport.pan(by: CGVector(dx: delta.x, dy: delta.y))
+            applyZoom()
+        case .ended:
+            let velocity = recognizer.velocity(in: self)
+            guard hypot(velocity.x, velocity.y) > 200 else { return }
+            _ = viewport.pan(by: CGVector(dx: velocity.x * Self.flickCarry, dy: velocity.y * Self.flickCarry))
+            UIView.animate(withDuration: 0.45, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                self.applyZoom()
+            }
+        default:
+            break
+        }
+    }
+
+    /// How far a flick carries the view on, in seconds of its release speed.
+    private static let flickCarry: CGFloat = 0.18
 
     @objc private func scrolled(_ recognizer: UIPanGestureRecognizer) {
         guard recognizer.state == .changed, !isPinching else {

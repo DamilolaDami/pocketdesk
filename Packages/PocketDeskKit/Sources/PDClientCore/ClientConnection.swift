@@ -26,6 +26,8 @@ public enum ClientEvent: Sendable, Equatable {
     case macStatus(MacStatus)
     /// The frontmost Mac app's menus (after `watchMenus`); `nil` when they can't be read.
     case menuBar(MenuBar?)
+    /// Where the Mac's text caret moved to while typing.
+    case caret(Caret)
     /// File transfers over this stream (`nil` once it ends).
     case files(MacFiles?)
     /// Something to tell the person without ending the session (a shortcut that failed).
@@ -187,6 +189,7 @@ public actor ClientConnection {
                     case .macStatus(let status): onEvent(.macStatus(status))
                     case .windows(let windows): onEvent(.windows(windows))
                     case .menuBar(let bar): onEvent(.menuBar(bar))
+                    case .caret(let caret): onEvent(.caret(caret))
                     case .actionFailed(let reason): onEvent(.notice(reason))
                     case .actionDone: continue
                     case .bye(let reason):

@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 17), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 18), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -519,7 +519,13 @@ and pinning, never on obscurity.
      keyboard via `UIKeyInput`, window picker. Trackpad mode (`TrackpadPointer`: relative,
      accelerated pointer; hold then drag = click-drag; two-finger tap = right-click) with a
      zoomed view that follows the pointer (`ZoomViewport.reveal`), and three-finger swipes
-     sent as Mission Control's ⌃-arrow shortcuts (`MacGesture`).
+     sent as Mission Control's ⌃-arrow shortcuts (`MacGesture`). A zoomed view also follows
+     the text caret while typing (protocol v18): after a keystroke settles (`caretDelay`) the
+     host reads the focused element's caret through Accessibility (`AccessibilityCaret`:
+     `AXSelectedTextRange` → `AXBoundsForRange`), maps it onto the streamed picture
+     (`Caret(frame:in:)`) and sends `caret` if it moved; the phone pans to it, clear of the
+     keyboard. It goes straight to the stream view (`SessionController.onCaret`), not
+     through the store. Apps that don't expose text ranges just don't send one.
 2. **v0.2 – Window picker**: stream one window fitted to the phone, app switcher UI.
 3. **v0.3 – Thumb UI**: read the frontmost app's menus/toolbar via AX APIs and render them as
    native controls. Menus done (protocol v14); toolbars to come.

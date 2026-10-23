@@ -50,15 +50,17 @@ public struct ZoomViewport: Equatable, Sendable {
     }
 
     /// Pans just enough to bring `point` (in the unzoomed picture's coordinates) at least
-    /// `margin` inside the view, as the zoomed view follows the pointer.
-    public mutating func reveal(_ point: CGPoint, margin: CGFloat) {
+    /// `margin` inside the view, as the zoomed view follows the pointer or the caret. The
+    /// bottom `obscuredBottom` points (under the keyboard) don't count as inside.
+    public mutating func reveal(_ point: CGPoint, margin: CGFloat, obscuredBottom: CGFloat = 0) {
         guard isZoomed else { return }
         let shown = screenPoint(point)
-        let marginX = min(margin, viewSize.width / 2), marginY = min(margin, viewSize.height / 2)
+        let visibleHeight = max(viewSize.height - obscuredBottom, 0)
+        let marginX = min(margin, viewSize.width / 2), marginY = min(margin, visibleHeight / 2)
         if shown.x < marginX { offset.x += marginX - shown.x }
         if shown.x > viewSize.width - marginX { offset.x -= shown.x - (viewSize.width - marginX) }
         if shown.y < marginY { offset.y += marginY - shown.y }
-        if shown.y > viewSize.height - marginY { offset.y -= shown.y - (viewSize.height - marginY) }
+        if shown.y > visibleHeight - marginY { offset.y -= shown.y - (visibleHeight - marginY) }
         clamp()
     }
 

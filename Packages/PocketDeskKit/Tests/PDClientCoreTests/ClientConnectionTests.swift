@@ -209,6 +209,37 @@ final class ClientConnectionTests {
         #expect(try #require(latency) < .seconds(1))
     }
 
+    /// The Mac cards' Paste and Copy: the clipboard both ways with no picture.
+    @Test func pastesAndCopiesWithoutStreaming() async throws {
+        try TrustStore(peers: [PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone")]).save(to: trustStoreURL)
+        let clipboard = FakeClipboard()
+        let service = try HostService(
+            configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
+                                 trustStoreURL: trustStoreURL, advertise: false),
+            makeFrameSource: { MovingFrames() }, clipboard: clipboard, input: SinkRecorder()
+        ) { _ in }
+        let serviceTask = Task { try await service.run() }
+        defer { serviceTask.cancel() }
+        var port: UInt16?
+        for _ in 0..<200 where port == nil {
+            port = await service.port
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let endpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .init(rawValue: try #require(port))!)
+        let fingerprint = service.identity.fingerprint
+
+        await #expect(throws: ClientError.hostEnded("Nothing is copied on the Mac.")) {
+            _ = try await ClientConnection.copy(endpoint: endpoint, hostFingerprint: fingerprint, identity: self.phone,
+                                                deviceName: "Test iPhone")
+        }
+        try await ClientConnection.paste(ClipboardItem(text: "From the phone"), endpoint: endpoint, hostFingerprint: fingerprint,
+                                         identity: phone, deviceName: "Test iPhone")
+        #expect(await clipboard.read() == ClipboardItem(text: "From the phone"))
+        let copied = try await ClientConnection.copy(endpoint: endpoint, hostFingerprint: fingerprint, identity: phone,
+                                                     deviceName: "Test iPhone")
+        #expect(copied == ClipboardItem(text: "From the phone"))
+    }
+
     @Test func catalogListsAppsAndIconsWithoutStreaming() async throws {
         // Already paired: the catalog is only for phones the Mac trusts.
         try TrustStore(peers: [PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone")]).save(to: trustStoreURL)
@@ -325,8 +356,16 @@ actor HostBox {
 #endif
 
 /// Keeps client tests off the real Mac clipboard.
-final class FakeClipboard: ClipboardSink, @unchecked Sendable {
-    func changeCount() async -> Int { 0 }
-    func read() async -> ClipboardItem? { nil }
-    func write(_ item: ClipboardItem) async -> Int { 0 }
+/// A Mac clipboard that remembers what was written to it.
+actor FakeClipboard: ClipboardSink {
+    private var item: ClipboardItem?
+    private var count = 0
+
+    func changeCount() -> Int { count }
+    func read() -> ClipboardItem? { item }
+    func write(_ item: ClipboardItem) -> Int {
+        self.item = item
+        count += 1
+        return count
+    }
 }

@@ -192,7 +192,7 @@ public actor ClientConnection {
                         hostReason.value = reason
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
-                    case .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
+                    case .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .getClipboard, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon,
                          .listMacShortcuts, .macShortcuts, .watchStatus, .watchMenus, .pressMenuItem, .setQuality,
                          .sendFile, .getFile, .fileData, .listFiles:
@@ -419,6 +419,70 @@ extension ClientConnection {
                 }
             }
             if let failure { throw ClientError.hostEnded(failure) }
+        }
+    }
+}
+
+extension ClientConnection {
+    /// Puts `item` on the Mac's clipboard without streaming. Throws with the Mac's reason if it
+    /// couldn't.
+    public static func paste(_ item: ClipboardItem, endpoint: NWEndpoint, hostFingerprint: Fingerprint,
+                             identity: DeviceIdentity, deviceName: String) async throws {
+        try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+            var control = try await openQuietly(session, deviceName: deviceName)
+            try await session.send(.clipboard(item))
+            try await session.send(.bye(reason: "done"))
+            // As with `perform`: the Mac answers only on failure, then hangs up.
+            var failure: String?
+            while let message = try? await control.next() {
+                switch message {
+                case .actionFailed(let reason): failure = reason
+                case .ping(let value): try? await session.send(.pong(value))
+                default: continue
+                }
+            }
+            if let failure { throw ClientError.hostEnded(failure) }
+        }
+    }
+
+    /// What's copied on the Mac, without streaming.
+    public static func copy(endpoint: NWEndpoint, hostFingerprint: Fingerprint, identity: DeviceIdentity,
+                            deviceName: String) async throws -> ClipboardItem {
+        let answer = Answer()
+        try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+            var control = try await openQuietly(session, deviceName: deviceName)
+            try await session.send(.getClipboard)
+            while let message = try await control.next() {
+                switch message {
+                case .clipboard(let item):
+                    answer.item.withLock { $0 = item }
+                    try? await session.send(.bye(reason: "done"))
+                    return
+                case .actionFailed(let reason), .bye(let reason): throw ClientError.hostEnded(reason)
+                case .ping(let value): try await session.send(.pong(value))
+                default: continue
+                }
+            }
+        }
+        guard let item = answer.item.withLock({ $0 }) else { throw ClientError.hostEnded("The Mac went away.") }
+        return item
+    }
+
+    /// The Mac's clipboard, out of the connection's closure.
+    private final class Answer: Sendable {
+        let item = Mutex<ClipboardItem?>(nil)
+    }
+
+    /// Says hello for a connection with no picture; returns once the Mac has answered.
+    private static func openQuietly(_ session: some PeerSession, deviceName: String) async throws
+        -> AsyncThrowingStream<ControlMessage, any Error>.Iterator {
+        var control = session.controlMessages.makeAsyncIterator()
+        try await session.send(.hello(Hello(deviceName: deviceName, viewport: Viewport(width: 0, height: 0, scale: 1),
+                                            mode: .catalog)))
+        switch try await control.next() {
+        case .helloAck: return control
+        case .bye(let reason): throw ClientError.hostEnded(reason)
+        default: throw ClientError.unexpectedMessage
         }
     }
 }

@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 16), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 17), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -352,6 +352,22 @@ folders the Mac shares.
 - **Share sheet**: the `PocketDeskShare` extension sends to the most recently used Mac. It uses
   the app's TLS identity (same keychain access group) and its pairings, which now live in the
   App Group container (`SharedStorage`, moved there on first launch).
+
+## Mac cards and the clipboard without streaming (protocol v17)
+
+The Macs tab does things without opening a stream, over short catalog connections:
+
+- **Status**: `watchStatus` sends `MacStatus` as it changes: volume, now playing (with a cover
+  shrunk to 240 px and the app playing it, with its icon) and the battery. The phone pings
+  the same connection every 2 s for the round trip it shows (`ConnectionGrade`).
+- **Wallpaper**: `HelloAck.wallpaper` carries the desktop picture at 480 px, cached on the
+  Mac until the file changes. The phone keeps the last one per Mac, so a sleeping Mac is still
+  drawn with it.
+- **Clipboard**: the phone sends `clipboard` to paste and `getClipboard` to copy (the Mac
+  answers `clipboard`, or `actionFailed` when nothing's copied). Both count as using the Mac,
+  so "Ask Before Each Connection" applies, once per connection.
+
+The status, artwork and wallpaper fields are optional; only `getClipboard` needed the bump.
 
 ## Mac menus on the phone (protocol v14)
 

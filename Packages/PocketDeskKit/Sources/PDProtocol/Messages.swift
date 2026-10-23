@@ -1,5 +1,5 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 16
+public let protocolVersion: UInt16 = 17
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -31,6 +31,9 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// Copied on one side, for the other's clipboard (either direction, while streaming).
     case clipboard(ClipboardItem)
     case setClipboardEnabled(Bool)
+    /// Phone → host: what's copied on the Mac now, as `clipboard` (or `actionFailed` if nothing).
+    /// Works without streaming, like `clipboard` the other way.
+    case getClipboard
     case requestKeyframe
     /// Committed text (IME, dictation, paste).
     case insertText(String)

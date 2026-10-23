@@ -98,6 +98,8 @@ public actor HostSession {
     private var menusTask: Task<Void, Never>?
     private var files: HostFileTransfers?
     private var filesTask: Task<Void, Never>?
+    /// Whether the person at the Mac allowed this connection-with-no-picture to do things.
+    private var catalogAllowed: Bool?
     /// Set after a menu item is pressed: its menus may have changed even if the app didn't.
     private var menusStale = false
     /// The Mac clipboard's change count as last sent or written; anything newer goes out.
@@ -214,26 +216,32 @@ public actor HostSession {
             // no picture, no input, no "connected".
             try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: [],
                                                       wake: configuration.wake, wallpaper: configuration.wallpaper)))
-            var allowed: Bool?
             defer { statusTask?.cancel() }
             while let message = try await messages.next() {
+                func allow() async throws -> Bool { try await allowCatalogAction(deviceName: hello.deviceName) }
                 switch message {
                 case .listApps, .requestAppIcons, .listMacShortcuts: try await answer(message)
                 case .watchStatus: startWatchingStatus()
                 // The Mac cards show the round trip.
                 case .ping(let value): try await session.send(.pong(value))
                 case .run(let action):
-                    // Running something is using the Mac: "Ask Before Each Connection" applies.
-                    if allowed == nil { allowed = await pairing.allowSession(peer: peer, deviceName: hello.deviceName) }
-                    guard allowed == true else {
-                        try await session.send(.actionFailed("The Mac didn't allow this."))
+                    guard try await allow() else { continue }
+                    try await run(action)
+                // Paste to Mac and Copy from Mac on the phone's Mac cards.
+                case .clipboard(let item):
+                    guard try await allow() else { continue }
+                    guard item.fitsLimits, !item.isEmpty else {
+                        try await session.send(.actionFailed("That's too large for the Mac's clipboard."))
                         continue
                     }
-                    try await run(action)
+                    _ = await clipboard.write(item)
+                case .getClipboard:
+                    guard try await allow() else { continue }
+                    try await sendClipboard()
                 case _ where HostFileTransfers.handles(message):
                     // Files are using the Mac too.
-                    if allowed == nil { allowed = await pairing.allowSession(peer: peer, deviceName: hello.deviceName) }
-                    guard allowed == true else {
+                    if catalogAllowed == nil { catalogAllowed = await pairing.allowSession(peer: peer, deviceName: hello.deviceName) }
+                    guard catalogAllowed == true else {
                         if case .listFiles(let path) = message {
                             try await session.send(.fileList(FileList(path: path, entries: [], problem: "The Mac didn't allow this.")))
                         } else if case .sendFile(let offer) = message {
@@ -301,6 +309,8 @@ public actor HostSession {
             case .clipboard(let item):
                 guard clipboardEnabled, item.fitsLimits, !item.isEmpty else { continue }
                 clipboardSeen = await clipboard.write(item)
+            case .getClipboard:
+                try await sendClipboard()
             case .setClipboardEnabled(let enabled):
                 clipboardEnabled = enabled
                 // Turning it back on mustn't send whatever was copied while it was off.
@@ -363,6 +373,27 @@ public actor HostSession {
                 continue
             }
         }
+    }
+
+    /// Doing something on the Mac from a connection with no picture (not just looking):
+    /// "Ask Before Each Connection" applies, once per connection.
+    private func allowCatalogAction(deviceName: String) async throws -> Bool {
+        if catalogAllowed == nil { catalogAllowed = await pairing.allowSession(peer: peer, deviceName: deviceName) }
+        if catalogAllowed != true { try await session.send(.actionFailed("The Mac didn't allow this.")) }
+        return catalogAllowed == true
+    }
+
+    /// What's copied on the Mac, asked for by the phone.
+    private func sendClipboard() async throws {
+        guard let item = await clipboard.read(), !item.isEmpty else {
+            try await session.send(.actionFailed("Nothing is copied on the Mac."))
+            return
+        }
+        guard item.fitsLimits else {
+            try await session.send(.actionFailed("What's copied on the Mac is too large to send."))
+            return
+        }
+        try await session.send(.clipboard(item))
     }
 
     /// Live tiles: the status now, then again whenever it changes.

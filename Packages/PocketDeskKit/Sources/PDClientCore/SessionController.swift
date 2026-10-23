@@ -1,6 +1,7 @@
 import Foundation
 import PDProtocol
 import PDSecurity
+import Network
 import PDTransport
 
 /// Wires discovery, pairing, the trust store and `ClientConnection` to `SessionStore` for the
@@ -427,15 +428,66 @@ public final class SessionController {
     }
 
     /// From the stream's Paste button: the phone's clipboard, for the Mac's.
-    public func sendClipboard(_ item: ClipboardItem) {
+    /// Puts `item` on a Mac's clipboard: the one being streamed, or `hostID` (else the usual
+    /// Mac) over a quick connection of its own.
+    public func sendClipboard(_ item: ClipboardItem, to hostID: UUID? = nil) {
         guard item.fitsLimits else {
             store.post(notice: "That's too large to send to the Mac.")
             return
         }
         guard !item.isEmpty else { return }
-        connection?.send(.clipboard(item))
-        store.post(notice: item.text != nil ? "Pasted to your Mac's clipboard" : "Image sent to your Mac's clipboard",
-                   kind: .done)
+        let done = item.text != nil ? "Pasted to the clipboard on" : "Image pasted to the clipboard on"
+        if case .streaming(let host, _, _) = store.state, let connection, hostID == nil || hostID == host.hostID {
+            connection.send(.clipboard(item))
+            store.post(notice: "\(done) \(host.name)", kind: .done)
+            return
+        }
+        Task {
+            do throws(FilesError) {
+                let target = try quietTarget(hostID)
+                do {
+                    try await ClientConnection.paste(item, endpoint: target.endpoint, hostFingerprint: target.fingerprint,
+                                                     identity: target.identity, deviceName: deviceName)
+                } catch {
+                    throw .failed(ClientConnection.describe(error))
+                }
+                store.post(notice: "\(done) \(target.name)", kind: .done)
+            } catch {
+                store.post(notice: String(describing: error))
+            }
+        }
+    }
+
+    /// Copies what's copied on a Mac (`hostID`, else the usual one) onto this iPhone.
+    public func copyFromMac(_ hostID: UUID?) {
+        Task {
+            do throws(FilesError) {
+                let target = try quietTarget(hostID)
+                let item: ClipboardItem
+                do {
+                    item = try await ClientConnection.copy(endpoint: target.endpoint, hostFingerprint: target.fingerprint,
+                                                           identity: target.identity, deviceName: deviceName)
+                } catch {
+                    throw .failed(ClientConnection.describe(error))
+                }
+                pasteboard.write(item)
+                store.post(notice: ClipboardItem.copiedNotice(item, from: target.name), kind: .done)
+            } catch {
+                store.post(notice: String(describing: error))
+            }
+        }
+    }
+
+    /// A Mac to reach without streaming, and how.
+    private func quietTarget(_ hostID: UUID?) throws(FilesError)
+        -> (name: String, endpoint: NWEndpoint, fingerprint: Fingerprint, identity: DeviceIdentity) {
+        guard let host = shortcutTarget(preferredHostID: hostID), let macID = host.hostID,
+              let browsedHost = browsed[host.id], let peer = trustStore.peer(hostID: macID) else { throw .noMac }
+        do {
+            return (host.name, browsedHost.endpoint, peer.fingerprint, try DeviceIdentity.loadOrCreate(label: identityLabel))
+        } catch {
+            throw .failed("Couldn't load this phone's identity: \(error)")
+        }
     }
 
     public func insertText(_ text: String) {

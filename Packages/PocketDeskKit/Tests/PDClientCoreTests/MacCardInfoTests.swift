@@ -31,4 +31,12 @@ struct MacCardInfoTests {
         // A video in a browser has nothing to open on the phone.
         #expect(PlayerApp(bundleID: "com.apple.Safari", name: "Safari").phoneURL == nil)
     }
+
+    @Test func copiedNotice() {
+        #expect(ClipboardItem.copiedNotice(ClipboardItem(text: "  Meeting at 3\nRoom 2"), from: "Studio")
+                == "Copied “Meeting at 3” from Studio")
+        #expect(ClipboardItem.copiedNotice(ClipboardItem(text: String(repeating: "a", count: 50)), from: "Studio")
+                == "Copied “\(String(repeating: "a", count: 40))…” from Studio")
+        #expect(ClipboardItem.copiedNotice(ClipboardItem(png: "AAAA"), from: "Studio") == "Copied an image from Studio")
+    }
 }

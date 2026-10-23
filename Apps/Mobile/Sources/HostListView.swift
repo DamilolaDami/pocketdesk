@@ -41,6 +41,7 @@ struct HostListView: View {
                                               latency: watched ? controller.store.macLatency : nil,
                                               wallpaper: host.hostID.flatMap { controller.store.wallpapers[$0] },
                                               openOnMac: { open($0, on: host) },
+                                              menu: { menu(for: host) },
                                               control: { control($0, on: host) }) {
                                     if host.isOnline { controller.select(host) } else { controller.wake(host) }
                                 }
@@ -109,6 +110,16 @@ struct HostListView: View {
             }
         }
         if host.isOnline, host.needsUpdate == nil {
+            Section {
+                // The system paste button reads the clipboard without iOS's "Allow Paste" prompt
+                // (the tap is the consent), and in a menu it looks like any item.
+                PasteButton(supportedContentTypes: [.plainText, .image]) { providers in
+                    Task { @MainActor in
+                        if let item = await ClipboardItem(providers) { controller.sendClipboard(item, to: host.hostID) }
+                    }
+                }
+                Button("Copy from Mac", systemImage: "doc.on.doc") { controller.copyFromMac(host.hostID) }
+            }
             Section {
                 Button("Send Photos…", systemImage: "photo.on.rectangle") {
                     filesHost = host
@@ -182,7 +193,7 @@ private extension MediaKey {
     }
 }
 
-private struct PairedMacCard: View {
+private struct PairedMacCard<Actions: View>: View {
     let host: DiscoveredHost
     /// The Mac's volume, battery and now playing, when the app is watching this one.
     let status: MacStatus?
@@ -191,6 +202,8 @@ private struct PairedMacCard: View {
     /// Its desktop picture, as last seen.
     let wallpaper: Data?
     let openOnMac: (PlayerApp) -> Void
+    /// Everything else to do with this Mac, behind the card's ⋯ button.
+    @ViewBuilder let menu: () -> Actions
     let control: (MediaKey) -> Void
     let connect: () -> Void
     @AppStorage("macCardPlayerExpanded") private var playerExpanded = false
@@ -226,6 +239,16 @@ private struct PairedMacCard: View {
                     .minimumScaleFactor(0.85)
                 }
                 Spacer(minLength: 0)
+                Menu(content: menu) {
+                    Image(systemName: "ellipsis")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 36, height: 36)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .accessibilityLabel("More for \(host.name)")
             }
             if live {
                 MacVitals(latency: latency, battery: status?.battery)

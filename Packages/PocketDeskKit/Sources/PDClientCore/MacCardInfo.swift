@@ -83,3 +83,15 @@ extension PlayerApp {
         }
     }
 }
+
+extension ClipboardItem {
+    /// "Copied “Meeting at 3” from Studio", short enough for a banner.
+    public static func copiedNotice(_ item: ClipboardItem, from mac: String) -> String {
+        guard let text = item.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            return "Copied an image from \(mac)"
+        }
+        let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
+        let preview = line.count > 40 ? line.prefix(40) + "…" : Substring(line)
+        return "Copied “\(preview)” from \(mac)"
+    }
+}

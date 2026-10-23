@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show tools
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # The tests store a throwaway device identity in the default keychain. A fresh, unlocked
+      # keychain keeps them from waiting on a password prompt nobody can answer.
+      - name: Set up a test keychain
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/ci.keychain-db"
+          security create-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s "$KEYCHAIN"
+
+      # Screen-capture tests skip themselves: the runner has no Screen Recording permission.
+      - name: Test PocketDeskKit
+        working-directory: Packages/PocketDeskKit
+        run: |
+          set -o pipefail
+          xcodebuild test -scheme PocketDeskKit-Package -destination 'platform=macOS' \
+            -derivedDataPath ../../.build/xcode | tee "$RUNNER_TEMP/test.log" \
+            | grep -E 'error:|warning: .*PocketDeskKit|recorded an issue|passed after|failed after|Test run with|TEST (SUCCEEDED|FAILED)' || true
+          grep -q 'TEST SUCCEEDED' "$RUNNER_TEMP/test.log"
+
+      - name: Generate the Xcode project
+        run: xcodegen
+
+      - name: Build the iOS app
+        run: |
+          set -o pipefail
+          xcodebuild -scheme PocketDesk -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO build | grep -E 'error:|BUILD (SUCCEEDED|FAILED)'
+
+      - name: Build the Mac host
+        run: |
+          set -o pipefail
+          xcodebuild -scheme PocketDeskHost -destination 'platform=macOS' \
+            -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO build | grep -E 'error:|BUILD (SUCCEEDED|FAILED)'
+
+      - name: Upload the test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log
+          path: ${{ runner.temp }}/test.log

@@ -1,0 +1,48 @@
+name: Bug report
+description: Something in PocketDesk doesn't work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open PocketDesk on the Mac
+        2. Tap "Use This Mac" on the phone
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: phone
+    attributes:
+      label: iPhone or iPad
+      placeholder: iPhone 17 Pro, iOS 26.1
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac
+      placeholder: MacBook Pro (M3), macOS 26.1
+    validations:
+      required: true
+  - type: dropdown
+    id: network
+    attributes:
+      label: How they were connected
+      options:
+        - Same Wi-Fi
+        - Mac on Ethernet, phone on Wi-Fi
+        - Something else (say below)
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, screen recordings, or the Mac's log (`/usr/bin/log show --last 10m --predicate 'subsystem BEGINSWITH "com.pocketdesk"'`).

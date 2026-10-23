@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct PocketDeskApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var controller = AppModel.controller
     @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
 

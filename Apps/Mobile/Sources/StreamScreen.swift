@@ -71,7 +71,10 @@ struct StreamScreen: View {
             }
             .persistentSystemOverlays(.hidden)
             .statusBarHidden()
-            .onAppear { if startInLandscape { rotate(toLandscape: true) } }
+            .onAppear {
+                Orientation.allowLandscape(true)
+                if startInLandscape { rotate(toLandscape: true) }
+            }
             .onChange(of: quality) { controller.qualityChanged() }
             .task(id: controller.store.quality) {
                 // The chip confirms what you're looking at (again after a quality change), then
@@ -82,7 +85,7 @@ struct StreamScreen: View {
                 withAnimation(.smooth) { showsStatus = false }
             }
             // The other screens are designed for portrait; don't leave the phone stuck sideways.
-            .onDisappear { rotate(toLandscape: false) }
+            .onDisappear { Orientation.allowLandscape(false) }
             .sheet(isPresented: $showingDisplays) {
                 DisplayPicker(controller: controller) { showingDisplays = false }
                     .presentationDetents([.medium, .large])

@@ -6,3 +6,6 @@ xcuserdata/
 *.xcodeproj/
 *.xcworkspace/
 !Packages/**/*.xcworkspace/
+
+# Personal signing (see Config/Signing.xcconfig).
+Config/Local.xcconfig

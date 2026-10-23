@@ -100,7 +100,8 @@ public struct ShortcutLibrary: Codable, Sendable, Equatable {
         return shared
     }
 
-    public static let appGroup = "group.com.pocketdesk.app"
+    /// From the app's Info.plist, which takes it from the build (see `BUNDLE_ID_PREFIX`).
+    public static let appGroup = Bundle.main.object(forInfoDictionaryKey: "PDAppGroup") as? String ?? "group.com.pocketdesk.app"
 
     public static func load(from url: URL) throws -> ShortcutLibrary {
         try JSONDecoder().decode(ShortcutLibrary.self, from: Data(contentsOf: url))

@@ -5,12 +5,12 @@
 	<!-- The app keeps its paired Macs in the shared container. -->
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.com.pocketdesk.app</string>
+		<string>group.$(BUNDLE_ID_PREFIX).app</string>
 	</array>
 	<!-- The same TLS identity as the app, so the Macs it paired with recognize this. -->
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)com.pocketdesk.app</string>
+		<string>$(AppIdentifierPrefix)$(BUNDLE_ID_PREFIX).app</string>
 	</array>
 </dict>
 </plist>

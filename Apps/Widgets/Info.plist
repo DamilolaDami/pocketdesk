@@ -25,5 +25,7 @@
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.widgetkit-extension</string>
 	</dict>
+	<key>PDAppGroup</key>
+	<string>group.$(BUNDLE_ID_PREFIX).app</string>
 </dict>
 </plist>

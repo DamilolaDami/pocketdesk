@@ -1,0 +1,8 @@
+// Your own signing for the phone app, read by Xcode and xcodebuild alike. Put your team and an
+// identifier prefix you own in Config/Local.xcconfig (git-ignored), e.g.
+//
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   BUNDLE_ID_PREFIX = com.you.pocketdesk
+//
+// Without it the app builds with the project's own prefix, which only its owner can sign.
+#include? "Local.xcconfig"

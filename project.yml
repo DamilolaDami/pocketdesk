@@ -10,6 +10,9 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.1.0"
+    # The phone app's identifiers (bundle IDs, App Group, keychain group) start with this. To
+    # sign with your own team, pass a prefix you own: xcodebuild … BUNDLE_ID_PREFIX=com.you.pocketdesk
+    BUNDLE_ID_PREFIX: com.pocketdesk
     CURRENT_PROJECT_VERSION: "1"
 packages:
   PocketDeskKit:
@@ -57,6 +60,14 @@ targets:
   PocketDesk:
     type: application
     platform: iOS
+    # Lets automatic signing register the App Group for whichever team builds it.
+    attributes:
+      SystemCapabilities:
+        com.apple.ApplicationGroups.iOS:
+          enabled: 1
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
     sources: [Apps/Mobile/Sources, Apps/Shared]
     scheme: {}
     dependencies:
@@ -68,6 +79,7 @@ targets:
       path: Apps/Mobile/Info.plist
       properties:
         CFBundleDisplayName: PocketDesk
+        PDAppGroup: group.$(BUNDLE_ID_PREFIX).app
         UILaunchScreen: {}
         # Landscape fits a Mac display far better; the stream re-fits on rotation.
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
@@ -80,7 +92,7 @@ targets:
             CFBundleURLSchemes: [pocketdesk]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.app
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).app
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_ENTITLEMENTS: Apps/Mobile/PocketDesk.entitlements
 
@@ -88,6 +100,14 @@ targets:
   PocketDeskWidgets:
     type: app-extension
     platform: iOS
+    # Lets automatic signing register the App Group for whichever team builds it.
+    attributes:
+      SystemCapabilities:
+        com.apple.ApplicationGroups.iOS:
+          enabled: 1
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
     sources: [Apps/Widgets/Sources, Apps/Shared]
     dependencies:
       - package: PocketDeskKit
@@ -96,17 +116,26 @@ targets:
       path: Apps/Widgets/Info.plist
       properties:
         CFBundleDisplayName: PocketDesk
+        PDAppGroup: group.$(BUNDLE_ID_PREFIX).app
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.app.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).app.widgets
         CODE_SIGN_ENTITLEMENTS: Apps/Widgets/PocketDeskWidgets.entitlements
 
   # Share sheet: sends photos and files to a Mac's Downloads folder, without opening the app.
   PocketDeskShare:
     type: app-extension
     platform: iOS
+    # Lets automatic signing register the App Group for whichever team builds it.
+    attributes:
+      SystemCapabilities:
+        com.apple.ApplicationGroups.iOS:
+          enabled: 1
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
     sources: [Apps/Share/Sources]
     dependencies:
       - package: PocketDeskKit
@@ -115,6 +144,7 @@ targets:
       path: Apps/Share/Info.plist
       properties:
         CFBundleDisplayName: PocketDesk
+        PDAppGroup: group.$(BUNDLE_ID_PREFIX).app
         NSLocalNetworkUsageDescription: PocketDesk finds your Mac on the local network.
         NSBonjourServices: [_pocketdesk._udp]
         NSExtension:
@@ -127,5 +157,5 @@ targets:
               NSExtensionActivationSupportsFileWithMaxCount: 20
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.pocketdesk.app.share
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).app.share
         CODE_SIGN_ENTITLEMENTS: Apps/Share/PocketDeskShare.entitlements

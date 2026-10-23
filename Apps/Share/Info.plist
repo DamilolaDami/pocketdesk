@@ -45,5 +45,7 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PocketDesk finds your Mac on the local network.</string>
+	<key>PDAppGroup</key>
+	<string>group.$(BUNDLE_ID_PREFIX).app</string>
 </dict>
 </plist>

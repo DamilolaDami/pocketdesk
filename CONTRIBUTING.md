@@ -37,6 +37,21 @@ xcodebuild -scheme PocketDeskHost -destination 'platform=macOS' \
   CODE_SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="" build
 ```
 
+### Signing the phone app
+
+The phone app's bundle IDs, App Group and keychain group all start with `BUNDLE_ID_PREFIX`
+(`com.pocketdesk` by default, which only the project's owner can sign). To run it on your own
+iPhone, create `Config/Local.xcconfig` (git-ignored) with your team and a prefix you own:
+
+```
+DEVELOPMENT_TEAM = ABCDE12345
+BUNDLE_ID_PREFIX = com.you.pocketdesk
+```
+
+Then regenerate with `xcodegen`, open the project, and on each of the PocketDesk,
+PocketDeskWidgets and PocketDeskShare targets tick the App Group under Signing & Capabilities
+once, so Xcode registers it for your team.
+
 The host needs Screen Recording and Accessibility permission (System Settings › Privacy &
 Security). The phone and the Mac must run the same protocol version (`protocolVersion` in
 `PDProtocol`), so update both together.

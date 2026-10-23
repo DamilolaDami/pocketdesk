@@ -30,9 +30,27 @@ public struct DiscoveredHost: Sendable, Equatable, Identifiable, Hashable {
     public var isWaking: Bool
     /// For drawing the right Mac; `nil` for Macs that don't say.
     public var kind: MacKind?
+    /// Which side needs updating before they can connect; `nil` when they speak the same
+    /// protocol (or the Mac doesn't say).
+    public var needsUpdate: Side?
+    /// When this phone last streamed from it.
+    public var lastUsed: Date?
+
+    public enum Side: Sendable, Hashable {
+        case mac, phone
+
+        /// Compares the protocol a Mac advertises with this app's.
+        public init?(macVersion: UInt16?, phoneVersion: UInt16 = protocolVersion) {
+            guard let macVersion, macVersion != phoneVersion else { return nil }
+            self = macVersion < phoneVersion ? .mac : .phone
+        }
+    }
 
     public init(id: String, name: String, hostID: UUID? = nil, isPaired: Bool, isOnline: Bool = true,
-                canWake: Bool = false, isWaking: Bool = false, kind: MacKind? = nil) {
+                canWake: Bool = false, isWaking: Bool = false, kind: MacKind? = nil, needsUpdate: Side? = nil,
+                lastUsed: Date? = nil) {
+        self.needsUpdate = needsUpdate
+        self.lastUsed = lastUsed
         self.id = id
         self.name = name
         self.hostID = hostID
@@ -41,6 +59,18 @@ public struct DiscoveredHost: Sendable, Equatable, Identifiable, Hashable {
         self.canWake = canWake
         self.isWaking = isWaking
         self.kind = kind
+    }
+}
+
+extension DiscoveredHost {
+    /// The Macs tab's order: paired first, online first, most recently used first, then by name.
+    public static func ordered(_ hosts: [DiscoveredHost]) -> [DiscoveredHost] {
+        hosts.sorted { a, b in
+            let keyA = (a.isPaired ? 0 : 1, a.isOnline ? 0 : 1), keyB = (b.isPaired ? 0 : 1, b.isOnline ? 0 : 1)
+            if keyA != keyB { return keyA < keyB }
+            if a.lastUsed != b.lastUsed { return (a.lastUsed ?? .distantPast) > (b.lastUsed ?? .distantPast) }
+            return a.name.localizedStandardCompare(b.name) == .orderedAscending
+        }
     }
 }
 

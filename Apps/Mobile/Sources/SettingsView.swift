@@ -14,6 +14,8 @@ enum SettingsKey {
     static let haptics = "haptics"
     /// The stream starts in trackpad mode (the control bar switches it too).
     static let trackpad = "trackpad"
+    /// Same key `SessionController.autoConnect` reads.
+    static let autoConnect = "autoConnect"
 }
 
 struct SettingsView: View {
@@ -26,6 +28,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
     @AppStorage(SettingsKey.haptics) private var haptics = true
     @AppStorage(SettingsKey.trackpad) private var trackpad = false
+    @AppStorage(SettingsKey.autoConnect) private var autoConnect = false
     @State private var showingSiri = false
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
@@ -77,6 +80,9 @@ struct SettingsView: View {
                         SettingsLabel("Share Clipboard", symbol: "doc.on.clipboard.fill", color: .indigo)
                     }
                     .onChange(of: shareClipboard) { _, enabled in controller.clipboardEnabled = enabled }
+                    Toggle(isOn: $autoConnect) {
+                        SettingsLabel("Open Last Mac at Launch", symbol: "bolt.horizontal.fill", color: .green)
+                    }
                     Toggle(isOn: $trackpad) {
                         SettingsLabel("Trackpad Mode", symbol: "cursorarrow", color: .gray)
                     }

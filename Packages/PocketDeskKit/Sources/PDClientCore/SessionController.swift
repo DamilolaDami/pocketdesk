@@ -38,6 +38,18 @@ public final class SessionController {
     private var wakeBook: PerMac<WakeInfo>
     private let macKindsURL: URL
     private var macKinds: PerMac<MacKind>
+    private let macNamesURL: URL
+    /// Names given on this phone, shown instead of the Mac's own.
+    private var macNames: PerMac<String>
+    private let lastUsedURL: URL
+    private var lastUsed: PerMac<Date>
+    /// Auto-connect happens once per launch, not again after leaving a Mac.
+    private var autoConnected = false
+    /// Open the most recently used Mac as soon as it shows up.
+    public var autoConnect: Bool {
+        get { UserDefaults.standard.bool(forKey: "autoConnect") }
+        set { UserDefaults.standard.set(newValue, forKey: "autoConnect") }
+    }
     private var wakeAttempts = WakeAttempts()
     private var wakeTasks: [UUID: Task<Void, Never>] = [:]
     private var connectionHostID: UUID?
@@ -65,6 +77,8 @@ public final class SessionController {
     private var catalogFetchedAt: [UUID: ContinuousClock.Instant] = [:]
     private var heldKey: (code: UInt16, task: Task<Void, Never>)?
     private var statusTask: Task<Void, Never>?
+    /// Screens showing live status (the Macs tab, the Shortcuts tab): it stops when none are.
+    private var statusWatchers: Set<String> = []
 
     public init(identityLabel: String = "com.pocketdesk.phone.identity",
                 trustStoreURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/paired-macs.json"),
@@ -72,7 +86,13 @@ public final class SessionController {
                 cacheDirectory: URL = URL.cachesDirectory.appending(path: "PocketDesk"),
                 displayPreferencesURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/displays.json"),
                 wakeBookURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/wake.json"),
-                macKindsURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/mac-kinds.json")) {
+                macKindsURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/mac-kinds.json"),
+                macNamesURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/mac-names.json"),
+                lastUsedURL: URL = URL.applicationSupportDirectory.appending(path: "PocketDesk/last-used.json")) {
+        self.macNamesURL = macNamesURL
+        self.macNames = (try? PerMac.load(from: macNamesURL)) ?? PerMac()
+        self.lastUsedURL = lastUsedURL
+        self.lastUsed = (try? PerMac.load(from: lastUsedURL)) ?? PerMac()
         self.wakeBookURL = wakeBookURL
         self.wakeBook = (try? PerMac.load(from: wakeBookURL)) ?? PerMac()
         self.macKindsURL = macKindsURL
@@ -130,26 +150,33 @@ public final class SessionController {
             pendingInvite = nil
             beginPairing(invite, with: host)
         }
+        if autoConnect, !autoConnected, case .discovering = store.state,
+           let host = discoveredHosts().filter({ $0.isPaired && $0.isOnline && $0.needsUpdate == nil && $0.lastUsed != nil })
+               .max(by: { $0.lastUsed! < $1.lastUsed! }) {
+            autoConnected = true
+            select(host)
+        }
     }
 
     /// Online Macs from Bonjour, plus paired Macs that aren't advertising right now.
     private func discoveredHosts() -> [DiscoveredHost] {
         let online = browsed.values.map { host in
-            DiscoveredHost(id: host.id, name: host.name, hostID: host.hostID,
-                           isPaired: host.hostID.flatMap(trustStore.peer(hostID:)) != nil, kind: host.kind)
+            DiscoveredHost(id: host.id, name: macNames[host.hostID] ?? host.name, hostID: host.hostID,
+                           isPaired: host.hostID.flatMap(trustStore.peer(hostID:)) != nil, kind: host.kind,
+                           needsUpdate: DiscoveredHost.Side(macVersion: host.protocolVersion),
+                           lastUsed: lastUsed[host.hostID])
         }
         let onlineIDs = Set(online.compactMap(\.hostID))
         let offline = trustStore.peers.values
             .filter { peer in peer.hostID.map { !onlineIDs.contains($0) } ?? false }
             .map { peer in
-                DiscoveredHost(id: "paired-\(peer.fingerprint.description)", name: peer.name, hostID: peer.hostID,
-                               isPaired: true, isOnline: false, canWake: wakeBook[peer.hostID] != nil,
+                DiscoveredHost(id: "paired-\(peer.fingerprint.description)", name: macNames[peer.hostID] ?? peer.name,
+                               hostID: peer.hostID, isPaired: true, isOnline: false,
+                               canWake: wakeBook[peer.hostID] != nil,
                                isWaking: peer.hostID.map(wakeAttempts.waking.contains) ?? false,
-                               kind: macKinds[peer.hostID])
+                               kind: macKinds[peer.hostID], lastUsed: lastUsed[peer.hostID])
             }
-        return (online + offline).sorted {
-            ($0.isPaired ? 0 : 1, $0.isOnline ? 0 : 1, $0.name) < ($1.isPaired ? 0 : 1, $1.isOnline ? 0 : 1, $1.name)
-        }
+        return DiscoveredHost.ordered(online + offline)
     }
 
     // MARK: Connecting
@@ -157,6 +184,11 @@ public final class SessionController {
     /// Paired Macs connect straight away; unpaired ones show the pairing screen.
     public func select(_ host: DiscoveredHost) {
         guard host.isOnline else { return }
+        if let side = host.needsUpdate {
+            store.post(notice: side == .mac ? "Update PocketDesk on \(host.name) to use it from this iPhone."
+                                            : "Update PocketDesk on this iPhone to use \(host.name).")
+            return
+        }
         lastHost = host
         store.send(.select(host))
         guard host.isPaired, let browsedHost = browsed[host.id],
@@ -277,6 +309,10 @@ public final class SessionController {
         case .streamConfig(let config):
             if config.displayID != nil { store.send(.sourceChanged(nil)) }
             store.send(.connected(config))
+            if let hostID = connectionHostID {
+                lastUsed[hostID] = .now
+                try? lastUsed.save(to: lastUsedURL)
+            }
             if let displayID = config.displayID, let hostID = connectionHostID,
                let selected = store.displaySelection.displays.first(where: { $0.id == displayID }) {
                 displayPreferences.remember(selected.persistentID, for: hostID)
@@ -423,6 +459,15 @@ public final class SessionController {
         startDiscovery()
     }
 
+    /// Shows a paired Mac under another name on this phone; an empty name goes back to the Mac's own.
+    public func rename(_ host: DiscoveredHost, to name: String) {
+        guard let hostID = host.hostID else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        macNames[hostID] = trimmed.isEmpty ? nil : String(trimmed.prefix(60))
+        try? macNames.save(to: macNamesURL)
+        store.send(.hostsChanged(discoveredHosts()))
+    }
+
     /// Forgets a Mac; it will need pairing again.
     public func forget(_ host: DiscoveredHost) {
         guard let peer = host.hostID.flatMap(trustStore.peer(hostID:)) else { return }
@@ -430,11 +475,15 @@ public final class SessionController {
             displayPreferences.forget(hostID)
             wakeBook[hostID] = nil
             macKinds[hostID] = nil
+            macNames[hostID] = nil
+            lastUsed[hostID] = nil
             wakeAttempts.cancel(hostID)
         }
         try? displayPreferences.save(to: displayPreferencesURL)
         try? wakeBook.save(to: wakeBookURL)
         try? macKinds.save(to: macKindsURL)
+        try? macNames.save(to: macNamesURL)
+        try? lastUsed.save(to: lastUsedURL)
         trustStore.revoke(peer.fingerprint)
         try? trustStore.save(to: trustStoreURL)
         store.send(.hostsChanged(discoveredHosts()))
@@ -499,7 +548,8 @@ public final class SessionController {
 
     /// Keeps the store's `macStatus` current while tiles are on screen: through the stream if
     /// one is up, else over a quiet connection of its own. Retries while it's wanted.
-    public func watchStatus(preferredHostID: UUID?) {
+    public func watchStatus(preferredHostID: UUID?, watcher: String = "shortcuts") {
+        statusWatchers.insert(watcher)
         if case .streaming = store.state, let connection {
             connection.send(.watchStatus)
             return
@@ -522,7 +572,9 @@ public final class SessionController {
         }
     }
 
-    public func stopWatchingStatus() {
+    public func stopWatchingStatus(watcher: String = "shortcuts") {
+        statusWatchers.remove(watcher)
+        guard statusWatchers.isEmpty else { return }
         statusTask?.cancel()
         statusTask = nil
         store.update(macStatus: nil)

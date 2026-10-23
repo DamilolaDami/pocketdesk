@@ -36,10 +36,13 @@ struct StreamView: UIViewRepresentable {
 
 /// Gestures → `InputEvent`s:
 /// - tap: click · long press: right-click · one-finger drag: click-drag
-/// - two-finger pan: scroll · keyboard (`UIKeyInput`): text, return, delete
+/// - two-finger pan: scroll; zoomed in, it moves the picture first and scrolls the Mac
+///   only with what's left past its edges
+/// - keyboard (`UIKeyInput`): text, return, delete
 /// - hardware keyboard (`pressesBegan`): every key as itself, modifiers included
 /// - the key bar above the keyboard: Esc, Tab, arrows, F-keys and sticky ⌃ ⌥ ⇧ ⌘
 /// - pinch: zoom the picture on the phone (pans with the fingers); nothing is sent to the Mac
+/// - two-finger double-tap: toggle a comfortable zoom; nothing is sent to the Mac
 final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// Holds the video layer; pinch transforms it. Touch locations are read in its
     /// coordinate space, so input stays accurate at any zoom.
@@ -47,11 +50,9 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     var displayLayer: AVSampleBufferDisplayLayer { content.displayLayer }
 
     var videoSize: CGSize = .zero
-    private var zoom: CGFloat = 1
-    private var offset: CGPoint = .zero
+    private var viewport = ZoomViewport()
     private var pinchCentroid: CGPoint = .zero
     private var isPinching = false
-    private static let maxZoom: CGFloat = 6
     var onInput: (InputEvent) -> Void = { _ in }
     var onText: (String) -> Void = { _ in }
     var onTapKey: (UInt16, MacModifiers) -> Void = { _, _ in }
@@ -100,8 +101,11 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched))
         pinch.delegate = self
         scroll.delegate = self
+        let zoomToggle = UITapGestureRecognizer(target: self, action: #selector(toggledZoom))
+        zoomToggle.numberOfTouchesRequired = 2
+        zoomToggle.numberOfTapsRequired = 2
         tap.require(toFail: longPress)
-        for recognizer in [tap, longPress, drag, scroll, pinch] { addGestureRecognizer(recognizer) }
+        for recognizer in [tap, longPress, drag, scroll, pinch, zoomToggle] { addGestureRecognizer(recognizer) }
 
         for name in [Notification.Name.GCKeyboardDidConnect, .GCKeyboardDidDisconnect] {
             NotificationCenter.default.addObserver(self, selector: #selector(keyboardsChanged), name: name, object: nil)
@@ -151,6 +155,7 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     override func layoutSubviews() {
         super.layoutSubviews()
         content.bounds = CGRect(origin: .zero, size: bounds.size)
+        viewport.viewSize = bounds.size
         applyZoom()
     }
 
@@ -168,13 +173,10 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             isPinching = true
             pinchCentroid = centroid
         case .changed:
-            let newZoom = min(max(zoom * recognizer.scale, 1), Self.maxZoom)
-            let factor = newZoom / zoom
-            recognizer.scale = 1
             // Zoom about the fingers, then follow them as they move.
-            offset.x = centroid.x - factor * (pinchCentroid.x - offset.x)
-            offset.y = centroid.y - factor * (pinchCentroid.y - offset.y)
-            zoom = newZoom
+            viewport.scale(by: recognizer.scale, about: pinchCentroid)
+            recognizer.scale = 1
+            _ = viewport.pan(by: CGVector(dx: centroid.x - pinchCentroid.x, dy: centroid.y - pinchCentroid.y))
             pinchCentroid = centroid
             applyZoom()
         default:
@@ -182,12 +184,14 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
     }
 
+    @objc private func toggledZoom(_ recognizer: UITapGestureRecognizer) {
+        viewport.toggle(about: recognizer.location(in: self))
+        UIView.animate(withDuration: 0.25) { self.applyZoom() }
+    }
+
     private func applyZoom() {
-        // Keep the zoomed picture covering the view: no panning past its edges.
-        offset.x = min(0, max(bounds.width - bounds.width * zoom, offset.x))
-        offset.y = min(0, max(bounds.height - bounds.height * zoom, offset.y))
         content.layer.position = .zero
-        content.transform = CGAffineTransform(translationX: offset.x, y: offset.y).scaledBy(x: zoom, y: zoom)
+        content.transform = viewport.transform
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -233,8 +237,12 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
         let delta = recognizer.translation(in: self)
         recognizer.setTranslation(.zero, in: self)
+        // Zoomed in, the picture moves first; the Mac scrolls with what's left past its edges.
+        let rest = viewport.pan(by: CGVector(dx: delta.x, dy: delta.y))
+        if viewport.isZoomed { applyZoom() }
+        guard rest != .zero else { return }
         // Natural scrolling: content follows the fingers.
-        onInput(.scroll(dx: Float(delta.x * Self.scrollScale), dy: Float(delta.y * Self.scrollScale)))
+        onInput(.scroll(dx: Float(rest.dx * Self.scrollScale), dy: Float(rest.dy * Self.scrollScale)))
     }
 
     // MARK: Keyboard

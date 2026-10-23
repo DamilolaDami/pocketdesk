@@ -97,6 +97,8 @@ import Testing
             .watchMenus(true), .watchMenus(false), .menuBar(nil),
             .menuBar(MenuBar(appName: "Safari", bundleID: "com.apple.Safari", menus: [file])),
             .pressMenuItem(MenuPress(path: [2, 0], title: "New Window")),
+            .setQuality(.batterySaver),
+            .hello(Hello(deviceName: "Phone", viewport: Viewport(width: 400, height: 800, scale: 3), quality: .balanced)),
         ]
         for message in messages {
             #expect(try JSONDecoder().decode(ControlMessage.self, from: JSONEncoder().encode(message)) == message)

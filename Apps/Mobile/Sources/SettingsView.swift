@@ -1,5 +1,6 @@
 import AppIntents
 import PDClientCore
+import PDProtocol
 import SwiftUI
 
 /// `@AppStorage` keys for the phone's preferences.
@@ -16,6 +17,8 @@ enum SettingsKey {
     static let trackpad = "trackpad"
     /// Same key `SessionController.autoConnect` reads.
     static let autoConnect = "autoConnect"
+    /// Same key `SessionController.preferredQuality` reads.
+    static let streamQuality = "streamQuality"
 }
 
 struct SettingsView: View {
@@ -29,6 +32,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.haptics) private var haptics = true
     @AppStorage(SettingsKey.trackpad) private var trackpad = false
     @AppStorage(SettingsKey.autoConnect) private var autoConnect = false
+    @AppStorage(SettingsKey.streamQuality) private var quality = StreamQuality.best
     @State private var showingSiri = false
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
@@ -70,6 +74,19 @@ struct SettingsView: View {
                     .foregroundStyle(.primary)
                 }
 
+
+                Section {
+                    Picker(selection: $quality) {
+                        ForEach(StreamQuality.allCases, id: \.self) { Text($0.name).tag($0) }
+                    } label: {
+                        SettingsLabel("Quality", symbol: "sparkles.tv.fill", color: .purple)
+                    }
+                    .onChange(of: quality) { controller.qualityChanged() }
+                } header: {
+                    Text("Picture")
+                } footer: {
+                    Text("Best keeps text sharp when you zoom in. Battery Saver lowers resolution and frame rate to save battery and data, and is used automatically in Low Power Mode.")
+                }
 
                 Section("Streaming") {
                     Toggle(isOn: $streamAudio) {

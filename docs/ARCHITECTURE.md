@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 14), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 15), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -135,6 +135,20 @@ Each change goes to the phone as `linkQuality`; from the second rung down the ph
 To try it on a fast LAN, launch the Mac app with `POCKETDESK_SIMULATE_KBPS=300` (see
 `ThrottledSession`). If a resize can't find the source (the screen locked, say), the stream
 keeps its size and only bitrate and frame rate drop.
+
+### Quality modes (protocol v15)
+
+The phone sends a `StreamQuality` in `hello`, and `setQuality` when it changes. Each mode is a
+ceiling (`QualityCeiling`) that link adaptation steps down from:
+
+| Mode | Resolution | Frame rate | Bitrate |
+|---|---|---|---|
+| Best | 1.5× the phone's pixels per side (zoom headroom) | 60 | full |
+| Balanced | the phone's pixels | 60 | 0.8× |
+| Battery Saver | 0.75× the phone's pixels | 30 | 0.6× |
+
+Low Power Mode on the phone means Battery Saver whatever the setting
+(`StreamQuality.effective`). A change restarts the stream at the new size.
 
 ## Display selection (protocol v4)
 

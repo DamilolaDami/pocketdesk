@@ -84,6 +84,7 @@ public actor HostSession {
     private let onEvent: @Sendable (Event) -> Void
 
     private var audioEnabled = true
+    private var quality = StreamQuality.best
     private var clipboardEnabled = false
     private var clipboardTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
@@ -190,6 +191,7 @@ public actor HostSession {
             return
         }
         audioEnabled = hello.audioEnabled
+        quality = hello.quality
         viewport = hello.viewport
         if hello.mode == .catalog {
             // A quick question from the shortcut editor, or a shortcut run from Siri or a widget:
@@ -256,6 +258,11 @@ public actor HostSession {
                 if enabled != audioEnabled {
                     audioEnabled = enabled
                     try await startStreaming(currentSource)
+                }
+            case .setQuality(let newQuality):
+                if newQuality != quality {
+                    quality = newQuality
+                    try await startStreaming(currentSource, keepingSource: true)
                 }
             case .requestKeyframe:
                 encoder?.requestKeyframe()
@@ -441,11 +448,13 @@ public actor HostSession {
 
     private func restartStreaming(_ source: CaptureSource?) async throws {
         let resolved = try await frameSource.resolve(source)
-        let full = StreamSizing.fit(sourceWidth: resolved.pixelWidth, sourceHeight: resolved.pixelHeight, into: viewport)
+        let full = StreamSizing.fit(sourceWidth: resolved.pixelWidth, sourceHeight: resolved.pixelHeight, into: viewport,
+                                    zoomHeadroom: ceiling.zoomHeadroom)
         let size = StreamSizing.scale(full, by: rate.step.scale)
         let displayID: UInt32?
         if case .display(let id) = resolved.source { displayID = id } else { displayID = nil }
-        fullBitrateKbps = StreamSizing.bitrateKbps(width: full.width, height: full.height, fps: configuration.fps)
+        fullBitrateKbps = Int(Double(StreamSizing.bitrateKbps(width: full.width, height: full.height,
+                                                              fps: min(configuration.fps, ceiling.fps))) * ceiling.bitrate)
         let config = StreamConfig(codec: .hevc, width: size.width, height: size.height, fps: streamFPS,
                                   bitrateKbps: streamBitrateKbps, displayID: displayID)
         let encoder = try HEVCEncoder(width: config.width, height: config.height, fps: config.fps,
@@ -576,7 +585,8 @@ public actor HostSession {
 
     // MARK: Fitting the stream to the link
 
-    private var streamFPS: Int { min(configuration.fps, rate.step.fps) }
+    private var ceiling: QualityCeiling { QualityCeiling(quality) }
+    private var streamFPS: Int { min(configuration.fps, rate.step.fps, ceiling.fps) }
 
     private var streamBitrateKbps: Int {
         max(Self.minBitrateKbps, Int(Double(fullBitrateKbps) * rate.step.bitrate))

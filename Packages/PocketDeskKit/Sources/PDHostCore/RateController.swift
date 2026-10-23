@@ -1,10 +1,30 @@
+import PDProtocol
+
+/// What a `StreamQuality` allows, before link adaptation takes anything off.
+public struct QualityCeiling: Sendable, Equatable {
+    /// Resolution beyond the phone's screen, per side (see `StreamSizing`).
+    public var zoomHeadroom: Double
+    public var fps: Int
+    /// Fraction of the bitrate the size and frame rate would otherwise get.
+    public var bitrate: Double
+
+    public init(_ quality: StreamQuality) {
+        switch quality {
+        case .best: (zoomHeadroom, fps, bitrate) = (StreamSizing.defaultZoomHeadroom, 60, 1)
+        case .balanced: (zoomHeadroom, fps, bitrate) = (1, 60, 0.8)
+        // Under the phone's own pixels: text is softer, but there's half as much to decode.
+        case .batterySaver: (zoomHeadroom, fps, bitrate) = (0.75, 30, 0.6)
+        }
+    }
+}
+
 /// Fits the stream to the link. Every half second `HostSession` reports what happened (frames
 /// dropped because the network was behind, how long sends took, the latest round trip) and
 /// this walks a ladder: bitrate first, then frame rate, then resolution. It steps down at once
 /// when the link struggles and back up only after a quiet stretch, which doubles each time a
 /// step up fails straight away, so a link at its limit doesn't flap.
 ///
-/// Pure value; the session applies `step`.
+/// Pure value; the session applies `step`, under the ceiling of the phone's `StreamQuality`.
 public struct RateController: Sendable, Equatable {
     public struct Step: Sendable, Equatable {
         /// Fraction of the full-quality bitrate.

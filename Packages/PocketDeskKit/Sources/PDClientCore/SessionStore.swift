@@ -47,6 +47,13 @@ public final class SessionStore {
         self.windows = windows
     }
 
+    /// The stream quality in effect (the setting, or Battery Saver in Low Power Mode).
+    public private(set) var quality = StreamQuality.best
+
+    public func update(quality: StreamQuality) {
+        self.quality = quality
+    }
+
     /// The frontmost Mac app's menus while the menu sheet is up.
     public private(set) var menus = MenusState.idle
 

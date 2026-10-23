@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import PDClientCore
+import PDProtocol
 
 struct MacListTests {
     @Test func versionsThatDifferNeedAnUpdate() {
@@ -22,5 +23,13 @@ struct MacListTests {
             DiscoveredHost(id: "6", name: "Air", isPaired: true),
         ]
         #expect(DiscoveredHost.ordered(hosts).map(\.name) == ["Laptop", "Studio", "Air", "Mini", "Asleep", "Nearby Mac"])
+    }
+}
+
+struct QualityTests {
+    @Test func lowPowerModeMeansBatterySaver() {
+        #expect(StreamQuality.effective(preferred: .best, lowPowerMode: false) == .best)
+        #expect(StreamQuality.effective(preferred: .balanced, lowPowerMode: true) == .batterySaver)
+        #expect(StreamQuality.effective(preferred: .batterySaver, lowPowerMode: false) == .batterySaver)
     }
 }

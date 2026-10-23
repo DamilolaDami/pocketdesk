@@ -23,6 +23,27 @@ public final class SessionController {
     }
 
     /// Share copied text and images with the Mac while streaming.
+    /// The quality chosen in Settings. In Low Power Mode the stream uses Battery Saver anyway.
+    public var preferredQuality: StreamQuality {
+        get { UserDefaults.standard.string(forKey: "streamQuality").flatMap(StreamQuality.init(rawValue:)) ?? .best }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: "streamQuality")
+            qualityChanged()
+        }
+    }
+
+    /// What the stream uses now.
+    public var quality: StreamQuality {
+        StreamQuality.effective(preferred: preferredQuality, lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled)
+    }
+
+    /// Tells the Mac when the effective quality changes (a new choice, or Low Power Mode).
+    public func qualityChanged() {
+        let now = quality
+        if store.quality != now { store.update(quality: now) }
+        connection?.send(.setQuality(now))
+    }
+
     public var clipboardEnabled: Bool {
         get { UserDefaults.standard.object(forKey: "shareClipboard") as? Bool ?? true }
         set {
@@ -77,6 +98,8 @@ public final class SessionController {
     private var catalogFetchedAt: [UUID: ContinuousClock.Instant] = [:]
     private var heldKey: (code: UInt16, task: Task<Void, Never>)?
     private var statusTask: Task<Void, Never>?
+    /// Follows Low Power Mode, which switches the stream to Battery Saver.
+    private var powerStateTask: Task<Void, Never>?
     /// Screens showing live status (the Macs tab, the Shortcuts tab): it stops when none are.
     private var statusWatchers: Set<String> = []
 
@@ -106,6 +129,12 @@ public final class SessionController {
         self.shortcutsURL = shortcutsURL
         self.library = (try? ShortcutLibrary.load(from: shortcutsURL)) ?? ShortcutLibrary()
         store.update(shortcuts: library.shortcuts)
+        store.update(quality: quality)
+        powerStateTask = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: .NSProcessInfoPowerStateDidChange) {
+                self?.qualityChanged()
+            }
+        }
     }
 
     // MARK: Discovery
@@ -278,7 +307,7 @@ public final class SessionController {
             request: .init(endpoint: host.endpoint, hostFingerprint: hostFingerprint, invite: invite,
                            deviceName: deviceName, viewport: viewport, audioEnabled: audioEnabled,
                            preferredDisplayID: displayPreferences.displayID(for: connectionHostID),
-                           clipboardEnabled: clipboardEnabled),
+                           clipboardEnabled: clipboardEnabled, quality: quality),
             display: display
         ) { [weak self] event in
             Task { @MainActor in

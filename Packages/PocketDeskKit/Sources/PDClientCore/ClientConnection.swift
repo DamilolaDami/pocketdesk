@@ -56,10 +56,12 @@ public actor ClientConnection {
         public var preferredDisplayID: String?
         public var audioEnabled: Bool
         public var clipboardEnabled: Bool
+        public var quality: StreamQuality
 
         public init(endpoint: NWEndpoint, hostFingerprint: Fingerprint, invite: PairingInvite?,
                     deviceName: String, viewport: Viewport, audioEnabled: Bool = true, preferredDisplayID: String? = nil,
-                    clipboardEnabled: Bool = true) {
+                    clipboardEnabled: Bool = true, quality: StreamQuality = .best) {
+            self.quality = quality
             self.clipboardEnabled = clipboardEnabled
             self.endpoint = endpoint
             self.hostFingerprint = hostFingerprint
@@ -136,7 +138,7 @@ public actor ClientConnection {
             try await pair(session, invite: invite)
         }
         try await session.send(.hello(Hello(deviceName: request.deviceName, viewport: request.viewport, audioEnabled: request.audioEnabled, preferredDisplayID: request.preferredDisplayID,
-                                             clipboardEnabled: request.clipboardEnabled)))
+                                             clipboardEnabled: request.clipboardEnabled, quality: request.quality)))
 
         let display = display
         let inputs = inputs.stream
@@ -179,7 +181,7 @@ public actor ClientConnection {
                     case .ping(let value): try await session.send(.pong(value))
                     case .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon,
-                         .listMacShortcuts, .macShortcuts, .watchStatus, .watchMenus, .pressMenuItem:
+                         .listMacShortcuts, .macShortcuts, .watchStatus, .watchMenus, .pressMenuItem, .setQuality:
                         continue
                     }
                 }

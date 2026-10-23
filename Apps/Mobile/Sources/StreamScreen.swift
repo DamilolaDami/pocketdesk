@@ -17,6 +17,7 @@ struct StreamScreen: View {
     @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
     @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
     @AppStorage(SettingsKey.trackpad) private var trackpad = false
+    @AppStorage(SettingsKey.streamQuality) private var quality = StreamQuality.best
     @State private var controlsExpanded = true
     @State private var showsStatus = true
     /// The on-screen keyboard is up (not just the key bar a hardware keyboard leaves).
@@ -38,7 +39,8 @@ struct StreamScreen: View {
             .background(.black)
             .overlay(alignment: .topLeading) {
                 if showsStatus && showStreamInfo {
-                    StatusChip(hostName: hostName, config: config, link: controller.store.link)
+                    StatusChip(hostName: hostName, config: config, link: controller.store.link,
+                               quality: controller.store.quality)
                         .padding(.leading, 16)
                         .padding(.top, topInset)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -70,9 +72,13 @@ struct StreamScreen: View {
             .persistentSystemOverlays(.hidden)
             .statusBarHidden()
             .onAppear { if startInLandscape { rotate(toLandscape: true) } }
-            .task {
-                // The chip confirms what you're looking at, then gets out of the way.
+            .onChange(of: quality) { controller.qualityChanged() }
+            .task(id: controller.store.quality) {
+                // The chip confirms what you're looking at (again after a quality change), then
+                // gets out of the way.
+                withAnimation(.smooth) { showsStatus = true }
                 try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
                 withAnimation(.smooth) { showsStatus = false }
             }
             // The other screens are designed for portrait; don't leave the phone stuck sideways.
@@ -138,6 +144,14 @@ struct StreamScreen: View {
                         }
                     }
                 }
+            }
+            Section {
+                Picker(selection: $quality) {
+                    ForEach(StreamQuality.allCases, id: \.self) { Text($0.name).tag($0) }
+                } label: {
+                    Label("Quality: \(controller.store.quality.name)", systemImage: "sparkles.tv")
+                }
+                .pickerStyle(.menu)
             }
             Section {
                 // Not used often enough for the bar, which needs the room for Menus.
@@ -210,12 +224,13 @@ private struct StatusChip: View {
     let hostName: String
     let config: StreamConfig
     let link: LinkQuality?
+    let quality: StreamQuality
 
     var body: some View {
         HStack(spacing: 8) {
             Circle().fill(link?.isWeak == true ? Color.orange : Brand.online).frame(width: 8, height: 8)
             Text(hostName).font(.footnote.weight(.semibold)).lineLimit(1)
-            Text("\(config.width)×\(config.height) · \(link?.fps ?? config.fps) fps")
+            Text("\(config.width)×\(config.height) · \(link?.fps ?? config.fps) fps\(quality == .best ? "" : " · \(quality.name)")")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }

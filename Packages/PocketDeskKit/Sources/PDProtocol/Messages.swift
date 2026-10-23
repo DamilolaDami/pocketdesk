@@ -1,5 +1,5 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 14
+public let protocolVersion: UInt16 = 15
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -26,6 +26,8 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// Host → phone: the stream was fitted to the link (sent whenever that changes).
     case linkQuality(LinkQuality)
     case setAudioEnabled(Bool)
+    /// Phone → host: the most the stream may use from now on (restarts it at the new size).
+    case setQuality(StreamQuality)
     /// Copied on one side, for the other's clipboard (either direction, while streaming).
     case clipboard(ClipboardItem)
     case setClipboardEnabled(Bool)
@@ -165,8 +167,11 @@ public struct Hello: Codable, Sendable, Equatable {
     /// Share copied text and images with the Mac during this session.
     public var clipboardEnabled: Bool
     public var mode: Mode
+    public var quality: StreamQuality
 
-    public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport, mode: Mode = .stream, audioEnabled: Bool = true, preferredDisplayID: String? = nil, clipboardEnabled: Bool = true) {
+    public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport, mode: Mode = .stream, audioEnabled: Bool = true, preferredDisplayID: String? = nil, clipboardEnabled: Bool = true,
+                quality: StreamQuality = .best) {
+        self.quality = quality
         self.clipboardEnabled = clipboardEnabled
         self.version = version
         self.deviceName = deviceName
@@ -174,6 +179,25 @@ public struct Hello: Codable, Sendable, Equatable {
         self.preferredDisplayID = preferredDisplayID
         self.audioEnabled = audioEnabled
         self.mode = mode
+    }
+}
+
+/// How much the stream may use: a ceiling over the Mac's link adaptation, which still steps
+/// down from it when the network struggles.
+public enum StreamQuality: String, Codable, Sendable, CaseIterable {
+    /// Up to 60 fps, with resolution to spare for pinch-zooming.
+    case best
+    /// The phone's own resolution at up to 60 fps.
+    case balanced
+    /// Fewer pixels and up to 30 fps, for battery and data.
+    case batterySaver
+
+    public var name: String {
+        switch self {
+        case .best: "Best"
+        case .balanced: "Balanced"
+        case .batterySaver: "Battery Saver"
+        }
     }
 }
 

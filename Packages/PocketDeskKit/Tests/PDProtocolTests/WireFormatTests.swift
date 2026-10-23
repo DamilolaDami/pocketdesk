@@ -86,6 +86,23 @@ import Testing
         }
     }
 
+    @Test func menuMessagesRoundTrip() throws {
+        let file = MenuItem(path: [2], title: "File", children: [
+            MenuItem(path: [2, 0], title: "New Window", shortcut: "⌘N"),
+            .separator(path: [2, 1]),
+            MenuItem(path: [2, 2], title: "Open Recent", children: [MenuItem(path: [2, 2, 0], title: "notes.txt")]),
+            MenuItem(path: [2, 3], title: "Show Sidebar", isEnabled: false, isChecked: true),
+        ])
+        let messages: [ControlMessage] = [
+            .watchMenus(true), .watchMenus(false), .menuBar(nil),
+            .menuBar(MenuBar(appName: "Safari", bundleID: "com.apple.Safari", menus: [file])),
+            .pressMenuItem(MenuPress(path: [2, 0], title: "New Window")),
+        ]
+        for message in messages {
+            #expect(try JSONDecoder().decode(ControlMessage.self, from: JSONEncoder().encode(message)) == message)
+        }
+    }
+
     @Test func displayMessagesRoundTrip() throws {
         let display = DisplayInfo(id: 2, width: 2560, height: 1440, name: "Studio Display", persistentID: "monitor-uuid")
         let messages: [ControlMessage] = [

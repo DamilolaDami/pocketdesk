@@ -34,6 +34,7 @@ public final class SessionStore {
         case .cancel, .disconnected, .select:
             displaySelection = displaySelection.reduce(.reset)
             link = nil
+            menus = .idle
         default: break
         }
     }
@@ -44,6 +45,13 @@ public final class SessionStore {
 
     public func update(windows: [WindowInfo]) {
         self.windows = windows
+    }
+
+    /// The frontmost Mac app's menus while the menu sheet is up.
+    public private(set) var menus = MenusState.idle
+
+    public func update(menus: MenusState) {
+        if self.menus != menus { self.menus = menus }
     }
 
     public func update(stats: StreamStats) {
@@ -125,6 +133,14 @@ public struct StreamStats: Sendable, Equatable {
     public var bitrateKbps: Double = 0
 
     public init() {}
+}
+
+public enum MenusState: Sendable, Equatable {
+    case idle
+    case loading
+    case ready(MenuBar)
+    /// No frontmost app, or the Mac can't read its menus.
+    case unavailable
 }
 
 public enum CatalogStatus: Sendable, Equatable {

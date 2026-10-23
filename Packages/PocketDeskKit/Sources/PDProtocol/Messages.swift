@@ -1,5 +1,5 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 13
+public let protocolVersion: UInt16 = 14
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -51,6 +51,13 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// Phone → host: send `macStatus` now and whenever it changes, until the session ends.
     case watchStatus
     case macStatus(MacStatus)
+    /// Phone → host: `true` sends the frontmost app's `menuBar` now and again whenever the
+    /// frontmost app changes; `false` stops.
+    case watchMenus(Bool)
+    /// Host → phone: the frontmost app's menus, or `nil` when they can't be read.
+    case menuBar(MenuBar?)
+    /// Phone → host: choose a menu item. A fresh `menuBar` follows.
+    case pressMenuItem(MenuPress)
     case ping(UInt64)
     case pong(UInt64)
     case bye(reason: String)
@@ -388,5 +395,65 @@ public struct NowPlaying: Codable, Sendable, Equatable {
         self.title = title
         self.artist = artist
         self.isPlaying = isPlaying
+    }
+}
+
+/// The frontmost Mac app's menu bar, for showing as native phone menus.
+public struct MenuBar: Codable, Sendable, Equatable {
+    public var appName: String
+    public var bundleID: String?
+    /// The menus along the bar (the Apple menu, the app menu, File, Edit…), each with items.
+    public var menus: [MenuItem]
+
+    /// Bounds on what the Mac reads (some apps list hundreds of bookmarks or recent files).
+    public static let maxDepth = 3
+    public static let maxItemsPerMenu = 150
+    public static let maxItems = 3_000
+
+    public init(appName: String, bundleID: String? = nil, menus: [MenuItem]) {
+        self.appName = appName
+        self.bundleID = bundleID
+        self.menus = menus
+    }
+}
+
+public struct MenuItem: Codable, Sendable, Equatable, Identifiable {
+    /// Where the item is: child indexes from the menu bar down, as the Mac lists them.
+    public var path: [Int]
+    public var title: String
+    public var isEnabled: Bool
+    public var isChecked: Bool
+    /// The key equivalent as the Mac shows it, like "⇧⌘N".
+    public var shortcut: String?
+    /// A submenu's items; `nil` for an item that does something. Separators are `isSeparator`.
+    public var children: [MenuItem]?
+    public var isSeparator: Bool
+    public var id: [Int] { path }
+
+    public init(path: [Int], title: String, isEnabled: Bool = true, isChecked: Bool = false,
+                shortcut: String? = nil, children: [MenuItem]? = nil, isSeparator: Bool = false) {
+        self.path = path
+        self.title = title
+        self.isEnabled = isEnabled
+        self.isChecked = isChecked
+        self.shortcut = shortcut
+        self.children = children
+        self.isSeparator = isSeparator
+    }
+
+    public static func separator(path: [Int]) -> MenuItem {
+        MenuItem(path: path, title: "", isEnabled: false, isSeparator: true)
+    }
+}
+
+/// A menu item to choose. The title must still match: menus change, and a stale path must
+/// not press something else.
+public struct MenuPress: Codable, Sendable, Equatable {
+    public var path: [Int]
+    public var title: String
+
+    public init(path: [Int], title: String) {
+        self.path = path
+        self.title = title
     }
 }

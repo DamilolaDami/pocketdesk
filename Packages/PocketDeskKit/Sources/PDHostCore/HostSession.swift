@@ -42,11 +42,15 @@ public actor HostSession {
         public var clipboardInterval: Duration
         /// How often volume and now playing are checked for a phone watching them.
         public var statusInterval: Duration
+        /// How often the frontmost app is checked while the phone shows its menus.
+        public var menusInterval: Duration
 
         public init(hostName: String, fps: Int = 60, maxFramesInFlight: Int = 2, refineFrames: Int = 8,
                     adaptInterval: Duration = .milliseconds(500), wake: WakeInfo? = nil,
-                    clipboardInterval: Duration = .milliseconds(500), statusInterval: Duration = .seconds(1)) {
+                    clipboardInterval: Duration = .milliseconds(500), statusInterval: Duration = .seconds(1),
+                    menusInterval: Duration = .milliseconds(500)) {
             self.clipboardInterval = clipboardInterval
+            self.menusInterval = menusInterval
             self.statusInterval = statusInterval
             self.hostName = hostName
             self.fps = fps
@@ -76,12 +80,16 @@ public actor HostSession {
     private let pairing: any PairingAuthority
     private let catalog: any AppCatalogSource
     private let clipboard: any ClipboardSink
+    private let menus: any MenuBarSource
     private let onEvent: @Sendable (Event) -> Void
 
     private var audioEnabled = true
     private var clipboardEnabled = false
     private var clipboardTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
+    private var menusTask: Task<Void, Never>?
+    /// Set after a menu item is pressed: its menus may have changed even if the app didn't.
+    private var menusStale = false
     /// The Mac clipboard's change count as last sent or written; anything newer goes out.
     private var clipboardSeen = 0
     private var currentSource: CaptureSource?
@@ -121,8 +129,10 @@ public actor HostSession {
     public init(session: any PeerSession, peer: Fingerprint, configuration: Configuration,
                 frameSource: any FrameSource, input: any InputSink, pairing: any PairingAuthority,
                 catalog: any AppCatalogSource = InstalledApps(), clipboard: any ClipboardSink = MacPasteboard(),
+                menus: any MenuBarSource = AccessibilityMenus(),
                 onEvent: @escaping @Sendable (Event) -> Void = { _ in }) {
         self.catalog = catalog
+        self.menus = menus
         self.clipboard = clipboard
         self.session = session
         self.peer = peer
@@ -285,6 +295,16 @@ public actor HostSession {
                 try await answer(message)
             case .watchStatus:
                 startWatchingStatus()
+            case .watchMenus(let watch):
+                menusTask?.cancel()
+                menusTask = watch ? Task { await self.watchMenus() } : nil
+            case .pressMenuItem(let press):
+                do {
+                    try await menus.press(press)
+                } catch {
+                    try await session.send(.actionFailed(String(describing: error)))
+                }
+                menusStale = true
             case .ping(let value):
                 try await session.send(.pong(value))
             case .pong(let value):
@@ -297,7 +317,7 @@ public actor HostSession {
             case .bye:
                 return
             case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
-                 .actionFailed, .apps, .appIcon, .macShortcuts, .macStatus:
+                 .actionFailed, .apps, .appIcon, .macShortcuts, .macStatus, .menuBar:
                 continue
             }
         }
@@ -318,6 +338,24 @@ public actor HostSession {
                 last = status
             }
             try? await Task.sleep(for: configuration.statusInterval)
+        }
+    }
+
+    /// The frontmost app's menus now, then again when another app comes forward or an item
+    /// was pressed (checkmarks and enabled items change).
+    private func watchMenus() async {
+        var shownApp: pid_t?
+        var first = true
+        while !Task.isCancelled {
+            let app = await menus.frontmostApp()
+            if first || app != shownApp || menusStale {
+                first = false
+                menusStale = false
+                shownApp = app
+                let bar = await menus.menuBar()
+                guard !Task.isCancelled, (try? await session.send(.menuBar(bar))) != nil else { return }
+            }
+            try? await Task.sleep(for: configuration.menusInterval)
         }
     }
 
@@ -620,6 +658,8 @@ public actor HostSession {
         }
         statusTask?.cancel()
         statusTask = nil
+        menusTask?.cancel()
+        menusTask = nil
         if let clipboardTask {
             clipboardTask.cancel()
             await clipboardTask.value

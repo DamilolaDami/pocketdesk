@@ -294,6 +294,8 @@ public final class SessionController {
             store.post(notice: item.text != nil ? "Copied from your Mac" : "Image copied from your Mac", kind: .done)
         case .windows(let windows):
             store.update(windows: windows)
+        case .menuBar(let bar):
+            store.update(menus: bar.map(MenusState.ready) ?? .unavailable)
         case .macStatus(let status):
             store.update(macStatus: status)
         case .notice(let text):
@@ -377,6 +379,23 @@ public final class SessionController {
 
     public func refreshWindows() {
         connection?.send(.listWindows)
+    }
+
+    /// Keeps the store's `menus` showing the frontmost Mac app's menus, until `stopWatchingMenus`.
+    public func watchMenus() {
+        guard let connection else { return }
+        store.update(menus: .loading)
+        connection.send(.watchMenus(true))
+    }
+
+    public func stopWatchingMenus() {
+        connection?.send(.watchMenus(false))
+        store.update(menus: .idle)
+    }
+
+    public func press(_ item: MenuItem) {
+        guard item.children == nil, !item.isSeparator, item.isEnabled else { return }
+        connection?.send(.pressMenuItem(MenuPress(path: item.path, title: item.title)))
     }
 
     /// `nil` streams the whole display.

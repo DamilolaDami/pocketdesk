@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 13), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 14), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -309,6 +309,22 @@ parameter (`needsValueError`). Quick picks include Search YouTube, Netflix, Goog
 - Tiles: Play / Pause shows the title and artist and swaps between play and pause; volume tiles
   show the level or "Muted".
 
+## Mac menus on the phone (protocol v14)
+
+- The stream's Menus button opens `MenusSheet`, which sends `watchMenus(true)` (and `false` when
+  it closes). The Mac answers with `menuBar` straight away, then again when another app comes
+  forward (checked every `Configuration.menusInterval`) or after `pressMenuItem`.
+- `AccessibilityMenus` reads the frontmost app's `AXMenuBar` without opening any menu, so the
+  Mac's screen doesn't change. One `AXUIElementCopyMultipleAttributeValues` per item keeps it
+  to one round trip each. Reading stops at `MenuBar.maxDepth` levels, `maxItemsPerMenu` and
+  `maxItems` in all (History and Bookmarks can be huge). Menus an app fills only when opened
+  (Open Recent, say) come through empty.
+- Items are addressed by `path`: child indexes from the bar down. `MenuPress` also carries the
+  title, and the Mac presses (`AXPress`) only if it still matches, so a stale sheet can't
+  choose the wrong thing.
+- Enabled states and checkmarks are what the app last validated; some apps update them only
+  when a menu opens, so an item can look enabled and do nothing.
+
 ## Shortcuts outside the app (protocol v8)
 
 - **Siri and the Shortcuts app:** `RunShortcutIntent` takes a `ShortcutEntity` and runs in the
@@ -436,6 +452,6 @@ and pinning, never on obscurity.
      sent as Mission Control's ⌃-arrow shortcuts (`MacGesture`).
 2. **v0.2 – Window picker**: stream one window fitted to the phone, app switcher UI.
 3. **v0.3 – Thumb UI**: read the frontmost app's menus/toolbar via AX APIs and render them as
-   native controls.
+   native controls. Menus done (protocol v14); toolbars to come.
 4. **v1.0 – Anywhere**: relay + hole punching, wake-on-LAN, subscription.
 5. **Later – Agent**: natural-language tasks executed on the Mac with a live view.

@@ -12,6 +12,7 @@ struct StreamScreen: View {
     @State private var showingWindows = false
     @State private var showingDisplays = false
     @State private var showingShortcuts = false
+    @State private var showingMenus = false
     @AppStorage(SettingsKey.startInLandscape) private var startInLandscape = false
     @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
     @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
@@ -84,6 +85,10 @@ struct StreamScreen: View {
                 WindowPicker(controller: controller) { showingWindows = false }
                     .presentationDetents([.medium, .large])
             }
+            .sheet(isPresented: $showingMenus) {
+                MenusSheet(controller: controller) { showingMenus = false }
+                    .presentationDetents([.medium, .large])
+            }
             .sheet(isPresented: $showingShortcuts) {
                 ShortcutsSheet(controller: controller) { showingShortcuts = false }
                     .presentationDetents([.medium, .large])
@@ -104,8 +109,8 @@ struct StreamScreen: View {
                             id: "Mode") {
                         trackpad.toggle()
                     }
+                    control("Menus", "filemenu.and.selection") { showingMenus = true }
                     control("Shortcuts", "square.grid.2x2.fill") { showingShortcuts = true }
-                    control("Displays", "display.2") { showingDisplays = true }
                     control("Windows", "macwindow.on.rectangle") {
                         controller.refreshWindows()
                         showingWindows = true
@@ -135,6 +140,8 @@ struct StreamScreen: View {
                 }
             }
             Section {
+                // Not used often enough for the bar, which needs the room for Menus.
+                Button("Displays", systemImage: "display.2") { showingDisplays = true }
                 Button(isLandscape ? "Portrait" : "Landscape",
                        systemImage: isLandscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate") {
                     rotate(toLandscape: !isLandscape)

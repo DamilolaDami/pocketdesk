@@ -9,6 +9,7 @@ import UIKit
 struct StreamView: UIViewRepresentable {
     let controller: SessionController
     let videoSize: CGSize
+    let trackpad: Bool
     @Binding var keyboardShown: Bool
 
     func makeUIView(context: Context) -> StreamUIView {
@@ -24,6 +25,7 @@ struct StreamView: UIViewRepresentable {
 
     func updateUIView(_ view: StreamUIView, context: Context) {
         view.videoSize = videoSize
+        view.isTrackpad = trackpad
         view.wantsKeyboard = keyboardShown
     }
 
@@ -34,7 +36,7 @@ struct StreamView: UIViewRepresentable {
     }
 }
 
-/// Gestures → `InputEvent`s:
+/// Gestures → `InputEvent`s. Direct touch (touch where you want the pointer):
 /// - tap: click · long press: right-click · one-finger drag: click-drag
 /// - two-finger pan: scroll; zoomed in, it moves the picture first and scrolls the Mac
 ///   only with what's left past its edges
@@ -43,16 +45,43 @@ struct StreamView: UIViewRepresentable {
 /// - the key bar above the keyboard: Esc, Tab, arrows, F-keys and sticky ⌃ ⌥ ⇧ ⌘
 /// - pinch: zoom the picture on the phone (pans with the fingers); nothing is sent to the Mac
 /// - two-finger double-tap: toggle a comfortable zoom; nothing is sent to the Mac
+/// - two-finger tap: right-click · three-finger swipe: Mission Control, App Exposé, Spaces
+///
+/// Trackpad mode (`isTrackpad`) moves the pointer like a laptop trackpad instead, with a ring
+/// showing where it is; a zoomed-in view follows it:
+/// - one-finger drag: move the pointer · tap: click · two-finger tap: right-click
+/// - press and hold, then drag: click-drag (select text, move windows)
 final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     /// Holds the video layer; pinch transforms it. Touch locations are read in its
     /// coordinate space, so input stays accurate at any zoom.
     private let content = VideoLayerView()
     var displayLayer: AVSampleBufferDisplayLayer { content.displayLayer }
 
-    var videoSize: CGSize = .zero
+    var videoSize: CGSize = .zero {
+        didSet { if videoSize != oldValue { applyZoom() } }
+    }
     private var viewport = ZoomViewport()
     private var pinchCentroid: CGPoint = .zero
     private var isPinching = false
+    /// Where the phone last put the Mac's pointer, in either mode.
+    private var pointer = TrackpadPointer()
+    /// Shows trackpad mode's pointer at once, ahead of the Mac's own cursor in the video.
+    private let cursorRing = UIView()
+    private let longPress = UILongPressGestureRecognizer()
+    /// The last finger position of a press-and-drag, which reports locations, not steps.
+    private var lastPressLocation: CGPoint = .zero
+    /// How close to the view's edge the pointer can get before a zoomed-in view follows it.
+    private static let followMargin: CGFloat = 48
+
+    var isTrackpad = false {
+        didSet {
+            guard isTrackpad != oldValue else { return }
+            cursorRing.isHidden = !isTrackpad
+            // Holding to start a drag should come sooner than a right-click needs to.
+            longPress.minimumPressDuration = isTrackpad ? 0.3 : 0.5
+            if isTrackpad { followPointer() }
+        }
+    }
     var onInput: (InputEvent) -> Void = { _ in }
     var onText: (String) -> Void = { _ in }
     var onTapKey: (UInt16, MacModifiers) -> Void = { _, _ in }
@@ -90,9 +119,21 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         displayLayer.videoGravity = .resizeAspect
         content.layer.anchorPoint = .zero
         addSubview(content)
+        cursorRing.bounds = CGRect(x: 0, y: 0, width: 26, height: 26)
+        cursorRing.layer.cornerRadius = 13
+        cursorRing.layer.borderWidth = 2
+        cursorRing.layer.borderColor = UIColor.white.withAlphaComponent(0.9).cgColor
+        cursorRing.backgroundColor = UIColor.white.withAlphaComponent(0.12)
+        cursorRing.layer.shadowColor = UIColor.black.cgColor
+        cursorRing.layer.shadowOpacity = 0.5
+        cursorRing.layer.shadowRadius = 3
+        cursorRing.layer.shadowOffset = .zero
+        cursorRing.isUserInteractionEnabled = false
+        cursorRing.isHidden = true
+        addSubview(cursorRing)
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(longPressed))
+        longPress.addTarget(self, action: #selector(longPressed))
         let drag = UIPanGestureRecognizer(target: self, action: #selector(dragged))
         drag.maximumNumberOfTouches = 1
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled))
@@ -104,8 +145,16 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         let zoomToggle = UITapGestureRecognizer(target: self, action: #selector(toggledZoom))
         zoomToggle.numberOfTouchesRequired = 2
         zoomToggle.numberOfTapsRequired = 2
+        let rightTap = UITapGestureRecognizer(target: self, action: #selector(rightTapped))
+        rightTap.numberOfTouchesRequired = 2
+        rightTap.require(toFail: zoomToggle)
+        let swipe = UIPanGestureRecognizer(target: self, action: #selector(swiped))
+        swipe.minimumNumberOfTouches = 3
+        swipe.maximumNumberOfTouches = 3
         tap.require(toFail: longPress)
-        for recognizer in [tap, longPress, drag, scroll, pinch, zoomToggle] { addGestureRecognizer(recognizer) }
+        for recognizer in [tap, longPress, drag, scroll, pinch, zoomToggle, rightTap, swipe] {
+            addGestureRecognizer(recognizer)
+        }
 
         for name in [Notification.Name.GCKeyboardDidConnect, .GCKeyboardDidDisconnect] {
             NotificationCenter.default.addObserver(self, selector: #selector(keyboardsChanged), name: name, object: nil)
@@ -172,13 +221,16 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         case .began:
             isPinching = true
             pinchCentroid = centroid
-        case .changed:
-            // Zoom about the fingers, then follow them as they move.
+        case .changed where recognizer.numberOfTouches == 2:
+            // Zoom about the fingers, then follow them as they move. Not with three: that's a Mac swipe.
             viewport.scale(by: recognizer.scale, about: pinchCentroid)
             recognizer.scale = 1
             _ = viewport.pan(by: CGVector(dx: centroid.x - pinchCentroid.x, dy: centroid.y - pinchCentroid.y))
             pinchCentroid = centroid
             applyZoom()
+        case .changed:
+            recognizer.scale = 1
+            pinchCentroid = centroid
         default:
             isPinching = false
         }
@@ -192,6 +244,41 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private func applyZoom() {
         content.layer.position = .zero
         content.transform = viewport.transform
+        cursorRing.center = viewport.screenPoint(pointerInContent)
+    }
+
+    /// The pointer in the unzoomed picture's coordinates (the content view's).
+    private var pointerInContent: CGPoint {
+        let rect = VideoGeometry.contentRect(videoSize: videoSize, in: content.bounds.size)
+        return CGPoint(x: rect.minX + CGFloat(pointer.x) * rect.width, y: rect.minY + CGFloat(pointer.y) * rect.height)
+    }
+
+    /// Trackpad mode: moves the pointer by a finger step and keeps it in view.
+    private func movePointer(by delta: CGPoint) {
+        let rect = VideoGeometry.contentRect(videoSize: videoSize, in: content.bounds.size)
+        pointer.move(by: CGVector(dx: delta.x, dy: delta.y),
+                     pictureSize: CGSize(width: rect.width * viewport.zoom, height: rect.height * viewport.zoom))
+        onInput(.pointerMove(x: pointer.x, y: pointer.y))
+        followPointer()
+    }
+
+    private func followPointer() {
+        viewport.reveal(pointerInContent, margin: Self.followMargin)
+        applyZoom()
+    }
+
+    private func click(_ button: MouseButton, at point: (x: Float, y: Float)) {
+        onInput(.pointerMove(x: point.x, y: point.y))
+        onInput(.button(button, isDown: true, x: point.x, y: point.y))
+        onInput(.button(button, isDown: false, x: point.x, y: point.y))
+    }
+
+    /// Where a gesture acts: the pointer in trackpad mode, under the fingers otherwise.
+    private func target(_ recognizer: UIGestureRecognizer) -> (x: Float, y: Float)? {
+        if isTrackpad { return (pointer.x, pointer.y) }
+        guard let point = point(recognizer) else { return nil }
+        pointer = TrackpadPointer(x: point.x, y: point.y)
+        return point
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -202,21 +289,57 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     }
 
     @objc private func tapped(_ recognizer: UITapGestureRecognizer) {
-        guard let (x, y) = point(recognizer) else { return }
-        onInput(.pointerMove(x: x, y: y))
-        onInput(.button(.left, isDown: true, x: x, y: y))
-        onInput(.button(.left, isDown: false, x: x, y: y))
+        guard let point = target(recognizer) else { return }
+        click(.left, at: point)
+    }
+
+    @objc private func rightTapped(_ recognizer: UITapGestureRecognizer) {
+        guard let point = target(recognizer) else { return }
+        click(.right, at: point)
     }
 
     @objc private func longPressed(_ recognizer: UILongPressGestureRecognizer) {
-        guard recognizer.state == .began, let (x, y) = point(recognizer) else { return }
-        onInput(.pointerMove(x: x, y: y))
-        onInput(.button(.right, isDown: true, x: x, y: y))
-        onInput(.button(.right, isDown: false, x: x, y: y))
+        guard isTrackpad else {
+            guard recognizer.state == .began, let point = target(recognizer) else { return }
+            return click(.right, at: point)
+        }
+        // Press and hold, then drag: the button stays down until the finger lifts.
+        let location = recognizer.location(in: self)
+        switch recognizer.state {
+        case .began:
+            lastPressLocation = location
+            onInput(.button(.left, isDown: true, x: pointer.x, y: pointer.y))
+            if UserDefaults.standard.object(forKey: SettingsKey.haptics) as? Bool ?? true {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
+        case .changed:
+            movePointer(by: CGPoint(x: location.x - lastPressLocation.x, y: location.y - lastPressLocation.y))
+            lastPressLocation = location
+        case .ended, .cancelled, .failed:
+            onInput(.button(.left, isDown: false, x: pointer.x, y: pointer.y))
+        default:
+            break
+        }
+    }
+
+    @objc private func swiped(_ recognizer: UIPanGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        let translation = recognizer.translation(in: self)
+        guard let gesture = MacGesture(swipe: CGVector(dx: translation.x, dy: translation.y)) else { return }
+        onKey(MacKey.control, true, .control)
+        onTapKey(gesture.key, gesture.modifiers)
+        onKey(MacKey.control, false, [])
     }
 
     @objc private func dragged(_ recognizer: UIPanGestureRecognizer) {
+        if isTrackpad {
+            let delta = recognizer.translation(in: self)
+            recognizer.setTranslation(.zero, in: self)
+            if [.began, .changed].contains(recognizer.state) { movePointer(by: delta) }
+            return
+        }
         guard let (x, y) = point(recognizer, clamped: true) else { return }
+        pointer = TrackpadPointer(x: x, y: y)
         switch recognizer.state {
         case .began:
             onInput(.pointerMove(x: x, y: y))

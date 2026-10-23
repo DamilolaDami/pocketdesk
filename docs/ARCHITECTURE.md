@@ -430,7 +430,10 @@ and pinning, never on obscurity.
    - Done on the phone: Bonjour host list, pairing (VisionKit QR scan, paste link, or a
      `pocketdesk://pair` URL), `FrameAssembler` → `AVSampleBufferDisplayLayer`, direct touch
      (tap = click, long press = right-click, drag = click-drag, two fingers = scroll),
-     keyboard via `UIKeyInput`, window picker.
+     keyboard via `UIKeyInput`, window picker. Trackpad mode (`TrackpadPointer`: relative,
+     accelerated pointer; hold then drag = click-drag; two-finger tap = right-click) with a
+     zoomed view that follows the pointer (`ZoomViewport.reveal`), and three-finger swipes
+     sent as Mission Control's ⌃-arrow shortcuts (`MacGesture`).
 2. **v0.2 – Window picker**: stream one window fitted to the phone, app switcher UI.
 3. **v0.3 – Thumb UI**: read the frontmost app's menus/toolbar via AX APIs and render them as
    native controls.

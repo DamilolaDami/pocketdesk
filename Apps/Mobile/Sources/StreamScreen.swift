@@ -15,6 +15,7 @@ struct StreamScreen: View {
     @AppStorage(SettingsKey.startInLandscape) private var startInLandscape = false
     @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
     @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
+    @AppStorage(SettingsKey.trackpad) private var trackpad = false
     @State private var controlsExpanded = true
     @State private var showsStatus = true
     /// The on-screen keyboard is up (not just the key bar a hardware keyboard leaves).
@@ -31,7 +32,7 @@ struct StreamScreen: View {
 
     private func stream(isLandscape: Bool) -> some View {
         StreamView(controller: controller, videoSize: CGSize(width: config.width, height: config.height),
-                   keyboardShown: $keyboardShown)
+                   trackpad: trackpad, keyboardShown: $keyboardShown)
             .ignoresSafeArea()
             .background(.black)
             .overlay(alignment: .topLeading) {
@@ -97,6 +98,11 @@ struct StreamScreen: View {
                 if controlsExpanded {
                     control("Keyboard", keyboardShown ? "keyboard.chevron.compact.down.fill" : "keyboard") {
                         keyboardShown.toggle()
+                    }
+                    // Shows the mode you're in; tap to switch.
+                    control(trackpad ? "Trackpad Mode" : "Touch Mode", trackpad ? "cursorarrow" : "hand.point.up.left",
+                            id: "Mode") {
+                        trackpad.toggle()
                     }
                     control("Shortcuts", "square.grid.2x2.fill") { showingShortcuts = true }
                     control("Displays", "display.2") { showingDisplays = true }
@@ -165,7 +171,7 @@ struct StreamScreen: View {
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: toLandscape ? .landscapeRight : .portrait))
     }
 
-    private func control(_ title: String, _ symbol: String, tint: Color? = nil,
+    private func control(_ title: String, _ symbol: String, tint: Color? = nil, id: String? = nil,
                          action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
@@ -176,7 +182,7 @@ struct StreamScreen: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .circle)
-        .glassEffectID(title, in: glass)
+        .glassEffectID(id ?? title, in: glass)
         .accessibilityLabel(title)
     }
 }

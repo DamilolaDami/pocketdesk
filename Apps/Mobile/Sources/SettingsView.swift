@@ -12,6 +12,8 @@ enum SettingsKey {
     /// Same key `SessionController.clipboardEnabled` reads.
     static let shareClipboard = "shareClipboard"
     static let haptics = "haptics"
+    /// The stream starts in trackpad mode (the control bar switches it too).
+    static let trackpad = "trackpad"
 }
 
 struct SettingsView: View {
@@ -23,6 +25,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.streamAudio) private var streamAudio = true
     @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
     @AppStorage(SettingsKey.haptics) private var haptics = true
+    @AppStorage(SettingsKey.trackpad) private var trackpad = false
     @State private var showingSiri = false
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
@@ -74,6 +77,9 @@ struct SettingsView: View {
                         SettingsLabel("Share Clipboard", symbol: "doc.on.clipboard.fill", color: .indigo)
                     }
                     .onChange(of: shareClipboard) { _, enabled in controller.clipboardEnabled = enabled }
+                    Toggle(isOn: $trackpad) {
+                        SettingsLabel("Trackpad Mode", symbol: "cursorarrow", color: .gray)
+                    }
                     Toggle(isOn: $startInLandscape) {
                         SettingsLabel("Start in Landscape", symbol: "rectangle.landscape.rotate", color: .orange)
                     }

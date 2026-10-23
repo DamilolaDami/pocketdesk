@@ -49,6 +49,24 @@ public struct ZoomViewport: Equatable, Sendable {
         zoom(to: isZoomed ? 1 : Self.comfortableZoom, about: anchor)
     }
 
+    /// Pans just enough to bring `point` (in the unzoomed picture's coordinates) at least
+    /// `margin` inside the view, as the zoomed view follows the pointer.
+    public mutating func reveal(_ point: CGPoint, margin: CGFloat) {
+        guard isZoomed else { return }
+        let shown = screenPoint(point)
+        let marginX = min(margin, viewSize.width / 2), marginY = min(margin, viewSize.height / 2)
+        if shown.x < marginX { offset.x += marginX - shown.x }
+        if shown.x > viewSize.width - marginX { offset.x -= shown.x - (viewSize.width - marginX) }
+        if shown.y < marginY { offset.y += marginY - shown.y }
+        if shown.y > viewSize.height - marginY { offset.y -= shown.y - (viewSize.height - marginY) }
+        clamp()
+    }
+
+    /// Where a point of the unzoomed picture shows in the view.
+    public func screenPoint(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: offset.x + point.x * zoom, y: offset.y + point.y * zoom)
+    }
+
     public var transform: CGAffineTransform {
         CGAffineTransform(translationX: offset.x, y: offset.y).scaledBy(x: zoom, y: zoom)
     }

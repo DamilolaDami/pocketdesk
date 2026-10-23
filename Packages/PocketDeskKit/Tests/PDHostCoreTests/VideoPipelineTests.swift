@@ -48,7 +48,7 @@ import PDProtocol
 @Suite(.timeLimit(.minutes(1)))
 struct HEVCEncoderTests {
     @Test func firstFrameIsDecodableKeyframeThenDeltas() async throws {
-        let encoder = try HEVCEncoder(width: 640, height: 360, fps: 30, bitrateKbps: 2_000)
+        let encoder = try await HEVCEncoder.make(width: 640, height: 360, fps: 30, bitrateKbps: 2_000)
         for index in 0..<10 {
             encoder.encode(makePixelBuffer(width: 640, height: 360, luma: UInt8(index * 20)),
                            presentationTime: CMTime(value: Int64(index), timescale: 30))
@@ -73,7 +73,7 @@ struct HEVCEncoderTests {
     }
 
     @Test func requestKeyframeForcesOne() async throws {
-        let encoder = try HEVCEncoder(width: 640, height: 360, fps: 30, bitrateKbps: 2_000)
+        let encoder = try await HEVCEncoder.make(width: 640, height: 360, fps: 30, bitrateKbps: 2_000)
         for index in 0..<6 {
             if index == 4 { encoder.requestKeyframe() }
             encoder.encode(makePixelBuffer(width: 640, height: 360, luma: UInt8(index * 30)),

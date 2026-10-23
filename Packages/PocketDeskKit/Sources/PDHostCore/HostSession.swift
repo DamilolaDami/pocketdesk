@@ -457,7 +457,7 @@ public actor HostSession {
                                                               fps: min(configuration.fps, ceiling.fps))) * ceiling.bitrate)
         let config = StreamConfig(codec: .hevc, width: size.width, height: size.height, fps: streamFPS,
                                   bitrateKbps: streamBitrateKbps, displayID: displayID)
-        let encoder = try HEVCEncoder(width: config.width, height: config.height, fps: config.fps,
+        let encoder = try await HEVCEncoder.make(width: config.width, height: config.height, fps: config.fps,
                                       bitrateKbps: config.bitrateKbps)
         await stopPump()
         currentSource = resolved.source

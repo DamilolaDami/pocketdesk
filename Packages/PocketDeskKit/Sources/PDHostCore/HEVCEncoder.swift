@@ -32,7 +32,25 @@ public final class HEVCEncoder: @unchecked Sendable {
     private let keyframeLock = NSLock()
     private var forceNextKeyframe = true
 
-    public init(width: Int, height: Int, fps: Int, bitrateKbps: Int) throws(EncoderError) {
+    /// Where sessions are created, one at a time. A process's first VideoToolbox session looks
+    /// up capture devices and waits for camera extensions to answer. Several encoders starting
+    /// at once on Swift's few cooperative threads would all block on that lookup, and with no
+    /// threads left nothing answers it: the process hangs. So creating one never blocks a
+    /// cooperative thread.
+    private static let creationQueue = DispatchQueue(label: "com.pocketdesk.host.encoder-creation")
+
+    public static func make(width: Int, height: Int, fps: Int, bitrateKbps: Int) async throws(EncoderError) -> HEVCEncoder {
+        let result = await withCheckedContinuation { (continuation: CheckedContinuation<Result<HEVCEncoder, EncoderError>, Never>) in
+            creationQueue.async {
+                continuation.resume(returning: Result { () throws(EncoderError) in
+                    try HEVCEncoder(width: width, height: height, fps: fps, bitrateKbps: bitrateKbps)
+                })
+            }
+        }
+        return try result.get()
+    }
+
+    private init(width: Int, height: Int, fps: Int, bitrateKbps: Int) throws(EncoderError) {
         self.width = width
         self.height = height
         // Unbounded on purpose: dropping here could drop a keyframe. Backlog is bounded

@@ -13,7 +13,7 @@ import PDProtocol
 @Suite(.timeLimit(.minutes(1)))
 struct FrameAssemblerTests {
     func encodedFrames(count: Int, width: Int = 640, height: Int = 360) async throws -> [EncodedFrame] {
-        let encoder = try HEVCEncoder(width: width, height: height, fps: 30, bitrateKbps: 2_000)
+        let encoder = try await HEVCEncoder.make(width: width, height: height, fps: 30, bitrateKbps: 2_000)
         for index in 0..<count {
             encoder.encode(flatFrame(width: width, height: height, luma: UInt8(index * 20)),
                            presentationTime: CMTime(value: Int64(index), timescale: 30))

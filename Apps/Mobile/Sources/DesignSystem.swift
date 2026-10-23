@@ -9,16 +9,23 @@ enum Brand {
     static let cornerRadius: CGFloat = 28
 }
 
-/// Full-screen backdrop: a gentle mesh gradient that gives the glass something to refract.
+/// Full-screen backdrop: in light mode a gentle mesh gradient that gives the glass something
+/// to refract; in dark mode the plain system background.
 struct AppBackground: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        MeshGradient(
-            width: 3, height: 3,
-            points: [[0, 0], [0.5, 0], [1, 0], [0, 0.5], [0.6, 0.45], [1, 0.5], [0, 1], [0.5, 1], [1, 1]],
-            colors: colorScheme == .dark ? darkColors : lightColors
-        )
+        Group {
+            if colorScheme == .dark {
+                Color(.systemBackground)
+            } else {
+                MeshGradient(
+                    width: 3, height: 3,
+                    points: [[0, 0], [0.5, 0], [1, 0], [0, 0.5], [0.6, 0.45], [1, 0.5], [0, 1], [0.5, 1], [1, 1]],
+                    colors: lightColors
+                )
+            }
+        }
         .ignoresSafeArea()
     }
 
@@ -26,12 +33,6 @@ struct AppBackground: View {
         [.init(white: 0.97), Brand.accent.opacity(0.18), .init(white: 0.97),
          .purple.opacity(0.10), .init(white: 0.98), Brand.accent.opacity(0.12),
          .init(white: 0.97), .cyan.opacity(0.12), .init(white: 0.96)]
-    }
-
-    private var darkColors: [Color] {
-        [.black, Brand.accent.opacity(0.35), .black,
-         .purple.opacity(0.25), .init(white: 0.06), Brand.accent.opacity(0.2),
-         .black, .cyan.opacity(0.18), .black]
     }
 }
 

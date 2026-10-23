@@ -620,6 +620,10 @@ public final class SessionController {
         updateLibrary { $0.move(shortcut, to: target) }
     }
 
+    public func reorder(_ ids: [Shortcut.ID]) {
+        updateLibrary { $0.reorder(ids) }
+    }
+
     private func updateLibrary(_ change: (inout ShortcutLibrary) -> Void) {
         change(&library)
         try? library.save(to: shortcutsURL)

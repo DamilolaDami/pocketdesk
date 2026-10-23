@@ -115,9 +115,9 @@ private struct PairedMacCard: View {
     }
 
     private var action: (title: String, symbol: String) {
-        if host.isOnline { ("Connect", "play.fill") }
+        if host.isOnline { ("Use This Mac", "play.fill") }
         else if host.isWaking { ("Waking…", "power") }
-        else if host.canWake { ("Wake & Connect", "power") }
+        else if host.canWake { ("Wake & Use", "power") }
         else { ("Not Available", "moon.zzz") }
     }
 }

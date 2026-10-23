@@ -35,6 +35,12 @@ import Testing
         #expect(MacAction.steps([.openURL("https://netflix.com"), .setVolume(30)]).needsPicture)
     }
 
+    @Test func reorderKeepsEveryShortcut() {
+        var library = ShortcutLibrary(shortcuts: [netflix, music, spotlight])
+        library.reorder([spotlight.id, netflix.id, UUID(), spotlight.id]) // unknown and repeated IDs
+        #expect(library.shortcuts.map(\.id) == [spotlight.id, netflix.id, music.id])
+    }
+
     @Test func searchesAskThenFillTheLink() {
         let search = MacAction.openURL("https://www.youtube.com/results?search_query={text}")
         #expect(search.asksForText)

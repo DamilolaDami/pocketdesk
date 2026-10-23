@@ -347,7 +347,7 @@ Each `helloAck` carries `WakeInfo`, sent only inside the encrypted session:
 - whether `pmset`'s `womp` ("Wake for network access") is on.
 
 The phone keeps the last useful one per Mac (`PerMac<WakeInfo>`, `wake.json`). A paired Mac
-that isn't advertising shows as Asleep with **Wake & Connect**. That sends magic packets
+that isn't advertising shows as Asleep with **Wake & Use**. That sends magic packets
 (`WakeOnLAN`, `WakeSender`) to the subnet broadcast, 255.255.255.255 and the Mac's last
 address, on ports 9 and 7, at 0, 3, 8 and 15 s. The phone connects as soon as the Mac shows
 up in Bonjour, or gives up after 40 s with a hint about the setting (`WakeAttempts`, a pure

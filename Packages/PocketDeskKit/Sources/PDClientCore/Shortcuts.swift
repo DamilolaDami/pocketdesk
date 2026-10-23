@@ -75,6 +75,15 @@ public struct ShortcutLibrary: Codable, Sendable, Equatable {
         shortcuts.insert(shortcuts.remove(at: from), at: to)
     }
 
+    /// Puts shortcuts in this order (after a drag). IDs it doesn't know are ignored, and any
+    /// it leaves out keep their place at the end, so a stale list can't lose a shortcut.
+    public mutating func reorder(_ ids: [Shortcut.ID]) {
+        let byID = Dictionary(uniqueKeysWithValues: shortcuts.map { ($0.id, $0) })
+        var seen = Set<Shortcut.ID>()
+        let ordered = ids.compactMap { id in seen.insert(id).inserted ? byID[id] : nil }
+        shortcuts = ordered + shortcuts.filter { !seen.contains($0.id) }
+    }
+
     /// Where the app keeps its shortcuts: the App Group container, so the widget extension and
     /// Siri see the same list. Falls back to the app's own folder when there's no group (tests,
     /// unsigned builds), moving an older copy across the first time.

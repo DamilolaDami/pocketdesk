@@ -102,10 +102,10 @@ struct SettingsView: View {
 
                 Section {
                     NavigationLink {
-                        RelaySettingsView(controller: controller)
+                        RelaySettingsView(controller: controller, pairedCount: paired.count)
                     } label: {
                         HStack {
-                            SettingsLabel("Remote Access", symbol: "network", color: .blue)
+                            SettingsLabel("Remote Access", symbol: "globe", color: Brand.accent)
                             Spacer()
                             Text(relayEnabled && RelayServer(address: relayAddress) != nil ? "On" : "Off")
                                 .foregroundStyle(.secondary)
@@ -366,104 +366,332 @@ private struct SiriSettingsSheet: View {
     }
 }
 
+/// Remote Access: what it does, whether it's working, and what to set up, in that order. The
+/// relay server itself is an advanced detail, on a page of its own.
 private struct RelaySettingsView: View {
     let controller: SessionController
+    let pairedCount: Int
     @AppStorage(RelayServer.enabledKey) private var enabled = false
     @AppStorage(RelayServer.addressKey) private var address = RelayServer.defaultAddress
-    @State private var draft = ""
-    @State private var custom = false
-    @State private var copied = false
 
-    private var status: String {
-        guard enabled else { return "Off" }
-        guard controller.store.connectionPath == .relay else { return "Ready to connect" }
-        switch controller.store.state {
-        case .streaming: return "Connected"
-        case .connecting: return "Connecting…"
-        case .failed: return "Unavailable"
-        default: return "Ready to connect"
-        }
-    }
-    private var statusColor: Color {
-        guard enabled else { return .secondary }
-        if controller.store.connectionPath == .relay {
-            switch controller.store.state {
-            case .streaming: return .green
-            case .failed: return .orange
-            default: break
+    private var usingDefault: Bool { address == RelayServer.defaultAddress }
+
+    var body: some View {
+        Form {
+            Section { RemoteAccessHeader(enabled: enabled) }
+                .listRowBackground(Color.clear)
+
+            Section {
+                Toggle(isOn: $enabled) {
+                    SettingsLabel("Remote Access", symbol: "globe", color: Brand.accent)
+                }
+                .onChange(of: enabled) { controller.relaySettingsChanged() }
+                RemoteAccessStatus(status: status)
+            }
+
+            Section {
+                SetupStep(number: 1, done: pairedCount > 0, title: "Pair on the same Wi-Fi",
+                          detail: pairedCount > 0
+                              ? "Done. Pairing always happens in person, so no one can pair from far away."
+                              : "Pair your Mac while you're together. No one can pair from far away.")
+                SetupStep(number: 2, done: false, title: "Turn it on on your Mac",
+                          detail: "Click PocketDesk in the menu bar, choose Remote Access… and turn it on.")
+                SetupStep(number: 3, done: false, title: "Keep your Mac awake",
+                          detail: "A sleeping Mac can't be reached from away. Leave it on power with PocketDesk open.")
+            } header: {
+                Text("Set Up Once")
+            }
+
+            Section {
+                InfoRow(symbol: "lock.shield.fill", color: .green, title: "Private and encrypted",
+                        detail: "Your screen and typing are encrypted between your iPhone and Mac. The relay only passes sealed data along and can't see either.")
+                InfoRow(symbol: "wifi", color: .blue, title: "Home Wi-Fi comes first",
+                        detail: "When your Mac is nearby, PocketDesk connects straight to it, just as before.")
+            }
+
+            Section {
+                NavigationLink {
+                    RelayServerView(controller: controller)
+                } label: {
+                    HStack {
+                        SettingsLabel("Relay Server", symbol: "server.rack", color: .gray)
+                        Spacer()
+                        Text(usingDefault ? "PocketDesk" : (RelayServer(address: address)?.host ?? "Custom"))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            } header: {
+                Text("Advanced")
+            } footer: {
+                Text("Only change this if you run your own relay.")
             }
         }
-        return .blue
+        .scrollContentBackground(.hidden)
+        .background { AppBackground() }
+        .navigationTitle("Remote Access")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { if address.isEmpty { address = RelayServer.defaultAddress } }
     }
+
+    private var status: RemoteAccessStatus.Status {
+        guard enabled else { return .off }
+        guard controller.store.connectionPath == .relay else { return .ready }
+        switch controller.store.state {
+        case .streaming: return .connected
+        case .connecting: return .connecting
+        case .failed: return .unreachable
+        default: return .ready
+        }
+    }
+}
+
+/// An iPhone and a Mac with the globe between them; the link lights up when it's on.
+private struct RemoteAccessHeader: View {
+    let enabled: Bool
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                device("iphone")
+                link
+                Image(systemName: "globe")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background((enabled ? Brand.accent : Color.gray).gradient, in: .circle)
+                    .shadow(color: (enabled ? Brand.accent : .clear).opacity(0.35), radius: 10, y: 4)
+                link
+                device("laptopcomputer")
+            }
+            .animation(.smooth, value: enabled)
+            Text("Your Mac, from anywhere")
+                .font(.title2.weight(.bold))
+            Text("Use your Mac over cellular or any Wi-Fi, not only when you're home.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func device(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 22, weight: .medium))
+            .foregroundStyle(.primary)
+            .frame(width: 52, height: 52)
+            .background(.background, in: .rect(cornerRadius: 14, style: .continuous))
+            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+    }
+
+    private var link: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<3, id: \.self) { _ in
+                Circle().frame(width: 4, height: 4)
+            }
+        }
+        .foregroundStyle(enabled ? Brand.accent : Color.secondary.opacity(0.4))
+    }
+}
+
+/// One line that says, in plain words, what Remote Access is doing right now.
+private struct RemoteAccessStatus: View {
+    enum Status { case off, ready, connecting, connected, unreachable }
+    let status: Status
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 29)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(color)
+                Text(detail).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var symbol: String {
+        switch status {
+        case .off: "wifi"
+        case .ready: "checkmark.circle.fill"
+        case .connecting: "arrow.triangle.2.circlepath"
+        case .connected: "dot.radiowaves.left.and.right"
+        case .unreachable: "exclamationmark.triangle.fill"
+        }
+    }
+    private var color: Color {
+        switch status {
+        case .off: .secondary
+        case .ready: Brand.accent
+        case .connecting: Brand.accent
+        case .connected: .green
+        case .unreachable: .orange
+        }
+    }
+    private var title: String {
+        switch status {
+        case .off: "Only on the same Wi-Fi"
+        case .ready: "Ready"
+        case .connecting: "Connecting from away…"
+        case .connected: "Connected from away"
+        case .unreachable: "Couldn't reach your Mac"
+        }
+    }
+    private var detail: String {
+        switch status {
+        case .off: "Turn on Remote Access to reach your Mac when you're out."
+        case .ready: "When your Mac isn't nearby, PocketDesk connects through the relay."
+        case .connecting: "Reaching your Mac through the relay."
+        case .connected: "Your Mac is streaming through the relay."
+        case .unreachable: "Check that it's awake, PocketDesk is open, and Remote Access is on on the Mac."
+        }
+    }
+}
+
+/// A numbered setup step, with a green tick once it's done.
+private struct SetupStep: View {
+    let number: Int
+    let done: Bool
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle().fill(done ? Color.green.gradient : Brand.accent.opacity(0.12).gradient)
+                if done {
+                    Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                } else {
+                    Text("\(number)").font(.subheadline.weight(.bold)).foregroundStyle(Brand.accent)
+                }
+            }
+            .frame(width: 29, height: 29)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.body.weight(.medium))
+                Text(detail).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Step \(number): \(title)\(done ? ", done" : ""). \(detail)")
+    }
+}
+
+/// A short reassurance: a colored icon, a title and one or two lines.
+private struct InfoRow: View {
+    let symbol: String
+    let color: Color
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 29, height: 29)
+                .background(color.gradient, in: .rect(cornerRadius: 7, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.body.weight(.medium))
+                Text(detail).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Which relay to use: PocketDesk's, or your own. Both devices need the same one.
+private struct RelayServerView: View {
+    let controller: SessionController
+    @AppStorage(RelayServer.addressKey) private var address = RelayServer.defaultAddress
+    @State private var draft = ""
+    @State private var customSelected = false
+    @FocusState private var editing: Bool
+
+    private var usingDefault: Bool { address == RelayServer.defaultAddress }
+    private var draftValid: Bool { RelayServer(address: draft) != nil }
+
     var body: some View {
         Form {
             Section {
-                Toggle("Connect Away from Home", isOn: $enabled)
-                    .onChange(of: enabled) { controller.relaySettingsChanged() }
+                choice("PocketDesk Relay", detail: "Recommended. Run by PocketDesk.", selected: !customSelected) {
+                    customSelected = false
+                    save(RelayServer.defaultAddress)
+                }
+                choice("Your Own Relay", detail: "A server you run yourself.", selected: customSelected) {
+                    customSelected = true
+                    editing = true
+                }
             } footer: {
-                Text("Pair with your Mac on the same Wi-Fi first. Keep your Mac awake with PocketDesk running and Remote Access enabled.")
+                Text("Use the same relay on your iPhone and your Mac.")
             }
-            Section {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "network")
-                            .font(.title2).foregroundStyle(.blue)
-                            .frame(width: 44, height: 44)
-                            .background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(address == RelayServer.defaultAddress ? "PocketDesk Relay" : "Custom Relay")
-                                .font(.headline)
-                            Label(status, systemImage: "circle.fill")
-                                .font(.caption).foregroundStyle(statusColor)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    HStack(alignment: .center, spacing: 8) {
-                        Text(address).font(.system(.footnote, design: .monospaced))
-                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                        Button {
-                            UIPasteboard.general.string = address
-                            copied = true
-                        } label: {
-                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel(copied ? "Relay address copied" : "Copy relay address")
-                    }
-                    Label("Encrypted between your devices", systemImage: "lock.shield")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 6)
-                DisclosureGroup("Use a custom relay", isExpanded: $custom) {
-                    TextField("Hostname and port", text: $draft, prompt: Text("relay.example.com:4433"))
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .keyboardType(.URL).accessibilityLabel("Relay hostname and port")
-                    Button("Save Relay") { save(draft) }
-                        .disabled(RelayServer(address: draft) == nil || draft == address)
-                    if !draft.isEmpty, RelayServer(address: draft) == nil {
-                        Text("Enter a hostname and optional port, without a URL path.")
-                            .foregroundStyle(.red).font(.footnote)
-                    }
-                    if address != RelayServer.defaultAddress {
-                        Button("Use PocketDesk Relay") { save(RelayServer.defaultAddress) }
+
+            if customSelected {
+                Section {
+                    TextField("relay.example.com:4433", text: $draft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .focused($editing)
+                        .submitLabel(.done)
+                        .onSubmit { if draftValid { save(draft) } }
+                        .accessibilityLabel("Relay hostname and port")
+                    Button("Use This Relay") { save(draft) }
+                        .disabled(!draftValid || draft == address)
+                } header: {
+                    Text("Server Address")
+                } footer: {
+                    if !draft.isEmpty && !draftValid {
+                        Text("Enter a hostname, with a port if it isn't 4433. For example relay.example.com:4433.")
+                            .foregroundStyle(.red)
+                    } else if !usingDefault {
+                        Text("Now using \(address).")
+                    } else {
+                        Text("A hostname, with a port if it isn't 4433.")
                     }
                 }
-            } header: { Text("Relay server") } footer: {
-                Text("Local connections are tried first. Relay status updates when you connect to your Mac. Use the same relay on both devices.")
             }
         }
-        .navigationTitle("Remote Access")
+        .scrollContentBackground(.hidden)
+        .background { AppBackground() }
+        .navigationTitle("Relay Server")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            if address.isEmpty { address = RelayServer.defaultAddress }
-            draft = address
+            customSelected = !usingDefault
+            draft = usingDefault ? "" : address
         }
-        .onChange(of: address) { copied = false }
     }
+
+    private func choice(_ title: String, detail: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).foregroundStyle(.primary)
+                    Text(detail).font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if selected {
+                    Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Brand.accent)
+                }
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
     private func save(_ value: String) {
-        address = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        draft = address
-        custom = false
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard RelayServer(address: trimmed) != nil, trimmed != address else { return }
+        address = trimmed
+        editing = false
         controller.relaySettingsChanged()
     }
 }

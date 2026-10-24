@@ -18,10 +18,12 @@ enum AppModel {
     }()
 }
 
-/// "Open Netflix on my Mac with PocketDesk": runs a saved shortcut without opening the app.
+/// "Open Netflix with PocketDesk": runs a saved shortcut without opening the app.
+/// App Review rejects intent metadata (titles, descriptions, phrases, symbol names) that
+/// contains "mac" anywhere, so these strings say "computer" instead.
 struct RunShortcutIntent: AppIntent {
-    static let title: LocalizedStringResource = "Run Shortcut on Mac"
-    static let description = IntentDescription("Runs one of your PocketDesk shortcuts on your Mac, like opening Netflix or a favorite app.")
+    static let title: LocalizedStringResource = "Run PocketDesk Shortcut"
+    static let description = IntentDescription("Runs one of your PocketDesk shortcuts on your computer, like opening Netflix or a favorite app.")
 
     @Parameter(title: "Shortcut")
     var shortcut: ShortcutEntity
@@ -31,7 +33,7 @@ struct RunShortcutIntent: AppIntent {
     var text: String?
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Run \(\.$shortcut) on my Mac")
+        Summary("Run \(\.$shortcut) on my computer")
     }
 
     init() {}
@@ -59,12 +61,12 @@ struct PocketDeskShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: RunShortcutIntent(),
             phrases: [
-                "Open \(\.$shortcut) on my Mac with \(.applicationName)",
-                "Run \(\.$shortcut) on my Mac with \(.applicationName)",
+                "Open \(\.$shortcut) with \(.applicationName)",
+                "Run \(\.$shortcut) with \(.applicationName)",
                 "\(.applicationName) \(\.$shortcut)",
             ],
-            shortTitle: "Run on Mac",
-            systemImageName: "macbook.gen2"
+            shortTitle: "Run Shortcut",
+            systemImageName: "laptopcomputer"
         )
     }
 }

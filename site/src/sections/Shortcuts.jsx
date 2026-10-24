@@ -104,7 +104,7 @@ export function Shortcuts() {
           <i className="blob blob-c" />
           <i className="blob blob-d" />
         </span>
-        <p>“Open Netflix on my Mac with PocketDesk”</p>
+        <p>“Open Netflix with PocketDesk”</p>
         <span className="label">Siri · Widgets · Control Center</span>
       </Reveal>
     </section>

@@ -44,7 +44,7 @@ struct ShortcutsWidget: Widget {
             ShortcutsWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("Mac Shortcuts")
+        .configurationDisplayName("PocketDesk Shortcuts")
         .description("Your first PocketDesk shortcuts, one tap away.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular])
     }
@@ -131,7 +131,7 @@ private struct EmptyWidget: View {
 
 /// Which shortcut a Control Center control runs; picked when adding the control.
 struct ShortcutControlConfiguration: ControlConfigurationIntent {
-    static let title: LocalizedStringResource = "Mac Shortcut"
+    static let title: LocalizedStringResource = "PocketDesk Shortcut"
 
     @Parameter(title: "Shortcut")
     var shortcut: ShortcutEntity?
@@ -144,11 +144,11 @@ struct RunShortcutControl: ControlWidget {
         AppIntentControlConfiguration(kind: "RunShortcut", intent: ShortcutControlConfiguration.self) { configuration in
             ControlWidgetButton(action: OpenURLIntent(configuration.shortcut.map { Shortcut.runURL(for: $0.id) }
                                                       ?? URL(string: "pocketdesk://")!)) {
-                Label(configuration.shortcut?.name ?? "Mac Shortcut",
-                      systemImage: configuration.shortcut?.symbol ?? "macbook.gen2")
+                Label(configuration.shortcut?.name ?? "PocketDesk",
+                      systemImage: configuration.shortcut?.symbol ?? "laptopcomputer")
             }
         }
-        .displayName("Run on Mac")
-        .description("Runs a PocketDesk shortcut on your Mac.")
+        .displayName("Run Shortcut")
+        .description("Runs a PocketDesk shortcut on your computer.")
     }
 }

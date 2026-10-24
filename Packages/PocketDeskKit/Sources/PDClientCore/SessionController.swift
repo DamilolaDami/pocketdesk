@@ -153,9 +153,8 @@ public final class SessionController {
     }
 
     public var relayServer: RelayServer? {
-        guard UserDefaults.standard.bool(forKey: RelayServer.enabledKey),
-              let text = UserDefaults.standard.string(forKey: RelayServer.addressKey) else { return nil }
-        return RelayServer(address: text)
+        guard UserDefaults.standard.bool(forKey: RelayServer.enabledKey) else { return nil }
+        return RelayServer(address: RelayServer.savedAddress())
     }
     public func relaySettingsChanged() { store.send(.hostsChanged(discoveredHosts())) }
 

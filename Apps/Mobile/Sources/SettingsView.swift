@@ -50,7 +50,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.keyBarFunction) private var keyBarFunction = true
     @State private var showingSiri = false
     @AppStorage(RelayServer.enabledKey) private var relayEnabled = false
-    @AppStorage(RelayServer.addressKey) private var relayAddress = ""
+    @AppStorage(RelayServer.addressKey) private var relayAddress = RelayServer.defaultAddress
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
 
@@ -369,36 +369,101 @@ private struct SiriSettingsSheet: View {
 private struct RelaySettingsView: View {
     let controller: SessionController
     @AppStorage(RelayServer.enabledKey) private var enabled = false
-    @AppStorage(RelayServer.addressKey) private var address = ""
+    @AppStorage(RelayServer.addressKey) private var address = RelayServer.defaultAddress
     @State private var draft = ""
+    @State private var custom = false
+    @State private var copied = false
+
+    private var status: String {
+        guard enabled else { return "Off" }
+        guard controller.store.connectionPath == .relay else { return "Ready to connect" }
+        switch controller.store.state {
+        case .streaming: return "Connected"
+        case .connecting: return "Connecting…"
+        case .failed: return "Unavailable"
+        default: return "Ready to connect"
+        }
+    }
+    private var statusColor: Color {
+        guard enabled else { return .secondary }
+        if controller.store.connectionPath == .relay {
+            switch controller.store.state {
+            case .streaming: return .green
+            case .failed: return .orange
+            default: break
+            }
+        }
+        return .blue
+    }
     var body: some View {
         Form {
             Section {
                 Toggle("Connect Away from Home", isOn: $enabled)
-                    .disabled(RelayServer(address: address) == nil && !enabled)
                     .onChange(of: enabled) { controller.relaySettingsChanged() }
             } footer: {
-                Text("PocketDesk tries your local network first, then this relay. Your Mac must be awake with remote access enabled. Pair on the same network before using a relay.")
+                Text("Pair with your Mac on the same Wi-Fi first. Keep your Mac awake with PocketDesk running and Remote Access enabled.")
             }
             Section {
-                TextField("relay.example.com:4433", text: $draft)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                    .accessibilityLabel("Relay hostname and port")
-                Button("Save Relay") {
-                    address = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    controller.relaySettingsChanged()
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "network")
+                            .font(.title2).foregroundStyle(.blue)
+                            .frame(width: 44, height: 44)
+                            .background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(address == RelayServer.defaultAddress ? "PocketDesk Relay" : "Custom Relay")
+                                .font(.headline)
+                            Label(status, systemImage: "circle.fill")
+                                .font(.caption).foregroundStyle(statusColor)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    HStack(alignment: .center, spacing: 8) {
+                        Text(address).font(.system(.footnote, design: .monospaced))
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Button {
+                            UIPasteboard.general.string = address
+                            copied = true
+                        } label: {
+                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(copied ? "Relay address copied" : "Copy relay address")
+                    }
+                    Label("Encrypted between your devices", systemImage: "lock.shield")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                .disabled(RelayServer(address: draft) == nil || draft == address)
-                if !draft.isEmpty, RelayServer(address: draft) == nil {
-                    Text("Enter a hostname and optional port, without a URL path.").foregroundStyle(.red).font(.footnote)
+                .padding(.vertical, 6)
+                DisclosureGroup("Use a custom relay", isExpanded: $custom) {
+                    TextField("Hostname and port", text: $draft, prompt: Text("relay.example.com:4433"))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .keyboardType(.URL).accessibilityLabel("Relay hostname and port")
+                    Button("Save Relay") { save(draft) }
+                        .disabled(RelayServer(address: draft) == nil || draft == address)
+                    if !draft.isEmpty, RelayServer(address: draft) == nil {
+                        Text("Enter a hostname and optional port, without a URL path.")
+                            .foregroundStyle(.red).font(.footnote)
+                    }
+                    if address != RelayServer.defaultAddress {
+                        Button("Use PocketDesk Relay") { save(RelayServer.defaultAddress) }
+                    }
                 }
             } header: { Text("Relay server") } footer: {
-                Text("Use the same hostname as your Mac. The server needs a valid TLS certificate. Screen, audio and controls stay encrypted between your devices.")
+                Text("Local connections are tried first. Relay status updates when you connect to your Mac. Use the same relay on both devices.")
             }
         }
         .navigationTitle("Remote Access")
-        .onAppear { draft = address }
+        .onAppear {
+            if address.isEmpty { address = RelayServer.defaultAddress }
+            draft = address
+        }
+        .onChange(of: address) { copied = false }
+    }
+    private func save(_ value: String) {
+        address = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = address
+        custom = false
+        controller.relaySettingsChanged()
     }
 }

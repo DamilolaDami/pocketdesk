@@ -4,6 +4,18 @@ import Testing
 @testable import PDProtocol
 
 struct RelayTests {
+    @Test func hostedDefaultPreservesCustomConfiguration() throws {
+        let name = "relay-default-test-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        #expect(RelayServer.savedAddress(in: defaults) == RelayServer.defaultAddress)
+        defaults.set("  ", forKey: RelayServer.addressKey)
+        #expect(RelayServer.savedAddress(in: defaults) == RelayServer.defaultAddress)
+        defaults.set("custom.example:5443", forKey: RelayServer.addressKey)
+        #expect(RelayServer.savedAddress(in: defaults) == "custom.example:5443")
+        #expect(!defaults.bool(forKey: RelayServer.enabledKey))
+    }
+
     @Test func sharedRustFixturesRoundTripAndFrame() throws {
         let url = try #require(
             Bundle.module.url(forResource: "relay-messages", withExtension: "json", subdirectory: "Fixtures"))

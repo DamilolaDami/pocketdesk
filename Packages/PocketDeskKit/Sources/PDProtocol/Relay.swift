@@ -94,7 +94,7 @@ public enum RelayMessage: Sendable, Equatable, Codable {
 
 public enum RelayWireError: Error, Sendable { case invalidPacket }
 
-/// Explicit self-hosted endpoint. An empty address means relay access is disabled.
+/// Validated relay endpoint. Remote access is enabled separately from the saved address.
 public struct RelayServer: Sendable, Equatable, Codable {
     public let host: String
     public let port: UInt16
@@ -112,6 +112,11 @@ public struct RelayServer: Sendable, Equatable, Codable {
         else { return nil }
         self.host = host.hasPrefix("[") ? String(host.dropFirst().dropLast()) : host
         self.port = UInt16(url.port ?? 4433)
+    }
+    public static let defaultAddress = "relay.pocketdesk.runmira.dev:4433"
+    public static func savedAddress(in defaults: UserDefaults = .standard) -> String {
+        let value = defaults.string(forKey: addressKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? defaultAddress : value
     }
     public static let addressKey = "PocketDesk.relayAddress"
     public static let enabledKey = "PocketDesk.relayEnabled"

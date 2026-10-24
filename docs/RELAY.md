@@ -1,6 +1,6 @@
 # Relay: reaching your Mac away from home
 
-Status: **design, not started.** This is the plan for roadmap item v1.0 "Anywhere". It covers how
+Status: **forwarding server implemented; app integration not started.** This is the plan for roadmap item v1.0 "Anywhere". It covers how
 the relay works, what it can and can't see, what has to change in the apps, and the steps to
 ship it. The checklist at the end tracks progress.
 
@@ -121,7 +121,7 @@ The relay forwards **UDP datagrams**, not decrypted data, much like a TURN serve
 - On the Mac, the agent's **shim** delivers those datagrams to the normal `QUICHostListener`
   through a loopback UDP socket, one per relayed phone. To the listener it's an ordinary peer,
   so pinning, the TLS gate and `HostSession` all work unchanged.
-- A forwarding port only accepts packets from the address that first used it, and it closes
+- A forwarding port requires a random allocation token and locks to the first valid sender, and it closes
   when the session ends or after 60 seconds idle.
 
 Why not let the relay terminate TLS and re-encrypt? Because then it could read and inject input
@@ -213,8 +213,10 @@ apps use the internet") must describe the relay, as it already promises.
 
 ## Server
 
-- **Language:** Rust with `quinn`, or Go with `quic-go`. Both are mature QUIC stacks. Pick one in
-  the spike, based on how easily each forwards raw UDP alongside QUIC.
+- **Language:** Rust with `quinn` (selected). The forwarding server is in `Services/relay`.
+  Its README specifies the implemented version-1 wire contract, token-bound forwarding and
+  packet fragmentation. The messages in the protocol section describe the wider target design; candidate
+  exchange and native app integration are not implemented yet.
 - **Hosting:** small instances in a few regions (for example on Fly.io, near users), with the
   apps picking the nearest by latency.
 - **State:** in memory per instance. Macs connect to their nearest instance, and instances share
@@ -257,12 +259,13 @@ apps use the internet") must describe the relay, as it already promises.
 
 - [ ] Send UDP from a `NetworkListener`'s bound port, or settle on the shim-owned port.
 - [ ] Check whether Network.framework's QUIC migrates a session when the phone changes network.
-- [ ] Pick the server stack (`quinn` or `quic-go`) with a 200-line forwarding prototype.
+- [x] Select Rust/Quinn and implement a tested local forwarding server.
 
 ### Phase 2: forwarding relay (works everywhere)
 
 - [ ] `Relay` message types in `PDProtocol`, with JSON fixtures shared with the server.
-- [ ] Relay server: registration, allow lists, `connect`, `allocate`, UDP forwarding, limits.
+- [x] Relay server: registration, allow lists, `connect`, `allocate`, UDP forwarding, limits.
+  See `Services/relay/README.md` for the implemented contract and remaining deployment work.
 - [ ] `RelayAgent` on the Mac: register, keep alive, publish the allow list on every pairing change.
 - [ ] Forwarding shim on the Mac: one loopback socket per relayed phone into `QUICHostListener`.
 - [ ] `PathFinder` on the phone: Bonjour first, then forwarded relay.

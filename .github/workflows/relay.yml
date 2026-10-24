@@ -1,0 +1,23 @@
+name: Relay
+on:
+  push:
+    branches: [main]
+    paths: ['Services/relay/**', '.github/workflows/relay.yml']
+  pull_request:
+    paths: ['Services/relay/**', '.github/workflows/relay.yml']
+permissions:
+  contents: read
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Services/relay
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings

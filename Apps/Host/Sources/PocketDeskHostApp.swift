@@ -19,6 +19,13 @@ struct PocketDeskHostApp: App {
             PairingWindow(controller: controller)
         }
         .windowResizability(.contentSize)
+
+        Window("Welcome to PocketDesk", id: OnboardingWindow.id) {
+            OnboardingWindow(controller: controller)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(UserDefaults.standard.bool(forKey: OnboardingWindow.finishedKey) ? .suppressed : .presented)
     }
 
     init() {

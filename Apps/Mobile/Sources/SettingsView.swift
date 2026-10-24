@@ -290,13 +290,12 @@ private struct SettingsLabel: View {
 private struct AboutHeader: View {
     var body: some View {
         VStack(spacing: 10) {
-            Image(systemName: "iphone.and.arrow.forward.inward")
-                .font(.system(size: 30, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 68, height: 68)
-                .background(LinearGradient(colors: [Brand.accent, .purple.opacity(0.85)],
-                                           startPoint: .topLeading, endPoint: .bottomTrailing),
-                            in: .rect(cornerRadius: 16, style: .continuous))
+            // The app icon's artwork, rounded like the Home Screen does it.
+            Image("AppIconArtwork")
+                .resizable()
+                .frame(width: 72, height: 72)
+                .clipShape(.rect(cornerRadius: 16, style: .continuous))
+                .accessibilityHidden(true)
             Text("PocketDesk").font(.title2.weight(.bold))
             Text("Version \(AppInfo.version) · Open source").font(.subheadline).foregroundStyle(.secondary)
         }

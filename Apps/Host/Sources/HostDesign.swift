@@ -7,17 +7,15 @@ enum HostBrand {
                                          startPoint: .topLeading, endPoint: .bottomTrailing)
 }
 
-/// The app glyph: a phone in a gradient circle.
+/// The app's own icon.
 struct AppGlyph: View {
     var size: CGFloat = 34
-    var symbol = "iphone"
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size * 0.48, weight: .semibold))
-            .foregroundStyle(.white)
+        Image(nsImage: NSApplication.shared.applicationIconImage)
+            .resizable()
             .frame(width: size, height: size)
-            .background(HostBrand.gradient, in: .circle)
+            .accessibilityHidden(true)
     }
 }
 

@@ -9,6 +9,8 @@ struct PairingWindow: View {
     private static let inviteLifetime: TimeInterval = 300
 
     let controller: HostController
+    /// Inside the welcome window, which has its own padding.
+    var compact = false
     @State private var opened = false
     @State private var openedAt = Date.now
     @State private var copied = false
@@ -30,7 +32,7 @@ struct PairingWindow: View {
                 ProgressView().frame(height: 300)
             }
         }
-        .padding(28)
+        .padding(compact ? 8 : 28)
         .frame(width: 420)
         .animation(.smooth, value: state.invite?.token)
         .animation(.smooth, value: state.pendingApprovals.first?.id)
@@ -41,7 +43,7 @@ struct PairingWindow: View {
     private func inviteView(_ invite: PairingInvite) -> some View {
         VStack(spacing: 20) {
             VStack(spacing: 6) {
-                AppGlyph(size: 44, symbol: "qrcode")
+                if !compact { AppGlyph(size: 56) }
                 Text("Pair your iPhone").font(.title2.weight(.bold))
                 Text("Open PocketDesk on your iPhone, tap this Mac, then scan the code.")
                     .font(.callout)

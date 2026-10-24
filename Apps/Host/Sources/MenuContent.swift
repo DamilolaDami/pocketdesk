@@ -72,7 +72,7 @@ struct MenuContent: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            AppGlyph(symbol: state.connected.isEmpty ? "iphone" : "iphone.radiowaves.left.and.right")
+            AppGlyph(size: 38)
             VStack(alignment: .leading, spacing: 2) {
                 Text("PocketDesk").font(.headline)
                 HStack(spacing: 6) {
@@ -140,6 +140,10 @@ struct MenuContent: View {
                     }
                 }
                 Divider()
+                Button("Show Welcome…") {
+                    openWindow(id: OnboardingWindow.id)
+                    NSApplication.shared.activate()
+                }
                 Button("Quit PocketDesk") { NSApplication.shared.terminate(nil) }
                     .keyboardShortcut("q")
             } label: {

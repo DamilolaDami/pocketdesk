@@ -1,7 +1,6 @@
 import { useRef } from "react";
 import { motion, useScroll, useTransform } from "motion/react";
-import { smoothLink } from "../smooth.js";
-import { AppleIcon, Phone, DOWNLOAD, ease } from "../ui.jsx";
+import { AppleIcon, Phone, DOWNLOAD, TESTFLIGHT, ease } from "../ui.jsx";
 
 const stagger = { hidden: {}, show: { transition: { staggerChildren: 0.09, delayChildren: 0.15 } } };
 const rise = {
@@ -71,8 +70,8 @@ export function Hero() {
             <motion.a className="button button-light" href={DOWNLOAD} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
               <AppleIcon /> Download for Mac
             </motion.a>
-            <motion.a className="button button-glass" href="#get" onClick={smoothLink} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-              Get the iPhone app
+            <motion.a className="button button-glass" href={TESTFLIGHT} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
+              Get the iPhone beta
             </motion.a>
           </motion.div>
           <motion.p className="fineprint" variants={rise}>Free and open source · macOS 26 and iOS 26</motion.p>

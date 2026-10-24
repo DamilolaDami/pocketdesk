@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Reveal, ease } from "../ui.jsx";
+import { Reveal, TESTFLIGHT, ease } from "../ui.jsx";
 
 const SETUP = [
   ["Install PocketDesk on your Mac", "Download it, drag it to Applications and open it. It walks you through two permissions and lives in your menu bar."],
-  ["Get the iPhone app", "PocketDesk for iPhone is in beta on TestFlight. Ask for an invite on GitHub."],
+  ["Get the iPhone app", <>PocketDesk for iPhone is in beta. <a className="text-link" href={TESTFLIGHT}>Join on TestFlight.</a></>],
   ["Scan the code", "Your Mac shows a code; your iPhone scans it. You confirm the same six digits on both, once."],
 ];
 

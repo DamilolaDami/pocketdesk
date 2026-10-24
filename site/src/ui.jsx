@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 export const ease = [0.22, 1, 0.36, 1];
 // Always the newest notarized DMG: each release uploads it as PocketDesk.dmg.
 export const DOWNLOAD = "https://github.com/DamilolaDami/pocketdesk/releases/latest/download/PocketDesk.dmg";
+export const TESTFLIGHT = "https://testflight.apple.com/join/bQbCmDK7";
 export const REPO = "https://github.com/DamilolaDami/pocketdesk";
 
 // Fades and lifts its content in the first time it scrolls into view.

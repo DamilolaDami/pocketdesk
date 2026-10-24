@@ -4,8 +4,8 @@ import UIKit
 
 @MainActor enum AppInfo {
     static let repository = URL(string: "https://github.com/DamilolaDami/pocketdesk")!
-    /// The website, published from `site/` to GitHub Pages.
-    static let website = URL(string: "https://damiloladami.github.io/pocketdesk/")!
+    /// The website, published from `site/` to GitHub Pages under this domain.
+    static let website = URL(string: "https://pocketdesk.runmira.dev/")!
     static let privacyPolicy = website.appending(path: "privacy.html")
     static let terms = website.appending(path: "terms.html")
 

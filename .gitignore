@@ -9,3 +9,4 @@ xcuserdata/
 
 # Personal signing (see Config/Signing.xcconfig).
 Config/Local.xcconfig
+Config/Release.xcconfig

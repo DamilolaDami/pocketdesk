@@ -1,0 +1,14 @@
+// Release signing: copy to Config/Release.xcconfig (git-ignored) and fill in your own.
+// scripts/release-ios.sh and scripts/release-mac.sh pass it to xcodebuild with -xcconfig.
+//
+// The Apple team that ships PocketDesk (Xcode › Settings › Accounts shows its Team ID).
+DEVELOPMENT_TEAM = ABCDE12345
+// Every identifier hangs off this: <prefix>.app (iPhone), .app.widgets, .app.share,
+// group.<prefix>.app, and <prefix>.host (Mac).
+BUNDLE_ID_PREFIX = com.example.pocketdesk
+// The notarytool keychain profile (see docs/RELEASING.md); read by release-mac.sh only.
+NOTARY_PROFILE = pocketdesk-notary
+// An App Store Connect API key (Users and Access › Integrations › Team Keys) for uploading.
+// Its .p8 goes in ~/.appstoreconnect/private_keys/AuthKey_<id>.p8, never in the repo.
+ASC_KEY_ID = ABCDE12345
+ASC_ISSUER_ID = 00000000-0000-0000-0000-000000000000

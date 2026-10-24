@@ -2,7 +2,7 @@ import PDProtocol
 import SwiftUI
 import UIKit
 
-enum AppInfo {
+@MainActor enum AppInfo {
     static let repository = URL(string: "https://github.com/DamilolaDami/pocketdesk")!
 
     static var version: String {

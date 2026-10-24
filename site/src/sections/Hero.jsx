@@ -64,8 +64,8 @@ export function Hero() {
             Your Mac,<br /><em>in your pocket.</em>
           </motion.h1>
           <motion.p className="lede" variants={rise}>
-            See it, touch it, type on it, play its music and send it files, from the sofa or the
-            next room. Straight from your iPhone to your Mac, encrypted end to end.
+            See it, touch it, type on it, play its music and send it files, from the sofa, the
+            next room or across town. Encrypted end to end between your iPhone and your Mac.
           </motion.p>
           <motion.div className="cta-row" variants={rise}>
             <motion.a className="button button-light" href={DOWNLOAD} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>

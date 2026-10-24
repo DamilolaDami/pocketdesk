@@ -1,11 +1,17 @@
 # Relay (not started)
 
-Phase 2. Lets the phone reach the Mac when they're not on the same network.
+Lets a paired iPhone reach its Mac when they're not on the same network. The full design,
+including the protocol, security model and step-by-step plan, is in
+[docs/RELAY.md](../../docs/RELAY.md).
 
-- Rendezvous: both devices register with their pinned public keys; the relay brokers a
-  direct QUIC path (UDP hole punching) and only forwards bytes when that fails.
-- Forwarded traffic is already end-to-end encrypted between the paired devices, so the relay
-  sees ciphertext only.
-- Candidate stack: Rust (quinn) or Go (quic-go), deployed on Fly.io near users.
-- Reuses the wire format in `Packages/PocketDeskKit/Sources/PDProtocol`; keep that module
-  free of Apple frameworks so it can be mirrored or code-generated for the server.
+In short:
+
+- Both devices connect to the relay with their existing device certificates. The Mac publishes
+  which iPhones may reach it, and the relay only introduces those.
+- The relay helps them connect directly (hole punching), and forwards packets only when that
+  fails.
+- The iPhone and Mac keep their normal QUIC session, end to end encrypted with pinned keys, so
+  the relay only ever handles ciphertext.
+- Candidate stack: Rust (`quinn`) or Go (`quic-go`), deployed near users. The relay protocol's
+  types live in `Packages/PocketDeskKit/Sources/PDProtocol`, which stays free of Apple
+  frameworks so this server can mirror it.

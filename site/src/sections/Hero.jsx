@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { motion, useScroll, useTransform } from "motion/react";
 import { smoothLink } from "../smooth.js";
-import { AppleIcon, Phone, RELEASES, ease } from "../ui.jsx";
+import { AppleIcon, Phone, DOWNLOAD, ease } from "../ui.jsx";
 
 const stagger = { hidden: {}, show: { transition: { staggerChildren: 0.09, delayChildren: 0.15 } } };
 const rise = {
@@ -68,7 +68,7 @@ export function Hero() {
             next room. Straight from your iPhone to your Mac, encrypted end to end.
           </motion.p>
           <motion.div className="cta-row" variants={rise}>
-            <motion.a className="button button-light" href={RELEASES} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
+            <motion.a className="button button-light" href={DOWNLOAD} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
               <AppleIcon /> Download for Mac
             </motion.a>
             <motion.a className="button button-glass" href="#get" onClick={smoothLink} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>

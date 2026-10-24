@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { AppleIcon, RELEASES, Reveal } from "../ui.jsx";
+import { AppleIcon, DOWNLOAD, Reveal } from "../ui.jsx";
 
 export function Closing() {
   return (
@@ -12,7 +12,7 @@ export function Closing() {
         Ready to leave<br /><em>the desk?</em>
       </Reveal>
       <Reveal delay={0.12}>
-        <motion.a className="button button-primary button-big" href={RELEASES} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
+        <motion.a className="button button-primary button-big" href={DOWNLOAD} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
           <AppleIcon /> Download PocketDesk for free
         </motion.a>
         <p className="fineprint">Free · macOS 26 or later · iPhone beta on TestFlight</p>

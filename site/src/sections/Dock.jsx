@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useMotionValueEvent, useScroll } from "motion/react";
-import { AppleIcon, RELEASES, ease } from "../ui.jsx";
+import { AppleIcon, DOWNLOAD, ease } from "../ui.jsx";
 
 // The download pill that rides along the bottom once the hero's own button is gone,
 // and steps aside for the closing section's.
@@ -25,7 +25,7 @@ export function Dock() {
           exit={{ y: 120, opacity: 0 }}
           transition={{ duration: 0.55, ease }}
         >
-          <motion.a href={RELEASES} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} tabIndex={-1}>
+          <motion.a href={DOWNLOAD} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} tabIndex={-1}>
             <AppleIcon /> Download PocketDesk for free
           </motion.a>
         </motion.div>

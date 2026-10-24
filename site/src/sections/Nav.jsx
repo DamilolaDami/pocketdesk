@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useMotionValueEvent, useScroll } from "motion/react";
 import { smoothLink } from "../smooth.js";
-import { AppleIcon, RELEASES, REPO, ease } from "../ui.jsx";
+import { AppleIcon, DOWNLOAD, REPO, ease } from "../ui.jsx";
 
 const LINKS = [
   ["#how", "How it works"],
@@ -42,7 +42,7 @@ export function Nav({ home = "" }) {
         {scrolled && (
           <motion.a
             className="nav-download"
-            href={RELEASES}
+            href={DOWNLOAD}
             initial={{ opacity: 0, y: -10, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.96 }}

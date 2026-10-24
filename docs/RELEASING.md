@@ -43,6 +43,13 @@ scripts/release-mac.sh   # archive, sign with Developer ID, DMG, notarize and st
 - `release-mac.sh --no-notarize` stops after signing, for checking the DMG.
 - Everything lands in `.build/release/`. The Mac DMG is
   `PocketDesk-<version>-<build>.dmg`.
+- Publish the DMG as a GitHub release, uploaded as `PocketDesk.dmg`. The website's Download
+  buttons link to `releases/latest/download/PocketDesk.dmg`, so that name has to stay the same:
+
+  ```sh
+  cp .build/release/PocketDesk-<version>-<build>.dmg /tmp/PocketDesk.dmg
+  gh release create v<version> /tmp/PocketDesk.dmg --title "PocketDesk <version>" --notes "…"
+  ```
 
 ## What gets signed how
 

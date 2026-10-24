@@ -63,12 +63,14 @@ impl State {
 }
 pub struct Relay {
     bind: IpAddr,
+    forward_ports: Option<std::ops::RangeInclusive<u16>>,
     state: Mutex<State>,
 }
 impl Relay {
-    pub fn new(bind: IpAddr) -> Self {
+    pub fn new(bind: IpAddr, forward_ports: Option<std::ops::RangeInclusive<u16>>) -> Self {
         Self {
             bind,
+            forward_ports,
             state: Mutex::new(State::default()),
         }
     }
@@ -276,6 +278,24 @@ impl Relay {
         }
         Ok(())
     }
+    async fn bind_forward_socket(&self) -> std::io::Result<UdpSocket> {
+        if let Some(ports) = &self.forward_ports {
+            for port in ports.clone() {
+                match UdpSocket::bind(SocketAddr::new(self.bind, port)).await {
+                    Ok(socket) => return Ok(socket),
+                    Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::AddrInUse,
+                "forwarding port pool exhausted",
+            ))
+        } else {
+            UdpSocket::bind(SocketAddr::new(self.bind, 0)).await
+        }
+    }
+
     async fn allocate(
         self: &Arc<Self>,
         fp: &str,
@@ -283,8 +303,33 @@ impl Relay {
         out: &Outbox,
         id: Uuid,
     ) -> anyhow::Result<()> {
-        // Bind before taking the state lock; recheck ownership and authorization after awaiting.
-        let socket = Arc::new(UdpSocket::bind(SocketAddr::new(self.bind, 0)).await?);
+        // Reject unknown/foreign sessions before consuming any pool capacity. Authorization
+        // is checked again after binding because revocation can race with the await.
+        {
+            let state = self.state.lock().unwrap();
+            let authorized = state.sessions.get(&id).is_some_and(|s| {
+                s.phone == fp
+                    && s.owner == conn.stable_id()
+                    && s.allocation.is_none()
+                    && state
+                        .hosts
+                        .get(&s.host)
+                        .is_some_and(|h| h.allowed.contains(fp))
+            });
+            if !authorized {
+                out.try_send(Message::NotFound)?;
+                return Ok(());
+            }
+        }
+        let socket = match self.bind_forward_socket().await {
+            Ok(socket) => Arc::new(socket),
+            Err(_) => {
+                out.try_send(Message::Error {
+                    reason: "forwardingCapacity".into(),
+                })?;
+                return Ok(());
+            }
+        };
         let port = socket.local_addr()?.port();
         let token = Uuid::new_v4();
         let mut state = self.state.lock().unwrap();
@@ -456,6 +501,21 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn fixed_forwarding_pool_is_bounded_and_reuses_released_ports() {
+        let occupied = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let address = occupied.local_addr().unwrap();
+        let relay = Relay::new(address.ip(), Some(address.port()..=address.port()));
+        assert_eq!(
+            relay.bind_forward_socket().await.unwrap_err().kind(),
+            std::io::ErrorKind::AddrInUse
+        );
+        drop(occupied);
+        let allocated = relay.bind_forward_socket().await.unwrap();
+        assert_eq!(allocated.local_addr().unwrap().port(), address.port());
+        assert!(relay.bind_forward_socket().await.is_err());
+    }
+
+    #[tokio::test]
     async fn quic_forwarding_authorization_revocation_and_disconnect() {
         let (cert, key) = identity();
         let endpoint = quinn::Endpoint::server(
@@ -464,7 +524,7 @@ mod tests {
         )
         .unwrap();
         let addr = endpoint.local_addr().unwrap();
-        let relay = Arc::new(Relay::new(addr.ip()));
+        let relay = Arc::new(Relay::new(addr.ip(), None));
         let r = relay.clone();
         let accept = tokio::spawn(async move {
             while let Some(incoming) = endpoint.accept().await {

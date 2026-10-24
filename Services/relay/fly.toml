@@ -1,0 +1,243 @@
+# Run from Services/relay: fly deploy --ha=false
+# Create one dedicated IPv4 and a 1GB relay_certs volume in lhr before deployment.
+app = "pocketdesk-relay-dami"
+primary_region = "lhr"
+kill_signal = "SIGINT"
+kill_timeout = "25s"
+
+[deploy]
+  strategy = "immediate"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  RELAY_HOSTNAME = "relay.posketdesk.app"
+  RELAY_FORWARD_PORTS = "50000-50031"
+  RELAY_MAX_CONNECTIONS = "256"
+
+[[mounts]]
+  source = "relay_certs"
+  destination = "/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"
+
+# Keep the single stateful relay running; never auto-scale or auto-stop it.
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+[checks.relay]
+  type = "http"
+  port = 8081
+  path = "/healthz"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "300s"
+
+[[services]]
+  protocol = "udp"
+  internal_port = 4433
+  [[services.ports]]
+    port = 4433
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50000
+  [[services.ports]]
+    port = 50000
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50001
+  [[services.ports]]
+    port = 50001
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50002
+  [[services.ports]]
+    port = 50002
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50003
+  [[services.ports]]
+    port = 50003
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50004
+  [[services.ports]]
+    port = 50004
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50005
+  [[services.ports]]
+    port = 50005
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50006
+  [[services.ports]]
+    port = 50006
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50007
+  [[services.ports]]
+    port = 50007
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50008
+  [[services.ports]]
+    port = 50008
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50009
+  [[services.ports]]
+    port = 50009
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50010
+  [[services.ports]]
+    port = 50010
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50011
+  [[services.ports]]
+    port = 50011
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50012
+  [[services.ports]]
+    port = 50012
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50013
+  [[services.ports]]
+    port = 50013
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50014
+  [[services.ports]]
+    port = 50014
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50015
+  [[services.ports]]
+    port = 50015
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50016
+  [[services.ports]]
+    port = 50016
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50017
+  [[services.ports]]
+    port = 50017
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50018
+  [[services.ports]]
+    port = 50018
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50019
+  [[services.ports]]
+    port = 50019
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50020
+  [[services.ports]]
+    port = 50020
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50021
+  [[services.ports]]
+    port = 50021
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50022
+  [[services.ports]]
+    port = 50022
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50023
+  [[services.ports]]
+    port = 50023
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50024
+  [[services.ports]]
+    port = 50024
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50025
+  [[services.ports]]
+    port = 50025
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50026
+  [[services.ports]]
+    port = 50026
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50027
+  [[services.ports]]
+    port = 50027
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50028
+  [[services.ports]]
+    port = 50028
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50029
+  [[services.ports]]
+    port = 50029
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50030
+  [[services.ports]]
+    port = 50030
+
+[[services]]
+  protocol = "udp"
+  internal_port = 50031
+  [[services.ports]]
+    port = 50031

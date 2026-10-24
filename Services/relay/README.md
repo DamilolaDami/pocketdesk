@@ -114,3 +114,10 @@ The Mac uses a separate unadvertised, packet-bounded QUIC listener for relayed s
 with the same HostService handlers and a pinned-only TLS gate. The LAN listener retains its
 existing settings. Cellular/NAT and physical-device verification remain outstanding.
 This is a single-instance implementation, not a production launch.
+
+## Fly.io
+
+See [deploy/FLY.md](deploy/FLY.md) and `fly.toml`. The container includes automatic public
+certificate management and non-disruptive certificate reloads. Use `--forward-ports START-END`
+to keep allocations inside the public UDP port pool; omit it for direct hosts with unrestricted
+ephemeral ports. `--listen` accepts a hostname, including Fly's `fly-global-services` alias.

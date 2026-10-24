@@ -30,25 +30,12 @@ enum SettingsKey {
     static let keyBarFunction = "keyBarFunction"
 }
 
+/// The top level: one row per area, like the Settings app. Each area has its own page.
 struct SettingsView: View {
     let controller: SessionController
     let hosts: [DiscoveredHost]
     @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
-    @AppStorage(SettingsKey.startInLandscape) private var startInLandscape = false
-    @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
-    @AppStorage(SettingsKey.streamAudio) private var streamAudio = true
-    @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
-    @AppStorage(SettingsKey.haptics) private var haptics = true
-    @AppStorage(SettingsKey.trackpad) private var trackpad = false
-    @AppStorage(SettingsKey.autoConnect) private var autoConnect = false
     @AppStorage(SettingsKey.streamQuality) private var quality = StreamQuality.best
-    @AppStorage(SettingsKey.relockAfter) private var relockAfter: Double = 0
-    @AppStorage(SettingsKey.hideInSwitcher) private var hideInSwitcher = true
-    @AppStorage(SettingsKey.keyboardOnOpen) private var keyboardOnOpen = false
-    @AppStorage(SettingsKey.keyBarEditing) private var keyBarEditing = true
-    @AppStorage(SettingsKey.keyBarNavigation) private var keyBarNavigation = true
-    @AppStorage(SettingsKey.keyBarFunction) private var keyBarFunction = true
-    @State private var showingSiri = false
     @AppStorage(RelayServer.enabledKey) private var relayEnabled = false
     @AppStorage(RelayServer.addressKey) private var relayAddress = RelayServer.defaultAddress
 
@@ -61,223 +48,368 @@ struct SettingsView: View {
                     .listRowBackground(Color.clear)
 
                 Section {
-                    Picker(selection: $defaultMacID) {
-                        Text("Last Used").tag("")
-                        ForEach(paired.filter { $0.hostID != nil }) { mac in
-                            Text(mac.name).tag(mac.hostID!.uuidString)
-                        }
+                    NavigationLink {
+                        MacsSettingsPage(controller: controller, paired: paired)
                     } label: {
-                        SettingsLabel("Run On", symbol: "laptopcomputer", color: Brand.accent)
+                        row("Macs", symbol: "laptopcomputer", color: Brand.accent,
+                            value: paired.isEmpty ? "None" : "\(paired.count)")
                     }
-                    Button {
-                        showingSiri = true
-                    } label: {
-                        HStack {
-                            SettingsLabel("Siri & Shortcuts", symbol: "waveform", color: .purple)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .foregroundStyle(.primary)
-                } header: {
-                    Text("Shortcuts")
-                } footer: {
-                    Text("Run On is the Mac a shortcut connects to when you're not already streaming.")
-                }
-
-                Section {
-                    Picker(selection: $quality) {
-                        ForEach(StreamQuality.allCases, id: \.self) { Text($0.name).tag($0) }
-                    } label: {
-                        SettingsLabel("Quality", symbol: "sparkles.tv.fill", color: .purple)
-                    }
-                    .onChange(of: quality) { controller.qualityChanged() }
-                } header: {
-                    Text("Picture")
-                } footer: {
-                    Text("Best keeps text sharp when you zoom in. Battery Saver lowers resolution and frame rate to save battery and data, and is used automatically in Low Power Mode.")
-                }
-
-                Section {
                     NavigationLink {
                         RelaySettingsView(controller: controller, pairedCount: paired.count)
                     } label: {
-                        HStack {
-                            SettingsLabel("Remote Access", symbol: "globe", color: Brand.accent)
-                            Spacer()
-                            Text(relayEnabled && RelayServer(address: relayAddress) != nil ? "On" : "Off")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } header: { Text("Connection") }
-
-                Section("Streaming") {
-                    Toggle(isOn: $streamAudio) {
-                        SettingsLabel("Play Mac Audio", symbol: "speaker.wave.2.fill", color: .blue)
-                    }
-                    .onChange(of: streamAudio) { _, enabled in controller.audioEnabled = enabled }
-                    Toggle(isOn: $shareClipboard) {
-                        SettingsLabel("Share Clipboard", symbol: "doc.on.clipboard.fill", color: .indigo)
-                    }
-                    .onChange(of: shareClipboard) { _, enabled in controller.clipboardEnabled = enabled }
-                    Toggle(isOn: $autoConnect) {
-                        SettingsLabel("Open Last Mac at Launch", symbol: "bolt.horizontal.fill", color: .green)
-                    }
-                    Toggle(isOn: $trackpad) {
-                        SettingsLabel("Trackpad Mode", symbol: "cursorarrow", color: .gray)
-                    }
-                    Toggle(isOn: $startInLandscape) {
-                        SettingsLabel("Start in Landscape", symbol: "rectangle.landscape.rotate", color: .orange)
-                    }
-                    Toggle(isOn: $showStreamInfo) {
-                        SettingsLabel("Show Stream Info", symbol: "info.circle.fill", color: .teal)
-                    }
-                    Toggle(isOn: $haptics) {
-                        SettingsLabel("Haptics", symbol: "iphone.radiowaves.left.and.right", color: .pink)
+                        row("Remote Access", symbol: "globe", color: .blue,
+                            value: relayEnabled && RelayServer(address: relayAddress) != nil ? "On" : "Off")
                     }
                 }
 
                 Section {
-                    Toggle(isOn: Binding(get: { allLocked },
-                                         set: { locked in Task { await controller.setAllLocked(locked) } })) {
-                        SettingsLabel("Lock All Macs", symbol: DeviceOwner.symbol, color: .green)
-                    }
-                    .disabled(paired.isEmpty)
-                    Picker(selection: $relockAfter) {
-                        Text("Immediately").tag(0.0)
-                        Text("After 1 Minute").tag(60.0)
-                        Text("After 5 Minutes").tag(300.0)
-                        Text("After 15 Minutes").tag(900.0)
+                    NavigationLink {
+                        StreamingSettingsPage(controller: controller)
                     } label: {
-                        SettingsLabel("Lock Again", symbol: "timer", color: .orange)
-                    }
-                    Toggle(isOn: $hideInSwitcher) {
-                        SettingsLabel("Hide Mac in App Switcher", symbol: "eye.slash.fill", color: .gray)
-                    }
-                } header: {
-                    Text("Privacy & Security")
-                } footer: {
-                    Text("A locked Mac asks for \(DeviceOwner.method) before it's used. Lock Again is how long PocketDesk can be in the background before it asks again. Lock a single Mac from its page below.")
-                }
-
-                Section {
-                    Toggle(isOn: $keyboardOnOpen) {
-                        SettingsLabel("Show Keyboard on Open", symbol: "keyboard.fill", color: .blue)
-                    }
-                    Toggle(isOn: $keyBarEditing) {
-                        SettingsLabel("Undo, Cut, Copy, Paste", symbol: "scissors", color: .indigo)
-                    }
-                    Toggle(isOn: $keyBarNavigation) {
-                        SettingsLabel("Home, End, Page Keys", symbol: "arrow.up.to.line", color: .teal)
-                    }
-                    Toggle(isOn: $keyBarFunction) {
-                        SettingsLabel("Function Keys", symbol: "fn", color: .gray)
-                    }
-                } header: {
-                    Text("Keyboard")
-                } footer: {
-                    Text("Choose what the bar above the keyboard shows. Esc, Tab, ⌃ ⌥ ⇧ ⌘ and the arrows are always there.")
-                }
-
-                Section {
-                    if paired.isEmpty {
-                        Text("No Macs paired yet.").foregroundStyle(.secondary)
-                    }
-                    ForEach(paired) { mac in
-                        NavigationLink {
-                            if let hostID = mac.hostID { MacSettingsView(controller: controller, hostID: hostID) }
-                        } label: {
-                            HStack(spacing: 12) {
-                                MacGlyph(kind: mac.kind, size: 30, status: mac.glyphStatus)
-                                Text(mac.name)
-                                if mac.isLocked {
-                                    Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text(mac.isOnline ? "Online" : mac.canWake ? "Asleep" : "Offline")
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .swipeActions {
-                            Button("Forget", systemImage: "trash", role: .destructive) { forget(mac) }
-                        }
-                    }
-                } header: {
-                    Text("Paired Macs")
-                } footer: {
-                    if !paired.isEmpty { Text("Tap a Mac to rename it, lock it or see its security key.") }
-                }
-
-                Section("About") {
-                    LabeledContent {
-                        Text(UIDevice.current.name)
-                    } label: {
-                        SettingsLabel("This iPhone", symbol: "iphone", color: .gray)
-                    }
-                    LabeledContent {
-                        Text("TLS 1.3, pinned keys")
-                    } label: {
-                        SettingsLabel("Encryption", symbol: "lock.shield.fill", color: .green)
+                        row("Streaming", symbol: "play.rectangle.fill", color: .purple, value: quality.name)
                     }
                     NavigationLink {
-                        HowItsBuiltView()
+                        KeyboardSettingsPage()
                     } label: {
-                        SettingsLabel("How It's Built", symbol: "cpu.fill", color: Brand.accent)
+                        SettingsLabel("Keyboard", symbol: "keyboard.fill", color: .gray)
                     }
                     NavigationLink {
-                        PrivacyView()
+                        ShortcutsSettingsPage(controller: controller, paired: paired)
                     } label: {
-                        SettingsLabel("Privacy", symbol: "hand.raised.fill", color: .blue)
+                        row("Shortcuts & Siri", symbol: "waveform", color: .pink, value: runOnName)
                     }
                     NavigationLink {
-                        LicensesView()
+                        PrivacySettingsPage(controller: controller, paired: paired)
                     } label: {
-                        SettingsLabel("Licences", symbol: "doc.text.fill", color: .gray)
+                        SettingsLabel("Privacy & Security", symbol: "hand.raised.fill", color: .green)
                     }
-                    Link(destination: AppInfo.terms) {
-                        externalRow("Terms of Use", symbol: "doc.plaintext.fill", color: .teal)
-                    }
-                    .foregroundStyle(.primary)
-                    Link(destination: AppInfo.repository) {
-                        externalRow("Source Code", symbol: "chevron.left.forwardslash.chevron.right", color: .indigo)
-                    }
-                    .foregroundStyle(.primary)
                 }
 
                 Section {
+                    NavigationLink {
+                        AboutSettingsPage()
+                    } label: {
+                        SettingsLabel("About", symbol: "info.circle.fill", color: .gray)
+                    }
                     Link(destination: AppInfo.reportProblemURL) {
                         externalRow("Report a Problem", symbol: "ladybug.fill", color: .red)
                     }
                     .foregroundStyle(.primary)
                 } footer: {
-                    Text("Opens a new issue on GitHub with the app, protocol and iOS versions filled in. Nothing else about you or your Macs is included.")
+                    Text("Report a Problem opens a new issue on GitHub with the app, protocol and iOS versions filled in. Nothing else about you or your Macs is included.")
                 }
             }
             .scrollContentBackground(.hidden)
             .background { AppBackground() }
             .navigationTitle("Settings")
-            .sheet(isPresented: $showingSiri) {
-                SiriSettingsSheet(shortcuts: controller.store.shortcuts)
-                    .presentationDetents([.medium, .large])
-            }
         }
     }
 
-    private var allLocked: Bool { !paired.isEmpty && paired.allSatisfy(\.isLocked) }
+    /// The Mac shortcuts run on, for the row's value.
+    private var runOnName: String {
+        paired.first { $0.hostID?.uuidString == defaultMacID }?.name ?? "Last Used"
+    }
 
-    private func externalRow(_ title: String, symbol: String, color: Color) -> some View {
+    private func row(_ title: String, symbol: String, color: Color, value: String) -> some View {
         HStack {
             SettingsLabel(title, symbol: symbol, color: color)
             Spacer()
-            Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            Text(value).foregroundStyle(.secondary).lineLimit(1)
         }
+    }
+}
+
+/// A row that opens outside the app, with the arrow that says so.
+private func externalRow(_ title: String, symbol: String, color: Color) -> some View {
+    HStack {
+        SettingsLabel(title, symbol: symbol, color: color)
+        Spacer()
+        Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+    }
+}
+
+private extension View {
+    /// The look every settings page shares.
+    func settingsPage(_ title: String) -> some View {
+        scrollContentBackground(.hidden)
+            .background { AppBackground() }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// The paired Macs: tap one to rename, lock or check it; swipe to forget.
+private struct MacsSettingsPage: View {
+    let controller: SessionController
+    let paired: [DiscoveredHost]
+    @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
+
+    var body: some View {
+        Form {
+            Section {
+                if paired.isEmpty {
+                    Text("No Macs paired yet.").foregroundStyle(.secondary)
+                }
+                ForEach(paired) { mac in
+                    NavigationLink {
+                        if let hostID = mac.hostID { MacSettingsView(controller: controller, hostID: hostID) }
+                    } label: {
+                        HStack(spacing: 12) {
+                            MacGlyph(kind: mac.kind, size: 30, status: mac.glyphStatus)
+                            Text(mac.name)
+                            if mac.isLocked {
+                                Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(mac.isOnline ? "Online" : mac.canWake ? "Asleep" : "Offline")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .swipeActions {
+                        Button("Forget", systemImage: "trash", role: .destructive) { forget(mac) }
+                    }
+                }
+            } footer: {
+                if !paired.isEmpty { Text("Tap a Mac to rename it, lock it or see its security key. Swipe left to forget it.") }
+            }
+        }
+        .settingsPage("Macs")
     }
 
     private func forget(_ mac: DiscoveredHost) {
         if mac.hostID?.uuidString == defaultMacID { defaultMacID = "" }
         controller.forget(mac)
+    }
+}
+
+/// How the stream looks, sounds and behaves.
+private struct StreamingSettingsPage: View {
+    let controller: SessionController
+    @AppStorage(SettingsKey.streamQuality) private var quality = StreamQuality.best
+    @AppStorage(SettingsKey.streamAudio) private var streamAudio = true
+    @AppStorage(SettingsKey.shareClipboard) private var shareClipboard = true
+    @AppStorage(SettingsKey.autoConnect) private var autoConnect = false
+    @AppStorage(SettingsKey.trackpad) private var trackpad = false
+    @AppStorage(SettingsKey.startInLandscape) private var startInLandscape = false
+    @AppStorage(SettingsKey.showStreamInfo) private var showStreamInfo = true
+    @AppStorage(SettingsKey.haptics) private var haptics = true
+
+    var body: some View {
+        Form {
+            Section {
+                Picker(selection: $quality) {
+                    ForEach(StreamQuality.allCases, id: \.self) { Text($0.name).tag($0) }
+                } label: {
+                    SettingsLabel("Quality", symbol: "sparkles.tv.fill", color: .purple)
+                }
+                .onChange(of: quality) { controller.qualityChanged() }
+            } header: {
+                Text("Picture")
+            } footer: {
+                Text("Best keeps text sharp when you zoom in. Battery Saver lowers resolution and frame rate to save battery and data, and is used automatically in Low Power Mode.")
+            }
+
+            Section("Sound and Clipboard") {
+                Toggle(isOn: $streamAudio) {
+                    SettingsLabel("Play Mac Audio", symbol: "speaker.wave.2.fill", color: .blue)
+                }
+                .onChange(of: streamAudio) { _, enabled in controller.audioEnabled = enabled }
+                Toggle(isOn: $shareClipboard) {
+                    SettingsLabel("Share Clipboard", symbol: "doc.on.clipboard.fill", color: .indigo)
+                }
+                .onChange(of: shareClipboard) { _, enabled in controller.clipboardEnabled = enabled }
+            }
+
+            Section("When Streaming") {
+                Toggle(isOn: $autoConnect) {
+                    SettingsLabel("Open Last Mac at Launch", symbol: "bolt.horizontal.fill", color: .green)
+                }
+                Toggle(isOn: $trackpad) {
+                    SettingsLabel("Trackpad Mode", symbol: "cursorarrow", color: .gray)
+                }
+                Toggle(isOn: $startInLandscape) {
+                    SettingsLabel("Start in Landscape", symbol: "rectangle.landscape.rotate", color: .orange)
+                }
+                Toggle(isOn: $showStreamInfo) {
+                    SettingsLabel("Show Stream Info", symbol: "info.circle.fill", color: .teal)
+                }
+                Toggle(isOn: $haptics) {
+                    SettingsLabel("Haptics", symbol: "iphone.radiowaves.left.and.right", color: .pink)
+                }
+            }
+        }
+        .settingsPage("Streaming")
+    }
+}
+
+/// The keyboard and the bar of Mac keys above it.
+private struct KeyboardSettingsPage: View {
+    @AppStorage(SettingsKey.keyboardOnOpen) private var keyboardOnOpen = false
+    @AppStorage(SettingsKey.keyBarEditing) private var keyBarEditing = true
+    @AppStorage(SettingsKey.keyBarNavigation) private var keyBarNavigation = true
+    @AppStorage(SettingsKey.keyBarFunction) private var keyBarFunction = true
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: $keyboardOnOpen) {
+                    SettingsLabel("Show Keyboard on Open", symbol: "keyboard.fill", color: .blue)
+                }
+            }
+            Section {
+                Toggle(isOn: $keyBarEditing) {
+                    SettingsLabel("Undo, Cut, Copy, Paste", symbol: "scissors", color: .indigo)
+                }
+                Toggle(isOn: $keyBarNavigation) {
+                    SettingsLabel("Home, End, Page Keys", symbol: "arrow.up.to.line", color: .teal)
+                }
+                Toggle(isOn: $keyBarFunction) {
+                    SettingsLabel("Function Keys", symbol: "fn", color: .gray)
+                }
+            } header: {
+                Text("Key Bar")
+            } footer: {
+                Text("Choose what the bar above the keyboard shows. Esc, Tab, ⌃ ⌥ ⇧ ⌘ and the arrows are always there.")
+            }
+        }
+        .settingsPage("Keyboard")
+    }
+}
+
+/// Which Mac shortcuts run on, and running them from outside the app.
+private struct ShortcutsSettingsPage: View {
+    let controller: SessionController
+    let paired: [DiscoveredHost]
+    @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
+    @State private var showingSiri = false
+
+    var body: some View {
+        Form {
+            Section {
+                Picker(selection: $defaultMacID) {
+                    Text("Last Used").tag("")
+                    ForEach(paired.filter { $0.hostID != nil }) { mac in
+                        Text(mac.name).tag(mac.hostID!.uuidString)
+                    }
+                } label: {
+                    SettingsLabel("Run On", symbol: "laptopcomputer", color: Brand.accent)
+                }
+            } footer: {
+                Text("Run On is the Mac a shortcut connects to when you're not already streaming.")
+            }
+            Section {
+                Button {
+                    showingSiri = true
+                } label: {
+                    HStack {
+                        SettingsLabel("Siri & Shortcuts", symbol: "waveform", color: .purple)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .foregroundStyle(.primary)
+            } footer: {
+                Text("Run your shortcuts with Siri, from widgets and from Control Center.")
+            }
+        }
+        .settingsPage("Shortcuts & Siri")
+        .sheet(isPresented: $showingSiri) {
+            SiriSettingsSheet(shortcuts: controller.store.shortcuts)
+                .presentationDetents([.medium, .large])
+        }
+    }
+}
+
+/// Face ID locks, and keeping the Mac's picture out of the app switcher.
+private struct PrivacySettingsPage: View {
+    let controller: SessionController
+    let paired: [DiscoveredHost]
+    @AppStorage(SettingsKey.relockAfter) private var relockAfter: Double = 0
+    @AppStorage(SettingsKey.hideInSwitcher) private var hideInSwitcher = true
+
+    private var allLocked: Bool { !paired.isEmpty && paired.allSatisfy(\.isLocked) }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: Binding(get: { allLocked },
+                                     set: { locked in Task { await controller.setAllLocked(locked) } })) {
+                    SettingsLabel("Lock All Macs", symbol: DeviceOwner.symbol, color: .green)
+                }
+                .disabled(paired.isEmpty)
+                Picker(selection: $relockAfter) {
+                    Text("Immediately").tag(0.0)
+                    Text("After 1 Minute").tag(60.0)
+                    Text("After 5 Minutes").tag(300.0)
+                    Text("After 15 Minutes").tag(900.0)
+                } label: {
+                    SettingsLabel("Lock Again", symbol: "timer", color: .orange)
+                }
+            } footer: {
+                Text("A locked Mac asks for \(DeviceOwner.method) before it's used. Lock Again is how long PocketDesk can be in the background before it asks again. Lock a single Mac from its page in Macs.")
+            }
+            Section {
+                Toggle(isOn: $hideInSwitcher) {
+                    SettingsLabel("Hide Mac in App Switcher", symbol: "eye.slash.fill", color: .gray)
+                }
+            } footer: {
+                Text("Covers your Mac's screen in the app switcher's snapshot.")
+            }
+        }
+        .settingsPage("Privacy & Security")
+    }
+}
+
+/// This iPhone, how PocketDesk is built and secured, and its legal pages.
+private struct AboutSettingsPage: View {
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent {
+                    Text(UIDevice.current.name)
+                } label: {
+                    SettingsLabel("This iPhone", symbol: "iphone", color: .gray)
+                }
+                LabeledContent {
+                    Text("\(AppInfo.version) (\(AppInfo.build))")
+                } label: {
+                    SettingsLabel("Version", symbol: "number", color: .gray)
+                }
+                LabeledContent {
+                    Text("TLS 1.3, pinned keys")
+                } label: {
+                    SettingsLabel("Encryption", symbol: "lock.shield.fill", color: .green)
+                }
+            }
+            Section {
+                NavigationLink {
+                    HowItsBuiltView()
+                } label: {
+                    SettingsLabel("How It's Built", symbol: "cpu.fill", color: Brand.accent)
+                }
+                NavigationLink {
+                    PrivacyView()
+                } label: {
+                    SettingsLabel("Privacy", symbol: "hand.raised.fill", color: .blue)
+                }
+                NavigationLink {
+                    LicensesView()
+                } label: {
+                    SettingsLabel("Licences", symbol: "doc.text.fill", color: .gray)
+                }
+                Link(destination: AppInfo.terms) {
+                    externalRow("Terms of Use", symbol: "doc.plaintext.fill", color: .teal)
+                }
+                .foregroundStyle(.primary)
+                Link(destination: AppInfo.repository) {
+                    externalRow("Source Code", symbol: "chevron.left.forwardslash.chevron.right", color: .indigo)
+                }
+                .foregroundStyle(.primary)
+            }
+        }
+        .settingsPage("About")
     }
 }
 

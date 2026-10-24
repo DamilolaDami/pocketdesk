@@ -75,7 +75,8 @@ export function Shortcuts() {
         a widget or Control Center.
       </Reveal>
 
-      <div className="shortcut-row">
+      <p className="swipe-hint label">Swipe to explore <span aria-hidden="true">→</span></p>
+      <div className="shortcut-row" role="region" aria-label="Shortcut examples" tabIndex={0}>
         {PHONES.map((p, i) => (
           <motion.figure
             key={p.src}

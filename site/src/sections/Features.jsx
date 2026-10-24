@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { Reveal, ease } from "../ui.jsx";
 
 const icon = (d) => (
@@ -86,12 +86,13 @@ export function Features() {
 
 // A little segmented control that cycles on its own, to show the three quality modes.
 function QualityPicker() {
+  const reducedMotion = useReducedMotion();
   const options = ["Best", "Balanced", "Battery Saver"];
   return (
     <div className="quality" aria-hidden="true">
       <motion.span
         className="quality-thumb"
-        animate={{ x: ["0%", "100%", "200%", "100%", "0%"] }}
+        animate={reducedMotion ? { x: 0 } : { x: ["0%", "100%", "200%", "100%", "0%"] }}
         transition={{ duration: 9, ease, repeat: Infinity, times: [0, 0.25, 0.5, 0.75, 1] }}
       />
       {options.map((o) => <span key={o}>{o}</span>)}

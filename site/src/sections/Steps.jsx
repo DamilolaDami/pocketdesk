@@ -31,9 +31,9 @@ export function Steps() {
   const [active, setActive] = useState(0);
   const { scrollY } = useScroll();
   useMotionValueEvent(scrollY, "change", () => {
-    // On a phone the pinned phone covers the top of the screen, so read lower down.
-    const narrow = window.matchMedia("(max-width: 900px)").matches;
-    const line = window.innerHeight * (narrow ? 0.78 : 0.5);
+    // Touch layouts show each screenshot next to its own copy instead of a pinned stage.
+    if (window.matchMedia("(max-width: 900px)").matches) return;
+    const line = window.innerHeight * 0.5;
     let nearest = 0;
     let best = Infinity;
     items.current.forEach((el, i) => {
@@ -64,6 +64,7 @@ export function Steps() {
               <span className="step-num">0{i + 1}</span>
               <h3>{step.title}</h3>
               <p>{step.text}</p>
+              <div className="step-mobile-shot"><Phone src={step.src} alt={step.alt} /></div>
             </li>
           ))}
         </ol>

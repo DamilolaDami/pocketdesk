@@ -1,4 +1,4 @@
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 
 export const ease = [0.22, 1, 0.36, 1];
 // Always the newest notarized DMG: each release uploads it as PocketDesk.dmg.
@@ -8,10 +8,11 @@ export const REPO = "https://github.com/DamilolaDami/pocketdesk";
 
 // Fades and lifts its content in the first time it scrolls into view.
 export function Reveal({ as = "div", delay = 0, y = 28, children, ...rest }) {
+  const reducedMotion = useReducedMotion();
   const Tag = motion[as];
   return (
     <Tag
-      initial={{ opacity: 0, y }}
+      initial={reducedMotion ? false : { opacity: 0, y }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-80px" }}
       transition={{ duration: 0.9, ease, delay }}
@@ -35,12 +36,13 @@ export function Phone({ src, alt = "", landscape = false, eager = false, classNa
 
 // An endless horizontal strip. The items are doubled so the loop has no seam.
 export function Marquee({ items, render, reverse = false, duration = 40 }) {
+  const reducedMotion = useReducedMotion();
   const doubled = [...items, ...items];
   return (
     <div className="marquee">
       <motion.div
         className="marquee-track"
-        animate={{ x: reverse ? ["-50%", "0%"] : ["0%", "-50%"] }}
+        animate={reducedMotion ? { x: 0 } : { x: reverse ? ["-50%", "0%"] : ["0%", "-50%"] }}
         transition={{ duration, ease: "linear", repeat: Infinity }}
       >
         {doubled.map((item, i) => (

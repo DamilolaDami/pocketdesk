@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { useId, useState } from "react";
+import { motion } from "motion/react";
 import { Reveal, TESTFLIGHT, ease } from "../ui.jsx";
 
 const SETUP = [
@@ -18,25 +18,16 @@ const FAQ = [
 
 function Question({ q, a }) {
   const [open, setOpen] = useState(false);
+  const id = useId();
   return (
     <div className={`faq-item ${open ? "open" : ""}`}>
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button type="button" id={`${id}-question`} aria-expanded={open} aria-controls={`${id}-answer`} onClick={() => setOpen(!open)}>
         {q}
-        <motion.span className="faq-plus" animate={{ rotate: open ? 45 : 0 }} transition={{ duration: 0.35, ease }}>+</motion.span>
+        <span className="faq-plus" aria-hidden="true">+</span>
       </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            className="faq-answer"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.45, ease }}
-          >
-            <p>{a}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div id={`${id}-answer`} className="faq-answer" role="region" aria-labelledby={`${id}-question`} aria-hidden={!open}>
+        <div className="faq-answer-inner"><p>{a}</p></div>
+      </div>
     </div>
   );
 }

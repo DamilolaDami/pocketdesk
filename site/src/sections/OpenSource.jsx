@@ -5,7 +5,7 @@ const STACK = ["Swift 6", "SwiftUI", "QUIC", "HEVC", "ScreenCaptureKit", "TLS 1.
 
 export function OpenSource() {
   return (
-    <section className="open">
+    <section className="open-source">
       <Reveal as="p" className="label">Open source</Reveal>
       <Reveal as="h2" className="section-title" delay={0.05}>Built in the open.</Reveal>
       <Reveal as="p" className="intro" delay={0.1}>

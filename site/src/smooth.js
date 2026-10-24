@@ -7,7 +7,8 @@ let lenis = null;
 
 export function useSmoothScroll() {
   useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // Keep native scrolling on touch devices and when reduced motion is requested.
+    if (!window.matchMedia("(min-width: 901px) and (pointer: fine) and (prefers-reduced-motion: no-preference)").matches) return;
     lenis = new Lenis({ lerp: 0.09 });
     let frame;
     const raf = (time) => {
@@ -28,8 +29,9 @@ export function scrollToTarget(target) {
     lenis.scrollTo(target, { offset: typeof target === "number" ? 0 : -72, duration: 1.4 });
     return;
   }
-  if (typeof target === "number") window.scrollTo({ top: target, behavior: "smooth" });
-  else document.querySelector(target)?.scrollIntoView({ behavior: "smooth" });
+  const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+  if (typeof target === "number") window.scrollTo({ top: target, behavior });
+  else document.querySelector(target)?.scrollIntoView({ behavior });
 }
 
 // For in-page links: <a href="#features" onClick={smoothLink}>.

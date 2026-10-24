@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Reveal, ease } from "../ui.jsx";
 
 const POINTS = [
@@ -28,9 +28,10 @@ const GLOBE = icon(<><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 1
 
 // Packets flowing along a link: dots that slide across and fade at the ends.
 function Link({ active, delay = 0 }) {
+  const reducedMotion = useReducedMotion();
   return (
     <span className={`ra-link ${active ? "on" : ""}`} aria-hidden="true">
-      {active &&
+      {active && !reducedMotion &&
         [0, 1, 2].map((i) => (
           <motion.i
             key={i}
@@ -44,12 +45,14 @@ function Link({ active, delay = 0 }) {
 }
 
 export function RemoteAccess() {
+  const reducedMotion = useReducedMotion();
   // The diagram alternates between the two ways a session runs.
   const [away, setAway] = useState(false);
   useEffect(() => {
+    if (reducedMotion) return;
     const timer = setInterval(() => setAway((a) => !a), 4200);
     return () => clearInterval(timer);
-  }, []);
+  }, [reducedMotion]);
 
   return (
     <section className="remote" id="remote">

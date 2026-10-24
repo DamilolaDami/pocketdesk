@@ -63,18 +63,18 @@ export function Hero() {
             Your Mac,<br /><em>in your pocket.</em>
           </motion.h1>
           <motion.p className="lede" variants={rise}>
-            See it, touch it, type on it, play its music and send it files, from the sofa, the
-            next room or across town. Encrypted end to end between your iPhone and your Mac.
+            Your Mac’s screen, sound and shortcuts, right on your iPhone.
+            From the sofa or across town, encrypted end to end.
           </motion.p>
           <motion.div className="cta-row" variants={rise}>
-            <motion.a className="button button-light" href={DOWNLOAD} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
+            <motion.a className="button button-light cta-mac" href={DOWNLOAD} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
               <AppleIcon /> Download for Mac
             </motion.a>
-            <motion.a className="button button-glass" href={TESTFLIGHT} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
+            <motion.a className="button button-glass cta-iphone" href={TESTFLIGHT} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
               Get the iPhone beta
             </motion.a>
           </motion.div>
-          <motion.p className="fineprint" variants={rise}>Free and open source · macOS 26 and iOS 26</motion.p>
+          <motion.p className="fineprint" variants={rise}>Free & open source <span aria-hidden="true">·</span> No account needed<br />Requires a Mac and iPhone running macOS 26 / iOS 26</motion.p>
         </motion.div>
 
         <motion.div className="hero-devices" style={{ y: devicesY, rotate: devicesRotate }}>

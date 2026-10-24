@@ -1,0 +1,19 @@
+{
+    http_port 8080
+    https_port 8443
+    auto_https disable_redirects
+    servers {
+        protocols h1 h2
+    }
+}
+
+# Only HTTP-01 challenges use the public TCP port. Quinn loads the resulting cert/key;
+# Caddy never terminates or proxies PocketDesk's QUIC control or end-to-end session.
+{$RELAY_HOSTNAME} {
+    tls {
+        issuer acme https://acme-v02.api.letsencrypt.org/directory {
+            disable_tlsalpn_challenge
+        }
+    }
+    respond "PocketDesk relay certificate manager" 200
+}

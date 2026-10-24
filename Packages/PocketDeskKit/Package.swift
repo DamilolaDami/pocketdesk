@@ -29,7 +29,7 @@ let package = Package(
         // iOS client: session state machine, discovery, decode, render.
         .target(name: "PDClientCore", dependencies: ["PDProtocol", "PDSecurity", "PDTransport"]),
 
-        .testTarget(name: "PDProtocolTests", dependencies: ["PDProtocol"]),
+        .testTarget(name: "PDProtocolTests", dependencies: ["PDProtocol"], resources: [.copy("Fixtures")]),
         .testTarget(name: "PDSecurityTests", dependencies: ["PDSecurity"]),
         .testTarget(name: "PDTransportTests", dependencies: ["PDTransport"]),
         // Also runs the phone's file transfers against a real host session.

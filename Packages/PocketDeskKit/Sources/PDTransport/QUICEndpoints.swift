@@ -9,8 +9,8 @@ enum QUICOptions {
     ///
     /// Both sides use `.required`: with `.none` the validator is skipped entirely, and a phone
     /// would accept any Mac's certificate.
-    static func make(identity: DeviceIdentity, validate: @escaping @Sendable (Fingerprint) async -> Bool) -> QUIC {
-        QUIC(alpn: [alpn])
+    static func make(identity: DeviceIdentity, maxUDPPayloadSize: Int? = nil, validate: @escaping @Sendable (Fingerprint) async -> Bool) -> QUIC {
+        var quic = QUIC(alpn: [alpn])
             .idleTimeout(15_000)
             .maxDatagramFrameSize(1_200)
             .tls.localIdentity(identity.secIdentity)
@@ -19,6 +19,8 @@ enum QUICOptions {
                 guard let fingerprint = Fingerprint(trust: trust) else { return false }
                 return await validate(fingerprint)
             }
+        if let maxUDPPayloadSize { quic = quic.maxUDPPayloadSize(maxUDPPayloadSize) }
+        return quic
     }
 }
 
@@ -41,14 +43,17 @@ public final class QUICHostListener: Sendable {
     /// - Parameter authorize: called during each TLS handshake with the phone's certificate
     ///   fingerprint. Return `true` for pinned phones, and for anyone while a pairing invite
     ///   is open (the session must then present the invite token before anything else).
-    public init(identity: DeviceIdentity, advertise advertisement: Advertisement?,
+    public init(identity: DeviceIdentity, advertise advertisement: Advertisement?, maxUDPPayloadSize: Int? = nil, loopbackOnly: Bool = false,
                 authorize: @escaping @Sendable (Fingerprint) async -> Bool) throws {
-        let quic = QUICOptions.make(identity: identity, validate: authorize)
+        let quic = QUICOptions.make(identity: identity, maxUDPPayloadSize: maxUDPPayloadSize, validate: authorize)
         if let advertisement {
             var fields = ["id": advertisement.hostID.uuidString, "v": String(protocolVersion)]
             if let kind = advertisement.kind { fields["k"] = kind.rawValue }
             let txt = NWTXTRecord(fields)
             listener = try NetworkListener(for: .bonjour(name: advertisement.name, type: bonjourServiceType, txtRecord: txt)) { quic }
+        } else if loopbackOnly {
+            listener = try NetworkListener(using: .parameters { quic }
+                .localEndpoint(.hostPort(host: "127.0.0.1", port: .any)))
         } else {
             listener = try NetworkListener { quic }
         }
@@ -80,9 +85,9 @@ public enum QUICClient {
     /// Throws if the connection fails or isn't ready within `timeout`. Network.framework
     /// otherwise keeps a rejected handshake (e.g. an impostor host) in `.waiting` forever.
     public static func connect(to endpoint: NWEndpoint, identity: DeviceIdentity, host: Fingerprint,
-                               timeout: Duration = .seconds(10),
+                               timeout: Duration = .seconds(10), maxUDPPayloadSize: Int? = nil,
                                _ body: @escaping @Sendable (QUICPeerSession) async throws -> Void) async throws {
-        let quic = QUICOptions.make(identity: identity) { $0 == host }
+        let quic = QUICOptions.make(identity: identity, maxUDPPayloadSize: maxUDPPayloadSize) { $0 == host }
         try await withNetworkConnection(to: endpoint, using: { quic }) { connection in
             let states = AsyncStream<NetworkChannel<QUIC>.State>.makeStream()
             connection.onStateUpdate { _, state in states.continuation.yield(state) }

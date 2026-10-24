@@ -35,6 +35,16 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           security default-keychain -s "$KEYCHAIN"
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the Quinn relay
+        run: cargo build --locked --manifest-path Services/relay/Cargo.toml
+
+      - name: Test Apple QUIC through Quinn
+        run: |
+          POCKETDESK_RELAY_BINARY="$GITHUB_WORKSPACE/Services/relay/target/debug/pocketdesk-relay" \
+            swift test --package-path Packages/PocketDeskKit --filter RelayIntegrationTests
+
       # Screen-capture tests skip themselves: the runner has no Screen Recording permission.
       - name: Test PocketDeskKit
         working-directory: Packages/PocketDeskKit

@@ -9,6 +9,7 @@ import Synchronization
 
 /// What a connection reports to `SessionController`.
 public enum ClientEvent: Sendable, Equatable {
+    case path(ConnectionPath)
     /// Pairing: show this code; the person at the Mac must accept the same one.
     case awaitingApproval(code: String)
     case paired(PairedPeer)
@@ -53,7 +54,9 @@ public enum ClientError: Error, Sendable, Equatable, CustomStringConvertible {
 /// control messages and input until either side ends it.
 public actor ClientConnection {
     public struct Request: Sendable {
-        public var endpoint: NWEndpoint
+        public var endpoint: NWEndpoint?
+        public var relay: RelayServer?
+        public var findLocal: (@Sendable () async -> NWEndpoint?)?
         public var hostFingerprint: Fingerprint
         /// Set when pairing; the token and host fingerprint come from the scanned invite.
         public var invite: PairingInvite?
@@ -64,9 +67,11 @@ public actor ClientConnection {
         public var clipboardEnabled: Bool
         public var quality: StreamQuality
 
-        public init(endpoint: NWEndpoint, hostFingerprint: Fingerprint, invite: PairingInvite?,
+        public init(endpoint: NWEndpoint?, hostFingerprint: Fingerprint, invite: PairingInvite?,
                     deviceName: String, viewport: Viewport, audioEnabled: Bool = true, preferredDisplayID: String? = nil,
-                    clipboardEnabled: Bool = true, quality: StreamQuality = .best) {
+                    clipboardEnabled: Bool = true, quality: StreamQuality = .best, relay: RelayServer? = nil, findLocal: (@Sendable () async -> NWEndpoint?)? = nil) {
+            self.findLocal = findLocal
+            self.relay = invite == nil ? relay : nil
             self.quality = quality
             self.clipboardEnabled = clipboardEnabled
             self.endpoint = endpoint
@@ -112,7 +117,10 @@ public actor ClientConnection {
         let playbackID = display.beginSession(audioEnabled: request.audioEnabled)
         defer { display.endSession(playbackID) }
         do {
-            try await QUICClient.connect(to: request.endpoint, identity: identity, host: request.hostFingerprint) { session in
+            var local = request.endpoint
+            if local == nil, let find = request.findLocal { local = await find() }
+            try Task.checkCancellation()
+            try await PathFinder.connect(local: local, relay: request.relay, identity: identity, host: request.hostFingerprint, onPath: { [onEvent] in onEvent(.path($0)) }) { session in
                 try await self.drive(session, playbackID: playbackID)
             }
             Self.log.info("Session ended normally")
@@ -286,13 +294,13 @@ public enum CatalogUpdate: Sendable, Equatable {
 extension ClientConnection {
     /// A short connection with no video: lists the Mac's apps, then fetches icons for the
     /// bundle IDs `iconsWanted` picks from that list. Doesn't need Screen Recording on the Mac.
-    public static func catalog(endpoint: NWEndpoint, hostFingerprint: Fingerprint, identity: DeviceIdentity,
-                               deviceName: String,
+    public static func catalog(endpoint: NWEndpoint?, hostFingerprint: Fingerprint, identity: DeviceIdentity,
+                               deviceName: String, relay: RelayServer? = nil,
                                iconsWanted: @escaping @Sendable ([MacApp]) -> [String]) -> AsyncThrowingStream<CatalogUpdate, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+                    try await PathFinder.connect(local: endpoint, relay: relay, identity: identity, host: hostFingerprint, onPath: { _ in }) { session in
                         var control = session.controlMessages.makeAsyncIterator()
                         /// The next message that isn't housekeeping; a `bye` ends the fetch with its reason.
                         func next() async throws -> ControlMessage {
@@ -351,13 +359,13 @@ extension ClientConnection {
 
     /// The Mac's status as it changes, and a round-trip time every `pingInterval` (a Mac too
     /// old to answer pings just never sends one).
-    public static func watchStatus(endpoint: NWEndpoint, hostFingerprint: Fingerprint, identity: DeviceIdentity,
-                                   deviceName: String, pingInterval: Duration = .seconds(2))
+    public static func watchStatus(endpoint: NWEndpoint?, hostFingerprint: Fingerprint, identity: DeviceIdentity,
+                                   deviceName: String, pingInterval: Duration = .seconds(2), relay: RelayServer? = nil)
         -> AsyncThrowingStream<StatusUpdate, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+                    try await PathFinder.connect(local: endpoint, relay: relay, identity: identity, host: hostFingerprint, onPath: { _ in }) { session in
                         var control = session.controlMessages.makeAsyncIterator()
                         try await session.send(.hello(Hello(deviceName: deviceName, viewport: Viewport(width: 0, height: 0, scale: 1),
                                                             mode: .catalog)))
@@ -400,9 +408,9 @@ extension ClientConnection {
 extension ClientConnection {
     /// Runs one action without streaming (Siri, the Shortcuts app, widgets). Throws with the
     /// Mac's reason if it couldn't.
-    public static func perform(_ action: MacAction, endpoint: NWEndpoint, hostFingerprint: Fingerprint,
-                               identity: DeviceIdentity, deviceName: String) async throws {
-        try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+    public static func perform(_ action: MacAction, endpoint: NWEndpoint?, hostFingerprint: Fingerprint,
+                               identity: DeviceIdentity, deviceName: String, relay: RelayServer? = nil) async throws {
+        try await PathFinder.connect(local: endpoint, relay: relay, identity: identity, host: hostFingerprint, onPath: { _ in }) { session in
             var control = session.controlMessages.makeAsyncIterator()
             try await session.send(.hello(Hello(deviceName: deviceName, viewport: Viewport(width: 0, height: 0, scale: 1),
                                                 mode: .catalog)))
@@ -420,9 +428,9 @@ extension ClientConnection {
 extension ClientConnection {
     /// Puts `item` on the Mac's clipboard without streaming. Throws with the Mac's reason if it
     /// couldn't.
-    public static func paste(_ item: ClipboardItem, endpoint: NWEndpoint, hostFingerprint: Fingerprint,
-                             identity: DeviceIdentity, deviceName: String) async throws {
-        try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+    public static func paste(_ item: ClipboardItem, endpoint: NWEndpoint?, hostFingerprint: Fingerprint,
+                             identity: DeviceIdentity, deviceName: String, relay: RelayServer? = nil) async throws {
+        try await PathFinder.connect(local: endpoint, relay: relay, identity: identity, host: hostFingerprint, onPath: { _ in }) { session in
             var control = try await openQuietly(session, deviceName: deviceName)
             try await session.send(.clipboard(item))
             try await awaitDone(&control, on: session)
@@ -430,10 +438,10 @@ extension ClientConnection {
     }
 
     /// What's copied on the Mac, without streaming.
-    public static func copy(endpoint: NWEndpoint, hostFingerprint: Fingerprint, identity: DeviceIdentity,
-                            deviceName: String) async throws -> ClipboardItem {
+    public static func copy(endpoint: NWEndpoint?, hostFingerprint: Fingerprint, identity: DeviceIdentity,
+                            deviceName: String, relay: RelayServer? = nil) async throws -> ClipboardItem {
         let answer = Answer()
-        try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+        try await PathFinder.connect(local: endpoint, relay: relay, identity: identity, host: hostFingerprint, onPath: { _ in }) { session in
             var control = try await openQuietly(session, deviceName: deviceName)
             try await session.send(.getClipboard)
             while let message = try await control.next() {
@@ -519,15 +527,15 @@ public final class FilesConnection: Sendable {
 extension ClientConnection {
     /// Opens a connection with no picture for files (`FilesConnection`). Returns once the Mac
     /// has said hello.
-    public static func openFiles(endpoint: NWEndpoint, hostFingerprint: Fingerprint, identity: DeviceIdentity,
-                                 deviceName: String) async throws -> FilesConnection {
+    public static func openFiles(endpoint: NWEndpoint?, hostFingerprint: Fingerprint, identity: DeviceIdentity,
+                                 deviceName: String, relay: RelayServer? = nil) async throws -> FilesConnection {
         let (closed, closing) = AsyncStream<Void>.makeStream()
         let ready = OpeningFiles()
         return try await withCheckedThrowingContinuation { continuation in
             ready.continuation.withLock { $0 = continuation }
             let task = Task {
                 do {
-                    try await QUICClient.connect(to: endpoint, identity: identity, host: hostFingerprint) { session in
+                    try await PathFinder.connect(local: endpoint, relay: relay, identity: identity, host: hostFingerprint, onPath: { _ in }) { session in
                         let files = MacFiles(send: { try await session.send($0) }, sendChunk: { try await session.send(chunk: $0) })
                         try await session.send(.hello(Hello(deviceName: deviceName, viewport: Viewport(width: 0, height: 0, scale: 1),
                                                             mode: .catalog)))

@@ -143,6 +143,8 @@ public actor HostSession {
     /// A restart opens with a keyframe burst that isn't the link's fault: skip that window.
     private var settling = false
     static let minBitrateKbps = 800
+    /// How long a ping can go unanswered before the phone counts as gone.
+    static let lostAfter: Duration = .seconds(15)
     static let log = Logger(subsystem: "com.pocketdesk.host", category: "session")
 
     public init(session: any PeerSession, peer: Fingerprint, configuration: Configuration,
@@ -700,6 +702,12 @@ public actor HostSession {
             }
             try? await Task.sleep(for: configuration.adaptInterval)
             guard !Task.isCancelled else { return }
+            // The phone stopped answering. Over a relay the inner connection doesn't notice a
+            // vanished peer for a long time, and a session left running holds a relay slot.
+            if let pendingPing, ContinuousClock.now - pendingPing.sentAt > Self.lostAfter {
+                await end(reason: "Lost the connection to the iPhone.")
+                return
+            }
 
             // A pong that hasn't come back is at least as slow as the wait so far.
             if let pendingPing, ContinuousClock.now - pendingPing.sentAt > configuration.adaptInterval {

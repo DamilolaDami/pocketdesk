@@ -1,0 +1,11 @@
+[
+  {"type":"register","hostID":"00000000-0000-0000-0000-000000000001"},
+  {"type":"allow","fingerprints":["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]},
+  {"type":"connect","host":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
+  {"type":"incoming","phone":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","session":"00000000-0000-0000-0000-000000000002"},
+  {"type":"ready","session":"00000000-0000-0000-0000-000000000002"},
+  {"type":"allocate","session":"00000000-0000-0000-0000-000000000002"},
+  {"type":"forward","session":"00000000-0000-0000-0000-000000000002"},
+  {"type":"close","session":"00000000-0000-0000-0000-000000000002"},
+  {"type":"notFound"}, {"type":"error","reason":"sessionLimit"}, {"type":"ping"}, {"type":"pong"}
+]

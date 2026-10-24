@@ -4,6 +4,7 @@ import { Nav } from "./sections/Nav.jsx";
 import { Hero } from "./sections/Hero.jsx";
 import { Steps } from "./sections/Steps.jsx";
 import { Gallery } from "./sections/Gallery.jsx";
+import { RemoteAccess } from "./sections/RemoteAccess.jsx";
 import { Shortcuts } from "./sections/Shortcuts.jsx";
 import { Features } from "./sections/Features.jsx";
 import { Privacy } from "./sections/Privacy.jsx";
@@ -22,6 +23,7 @@ export default function App() {
         <Hero />
         <Steps />
         <Gallery />
+        <RemoteAccess />
         <Shortcuts />
         <Features />
         <Privacy />

@@ -57,6 +57,7 @@ One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 18), f
 
 Discovery: Bonjour `_pocketdesk._udp` on the LAN, TXT record `id=<hostID>`, `v=<protocolVersion>`.
 Off-LAN (phase 2): the relay brokers a direct path and only forwards traffic as a fallback.
+See [RELAY.md](RELAY.md) for the design.
 
 Connection lifetime is structured (that's how the new Network API works): a connection lives
 while `QUICHostListener.run`'s handler or `QUICClient.connect`'s body runs. `connect` fails
@@ -529,5 +530,6 @@ and pinning, never on obscurity.
 2. **v0.2 – Window picker**: stream one window fitted to the phone, app switcher UI.
 3. **v0.3 – Thumb UI**: read the frontmost app's menus/toolbar via AX APIs and render them as
    native controls. Menus done (protocol v14); toolbars to come.
-4. **v1.0 – Anywhere**: relay + hole punching, wake-on-LAN, subscription.
+4. **v1.0 – Anywhere**: relay + hole punching, wake-on-LAN, subscription. Design and checklist in
+   [RELAY.md](RELAY.md).
 5. **Later – Agent**: natural-language tasks executed on the Mac with a live view.

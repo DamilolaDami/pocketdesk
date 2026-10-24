@@ -46,7 +46,7 @@ struct HostListView: View {
                                     // Unlocking only opens the card (player, vitals, menu); streaming is
                                     // the next tap.
                                     if host.isOnline, host.needsUnlock { Task { await controller.unlock(host) } }
-                                    else if host.isOnline { controller.select(host) } else { controller.wake(host) }
+                                    else if host.isOnline || host.canRelay { controller.select(host) } else { controller.wake(host) }
                                 }
                                 // Lift the whole card, not just its button.
                                 .contentShape(.contextMenuPreview, .rect(cornerRadius: Brand.cornerRadius))
@@ -282,7 +282,7 @@ private struct PairedMacCard<Actions: View>: View {
             }
             .buttonStyle(.glassProminent)
             .tint(Brand.accent)
-            .disabled(host.needsUpdate != nil || (!host.isOnline && (!host.canWake || host.isWaking)))
+            .disabled(host.needsUpdate != nil || (!host.isOnline && !host.canRelay && (!host.canWake || host.isWaking)))
             if let hint {
                 Text(hint)
                     .font(.footnote)
@@ -304,13 +304,14 @@ private struct PairedMacCard<Actions: View>: View {
         switch host.needsUpdate {
         case .mac: return "This Mac has an older PocketDesk. Update it on the Mac to connect."
         case .phone: return "This Mac has a newer PocketDesk. Update this app to connect."
-        case nil: return !host.isOnline && !host.canWake ? "Open PocketDesk on this Mac once; then you can wake it from here." : nil
+        case nil: return !host.isOnline && !host.canRelay && !host.canWake ? "Open PocketDesk on this Mac once; then you can wake it from here." : nil
         }
     }
 
     private var state: (text: String, color: Color) {
         if host.needsUpdate != nil { ("Needs Update", .orange) }
         else if host.isOnline { ("Online", .secondary) }
+        else if host.canRelay { ("Not nearby · Relay configured", .secondary) }
         else if host.isWaking { ("Waking…", .orange) }
         else if host.canWake { ("Asleep", .indigo) }
         else { ("Offline", .secondary) }
@@ -320,6 +321,7 @@ private struct PairedMacCard<Actions: View>: View {
         if host.needsUpdate != nil { ("Update Needed", "arrow.down.circle") }
         else if host.isOnline, host.needsUnlock { ("Unlock", DeviceOwner.symbol) }
         else if host.isOnline { ("Use This Mac", "play.fill") }
+        else if host.canRelay { ("Connect via Relay", "network") }
         else if host.isWaking { ("Waking…", "power") }
         else if host.canWake { ("Wake & Use", "power") }
         else { ("Not Available", "moon.zzz") }

@@ -1,0 +1,50 @@
+# Run from Services/relay: fly deploy --ha=false
+# Create one dedicated IPv4 and a 1GB relay_certs volume in lhr before deployment.
+app = "pocketdesk-relay-dami"
+primary_region = "lhr"
+kill_signal = "SIGINT"
+kill_timeout = "25s"
+
+[deploy]
+  strategy = "immediate"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  RELAY_HOSTNAME = "relay.pocketdesk.runmira.dev"
+  RELAY_MAX_CONNECTIONS = "256"
+
+[[mounts]]
+  source = "relay_certs"
+  destination = "/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"
+
+# Keep the single stateful relay running; never auto-scale or auto-stop it.
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+[checks.relay]
+  type = "http"
+  port = 8081
+  path = "/healthz"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "300s"
+
+[[services]]
+  protocol = "udp"
+  internal_port = 4433
+  [[services.ports]]
+    port = 4433

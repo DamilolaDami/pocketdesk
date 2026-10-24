@@ -9,7 +9,8 @@ const SETUP = [
 ];
 
 const FAQ = [
-  ["Does it work away from home?", "Not yet. Your iPhone and Mac need to be on the same network for now. Reaching your Mac from anywhere is the next big thing we're working on."],
+  ["Does it work away from home?", "Yes, with Remote Access, now in beta. Pair at home, then turn it on on your Mac and your iPhone. When your Mac isn't nearby, PocketDesk connects through an encrypted relay that can't see your screen. Your Mac needs to be awake, with PocketDesk open."],
+  ["Can I run my own relay?", "Yes. The relay is open source: run it on your own server and enter its address under Remote Access on your Mac and your iPhone."],
   ["Why does it need Screen Recording and Accessibility?", "Screen Recording lets your iPhone see the screen; Accessibility lets your taps and typing become clicks and keystrokes. The picture only goes to iPhones you've paired, and only while one is connected."],
   ["Can it show Netflix or other films?", "The sound and controls work, but protected video shows as black. macOS keeps it out of every screen capture, and we wouldn't get around that."],
   ["What does it cost?", "Nothing. PocketDesk is free and open source."],

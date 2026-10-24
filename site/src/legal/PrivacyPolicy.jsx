@@ -4,7 +4,7 @@ import { REPO } from "../ui.jsx";
 export const UPDATED = "October 24, 2026";
 
 const SUMMARY = [
-  ["No account, no servers", "There's nothing to sign up for, and PocketDesk runs no servers. Your iPhone talks straight to your Mac."],
+  ["No account", "There's nothing to sign up for. At home your iPhone talks straight to your Mac; away, an optional relay passes along data it can't read."],
   ["Nothing is collected", "No analytics, no advertising, no tracking and no crash reporting of our own. We never see your data, so we can't sell or share it."],
   ["Encrypted end to end", "Everything between your iPhone and Mac is encrypted with TLS 1.3, and each side only trusts the device it paired with."],
   ["It stays on your devices", "What PocketDesk keeps, like paired Macs, keys, shortcuts and settings, is stored on your own iPhone and Mac."],
@@ -35,9 +35,10 @@ const SECTIONS = [
     body: (
       <>
         <p>
-          Nothing. PocketDesk has no accounts, no servers of its own, and no analytics, advertising or
-          tracking code. The apps don't send us information about you, your devices or how you use
-          them, and they include no third-party code that does.
+          No personal information. PocketDesk has no accounts and no analytics, advertising or
+          tracking code. The apps don't send us information about you or how you use them, and they
+          include no third-party code that does. The one service we run, the Remote Access relay,
+          handles only what it needs to connect your devices, as described <a href="#relay">below</a>.
         </p>
         <p>
           Because none of your information reaches us, we have nothing to sell, share, rent or hand
@@ -63,7 +64,8 @@ const SECTIONS = [
           <li><b>What helps the iPhone app show your Mac:</b> its name, whether it's awake, its battery level, its desktop picture, the menus of the app in front, its list of apps and their icons, its Shortcuts, what's playing, and the network details your iPhone needs to wake it from sleep.</li>
         </ul>
         <p>
-          All of it travels over your own network, encrypted with TLS 1.3. When you pair, both devices
+          At home it travels over your own network. With Remote Access on, it can also travel through
+          the relay described below. Either way it's encrypted with TLS 1.3. When you pair, both devices
           show the same six-digit code and remember each other's key. After that, each side only
           talks to the exact device it paired with, so someone else on the same Wi-Fi can't watch or
           join. Details are in our <a href={`${REPO}/blob/main/SECURITY.md`}>security notes</a>.
@@ -105,8 +107,9 @@ const SECTIONS = [
     body: (
       <>
         <p>
-          PocketDesk works on your local network and doesn't connect to any PocketDesk server. There's
-          one time the iPhone app reaches the internet on its own: when you make a shortcut for a
+          Apart from Remote Access (below), PocketDesk works on your local network and doesn't connect to
+          any PocketDesk server. There's one other time the iPhone app reaches the internet on its own:
+          when you make a shortcut for a
           website, it asks that website for its icon, the way a browser does, so the tile can show it.
           That website sees an ordinary request from your iPhone, including its IP address, and
           nothing about you or your Macs. The icon is then kept on your iPhone.
@@ -115,10 +118,35 @@ const SECTIONS = [
           When a shortcut opens a website, it opens on your Mac, in your Mac's browser. What happens
           there is between you and that website, under its own privacy policy.
         </p>
+      </>
+    ),
+  },
+  {
+    id: "relay",
+    title: "Remote Access and the relay",
+    body: (
+      <>
         <p>
-          We're working on a way to reach your Mac when you're away from home. If that needs a
-          service run by us, it will only pass along traffic that's already encrypted between your
-          devices, and we'll update this policy before it ships.
+          Remote Access lets you reach your Mac when it isn't on the same network as your iPhone. It's
+          off until you turn it on, on both devices. When it's on, your Mac keeps a connection to a
+          relay, and your iPhone connects through that relay when it can't find your Mac nearby.
+        </p>
+        <p>
+          The relay only passes sealed data between your two devices. Your screen, sound, typing,
+          clipboard and files stay encrypted end to end between your iPhone and your Mac, with the
+          keys they exchanged when you paired, so the relay can't read or change them.
+        </p>
+        <p>To connect your devices, the relay handles:</p>
+        <ul>
+          <li><b>Your devices' key fingerprints</b> and your Mac's ID, to know which device is which.</li>
+          <li><b>The list of iPhones each Mac allows,</b> so only your paired iPhones can reach it.</li>
+          <li><b>IP addresses,</b> to send data between your devices, and how much data passes, to enforce fair limits.</li>
+        </ul>
+        <p>
+          It keeps these in memory only while your devices are connected, and doesn't log devices,
+          addresses or content. PocketDesk's relay runs on Fly.io in London, which may keep standard
+          network logs as any host does. You can run your own relay instead: it's open source, and you
+          can enter its address under Remote Access on both devices.
         </p>
       </>
     ),
@@ -193,13 +221,14 @@ const SECTIONS = [
       <>
         <ul>
           <li><b>Forget a Mac</b> from its card on your iPhone to remove what PocketDesk kept about it.</li>
-          <li><b>Forget an iPhone</b> in PocketDesk's menu on your Mac to stop it connecting.</li>
+          <li><b>Forget an iPhone</b> in PocketDesk's menu on your Mac to stop it connecting, including through the relay.</li>
+          <li><b>Turn off Remote Access</b> on either device to stop using the relay.</li>
           <li><b>Turn off Share Clipboard</b> in Settings to stop sharing the clipboard automatically.</li>
           <li><b>Delete the apps</b> to remove everything they stored, apart from files you've sent to your Downloads folder.</li>
         </ul>
         <p>
-          Since we don't hold any of your information, there's nothing for us to look up, correct or
-          delete on our side. If you have a question about your privacy, we're still happy to help.
+          We don't store any of your information: the relay forgets your devices when they disconnect.
+          So there's nothing for us to look up, correct or delete on our side. If you have a question about your privacy, we're still happy to help.
         </p>
       </>
     ),

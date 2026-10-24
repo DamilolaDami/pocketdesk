@@ -1,0 +1,7 @@
+target
+*.pem
+*.key
+*.crt
+.env*
+
+**/__pycache__/

@@ -24,6 +24,8 @@ public struct DiscoveredHost: Sendable, Equatable, Identifiable, Hashable {
     public var isPaired: Bool
     /// `false` for a paired Mac that isn't advertising right now (asleep, app closed, away).
     public var isOnline: Bool
+    /// Relay is configured on this phone; availability is checked when connecting.
+    public var canRelay = false
     /// This phone knows how to wake it (it's connected before); what matters once it's offline.
     public var canWake: Bool
     /// Magic packets sent; it connects as soon as it shows up.

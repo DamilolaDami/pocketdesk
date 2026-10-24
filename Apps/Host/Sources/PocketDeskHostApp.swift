@@ -15,6 +15,11 @@ struct PocketDeskHostApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        Window("Remote Access", id: RelaySettingsWindow.id) {
+            RelaySettingsWindow(controller: controller)
+        }
+        .windowResizability(.contentSize)
+
         Window("Pair a Phone", id: PairingWindow.id) {
             PairingWindow(controller: controller)
         }

@@ -4,6 +4,10 @@ import UIKit
 
 @MainActor enum AppInfo {
     static let repository = URL(string: "https://github.com/DamilolaDami/pocketdesk")!
+    /// The website, published from `site/` to GitHub Pages.
+    static let website = URL(string: "https://damiloladami.github.io/pocketdesk/")!
+    static let privacyPolicy = website.appending(path: "privacy.html")
+    static let terms = website.appending(path: "terms.html")
 
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–"
@@ -85,6 +89,10 @@ struct PrivacyView: View {
                 }
             } footer: {
                 Text("PocketDesk is open source, so all of this can be checked in its code.")
+            }
+            Section {
+                Link("Full Privacy Policy", destination: AppInfo.privacyPolicy)
+                Link("Terms of Use", destination: AppInfo.terms)
             }
         }
         .scrollContentBackground(.hidden)

@@ -10,3 +10,7 @@ xcuserdata/
 # Personal signing (see Config/Signing.xcconfig).
 Config/Local.xcconfig
 Config/Release.xcconfig
+
+# Website
+site/node_modules/
+site/dist/

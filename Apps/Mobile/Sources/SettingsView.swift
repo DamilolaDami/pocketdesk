@@ -221,6 +221,10 @@ struct SettingsView: View {
                     } label: {
                         SettingsLabel("Licences", symbol: "doc.text.fill", color: .gray)
                     }
+                    Link(destination: AppInfo.terms) {
+                        externalRow("Terms of Use", symbol: "doc.plaintext.fill", color: .teal)
+                    }
+                    .foregroundStyle(.primary)
                     Link(destination: AppInfo.repository) {
                         externalRow("Source Code", symbol: "chevron.left.forwardslash.chevron.right", color: .indigo)
                     }

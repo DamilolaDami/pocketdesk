@@ -12,7 +12,7 @@ kill_timeout = "25s"
   dockerfile = "Dockerfile"
 
 [env]
-  RELAY_HOSTNAME = "relay.posketdesk.app"
+  RELAY_HOSTNAME = "relay.pocketdesk.runmira.dev"
   RELAY_FORWARD_PORTS = "50000-50031"
   RELAY_MAX_CONNECTIONS = "256"
 

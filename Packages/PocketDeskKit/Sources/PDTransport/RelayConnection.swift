@@ -50,7 +50,7 @@ public final class RelayConnection: Sendable {
         let ready = RelayReady()
         try await withThrowingTaskGroup(of: Bool.self) { group in
             group.addTask {
-                var quic = QUIC(alpn: [RelayMessage.alpn]).idleTimeout(60_000).maxDatagramFrameSize(1200)
+                var quic = QUIC(alpn: [RelayMessage.alpn]).idleTimeout(60_000).maxUDPPayloadSize(1200).maxDatagramFrameSize(1200)
                     .tls.localIdentity(identity.secIdentity).tls.peerAuthentication(.required)
                 if let serverPin {
                     quic = quic.tls.certificateValidator { _, trust in Fingerprint(trust: trust) == serverPin }

@@ -71,7 +71,11 @@ pub fn server(
         quinn::crypto::rustls::QuicServerConfig::try_from(tls)?,
     ));
     let transport = Arc::get_mut(&mut config.transport).unwrap();
+    // Keep every outer UDP datagram below Fly's public UDP MTU.
     transport
+        .initial_mtu(1200)
+        .mtu_discovery_config(None)
+        .enable_segmentation_offload(false)
         .max_concurrent_bidi_streams(1u8.into())
         .max_concurrent_uni_streams(0u8.into())
         .max_idle_timeout(Some(std::time::Duration::from_secs(60).try_into()?))

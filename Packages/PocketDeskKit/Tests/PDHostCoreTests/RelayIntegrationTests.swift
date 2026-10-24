@@ -61,6 +61,19 @@
             let startup = (try? String(contentsOf: logURL, encoding: .utf8)) ?? "No startup log"
             try #require(process.isRunning, Comment(rawValue: startup))
             let server = RelayServer(host: "127.0.0.1", port: port)
+            try await exercise(server: server, relayPin: relayPin)
+        }
+
+        @Test(.enabled(if: ProcessInfo.processInfo.environment["POCKETDESK_RELAY_REMOTE"] != nil))
+        func deployedRelayPreservesPinnedSession() async throws {
+            let address = try #require(ProcessInfo.processInfo.environment["POCKETDESK_RELAY_REMOTE"])
+            let server = try #require(RelayServer(address: address))
+            let certificatePath = ProcessInfo.processInfo.environment["POCKETDESK_RELAY_REMOTE_CERT_DER"]
+            let pin = try certificatePath.map { Fingerprint(certificateDER: try Data(contentsOf: URL(filePath: $0))) }
+            try await exercise(server: server, relayPin: pin)
+        }
+
+        private func exercise(server: RelayServer, relayPin: Fingerprint?) async throws {
             let suffix = UUID().uuidString
             let host = try DeviceIdentity.loadOrCreate(label: "com.pocketdesk.test.relay.host.\(suffix)")
             let phone = try DeviceIdentity.loadOrCreate(label: "com.pocketdesk.test.relay.phone.\(suffix)")
@@ -103,11 +116,11 @@
             ) { value in Task { await status.set(value) } }
             let agentTask = Task { await agent.run() }
             defer { agentTask.cancel() }
-            for _ in 0..<300 {
+            for _ in 0..<2000 {
                 if await status.ready { break }
                 try await Task.sleep(for: .milliseconds(10))
             }
-            #expect(await status.ready)
+            try #require(await status.ready)
             do {
                 try await RelayPhonePath.connect(
                     server: server, identity: stranger, host: host.fingerprint, serverPin: relayPin

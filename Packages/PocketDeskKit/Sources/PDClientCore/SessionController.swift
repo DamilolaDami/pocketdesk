@@ -162,10 +162,11 @@ public final class SessionController {
 
     public func startDiscovery() {
         store.send(.startDiscovery)
-        guard discoveryTask == nil else {
-            store.send(.hostsChanged(discoveredHosts()))
-            return
-        }
+        // Paired Macs (offline, or reachable through the relay) show straight away. Away from
+        // home a fresh Bonjour browser may never report anything, and waiting for it left the
+        // list empty after a relayed session ended.
+        store.send(.hostsChanged(discoveredHosts()))
+        guard discoveryTask == nil else { return }
         discoveryTask = Task { [weak self] in
             do {
                 for try await hosts in HostBrowser.hosts() {

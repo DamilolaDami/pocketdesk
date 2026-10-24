@@ -26,9 +26,12 @@ export function OpenSource() {
         ))}
       </div>
       <Reveal delay={0.2}>
-        <motion.a className="button button-quiet" href={REPO} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-          View on GitHub
-        </motion.a>
+        <div className="cta-row closing-actions">
+          <a className="button button-primary" href="how-its-built.html">How it’s built <span aria-hidden="true">→</span></a>
+          <motion.a className="button button-quiet" href={REPO} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
+            View on GitHub
+          </motion.a>
+        </div>
       </Reveal>
     </section>
   );

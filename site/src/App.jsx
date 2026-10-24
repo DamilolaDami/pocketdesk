@@ -2,6 +2,7 @@ import { MotionConfig } from "motion/react";
 import { useSmoothScroll } from "./smooth.js";
 import { Nav } from "./sections/Nav.jsx";
 import { Hero } from "./sections/Hero.jsx";
+import { ProductPreview } from "./sections/ProductPreview.jsx";
 import { Steps } from "./sections/Steps.jsx";
 import { Gallery } from "./sections/Gallery.jsx";
 import { RemoteAccess } from "./sections/RemoteAccess.jsx";
@@ -21,6 +22,7 @@ export default function App() {
       <Nav />
       <main>
         <Hero />
+        <ProductPreview />
         <Steps />
         <Gallery />
         <RemoteAccess />

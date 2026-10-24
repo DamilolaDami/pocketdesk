@@ -13,7 +13,7 @@ const LINKS = [
 
 // `home` is "" on the home page, where links scroll in place, and "./" on other pages,
 // where they lead back to the home page's sections.
-export function Nav({ home = "" }) {
+export function Nav({ home = "", page }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef(null);
   const onLink = home ? undefined : smoothLink;
@@ -44,6 +44,7 @@ export function Nav({ home = "" }) {
             <a key={href} href={home + href} onClick={onLink}>{label}</a>
           ))}
           <a href={REPO}>GitHub</a>
+          <a href="how-its-built.html" aria-current={page === "built" ? "page" : undefined}>How it’s built</a>
         </span>
         <button ref={menuButton} type="button" className="nav-toggle" aria-expanded={menuOpen} aria-controls="mobile-menu" onClick={() => setMenuOpen(!menuOpen)}>
           {menuOpen ? "Close" : "Explore"}
@@ -56,6 +57,7 @@ export function Nav({ home = "" }) {
               <a key={href} href={home + href} onClick={(event) => { onLink?.(event); setMenuOpen(false); }}>{label}<span aria-hidden="true">↗</span></a>
             ))}
             <a href={REPO}>GitHub<span aria-hidden="true">↗</span></a>
+            <a href="how-its-built.html" aria-current={page === "built" ? "page" : undefined}>How it’s built<span aria-hidden="true">↗</span></a>
             <a className="mobile-menu-cta" href={TESTFLIGHT}>Get the iPhone beta<span aria-hidden="true">→</span></a>
           </div>
         )}

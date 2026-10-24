@@ -1,6 +1,6 @@
-import { useRef } from "react";
-import { motion, useScroll, useTransform } from "motion/react";
-import { AppleIcon, Phone, DOWNLOAD, TESTFLIGHT, ease } from "../ui.jsx";
+import { useRef, useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { AppleIcon, DOWNLOAD, TESTFLIGHT, ease } from "../ui.jsx";
 
 const stagger = { hidden: {}, show: { transition: { staggerChildren: 0.09, delayChildren: 0.15 } } };
 const rise = {
@@ -18,22 +18,16 @@ const LIGHTS = [
 
 
 export function Hero() {
-  const ref = useRef(null);
-  const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end start"] });
-  const copyY = useTransform(scrollYProgress, [0, 1], [0, 120]);
-  const copyOpacity = useTransform(scrollYProgress, [0, 0.55], [1, 0]);
-  const devicesY = useTransform(scrollYProgress, [0, 1], [0, 180]);
-  const devicesRotate = useTransform(scrollYProgress, [0, 1], [0, -3]);
-  const wordY = useTransform(scrollYProgress, [0, 1], [0, -80]);
+  const reducedMotion = useReducedMotion();
 
   return (
-    <section className="hero" id="top" ref={ref}>
+    <section className="hero hero-with-film" id="top">
       <div className="hero-light" aria-hidden="true">
         {LIGHTS.map((l, i) => (
           <motion.span
             key={i}
             style={{ left: l.left, top: l.top, width: l.size, height: l.size }}
-            animate={{ x: l.x, y: l.y }}
+            animate={reducedMotion ? undefined : { x: l.x, y: l.y }}
             transition={{ duration: l.duration, ease: "easeInOut", repeat: Infinity }}
           />
         ))}
@@ -42,7 +36,6 @@ export function Hero() {
       <motion.p
         className="hero-wordmark"
         aria-hidden="true"
-        style={{ y: wordY }}
         initial={{ opacity: 0, y: 60 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 1.4, ease, delay: 0.2 }}
@@ -53,7 +46,6 @@ export function Hero() {
       <div className="hero-inner">
         <motion.div
           className="hero-copy"
-          style={{ y: copyY, opacity: copyOpacity }}
           variants={stagger}
           initial="hidden"
           animate="show"
@@ -77,27 +69,41 @@ export function Hero() {
           <motion.p className="fineprint" variants={rise}>Free & open source <span aria-hidden="true">·</span> No account needed<br />Requires a Mac and iPhone running macOS 26 / iOS 26</motion.p>
         </motion.div>
 
-        <motion.div className="hero-devices" style={{ y: devicesY, rotate: devicesRotate }}>
-          <motion.div
-            className="hero-landscape"
-            initial={{ opacity: 0, x: 120, rotate: 6 }}
-            animate={{ opacity: 1, x: 0, rotate: 0 }}
-            transition={{ duration: 1.3, ease, delay: 0.3 }}
-          >
-            <Phone landscape eager src="shots/stream-xcode.jpg" alt="Xcode on a Mac, streamed sharp to an iPhone held sideways, with PocketDesk's controls along the bottom" />
-          </motion.div>
-          <motion.div
-            className="hero-portrait"
-            initial={{ opacity: 0, y: 140, rotate: -14 }}
-            animate={{ opacity: 1, y: 0, rotate: -7 }}
-            transition={{ duration: 1.3, ease, delay: 0.55 }}
-          >
-            <Phone eager src="shots/home.jpg" alt="PocketDesk's home screen: a MacBook Pro card that's online, with Use This Mac and the song playing on the Mac" />
-          </motion.div>
-        </motion.div>
+        <LaunchFilm />
       </div>
 
       <div className="hero-arc" aria-hidden="true" />
     </section>
   );
+}
+
+function LaunchFilm() {
+  const video = useRef(null);
+  const [started, setStarted] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const play = async () => {
+    setFailed(false);
+    try {
+      await video.current.play();
+    } catch {
+      setFailed(true);
+    }
+  };
+
+  return <figure className="launch-film">
+    <div className="launch-player">
+      <video ref={video} controls={started} playsInline preload="none" width="1920" height="1080"
+        poster="media/pocketdesk-launch-poster.jpg" aria-label="PocketDesk launch film"
+        onPlay={() => setStarted(true)} onError={() => setFailed(true)}>
+        <source src="media/pocketdesk-launch.mp4" type="video/mp4" />
+        Your browser doesn’t support embedded video. <a href="media/pocketdesk-launch.mp4">Watch the launch film.</a>
+      </video>
+      {!started && !failed && <button type="button" className="launch-play" onClick={play} aria-label="Play PocketDesk launch film">
+        <span className="launch-play-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg></span>
+        <span>Play the launch film<small>22 seconds</small></span>
+      </button>}
+      {failed && <div className="launch-error" role="status"><p>The film couldn’t play here.</p><a href="media/pocketdesk-launch.mp4">Open the video directly ↗</a></div>}
+    </div>
+    <figcaption><span className="launch-dot" aria-hidden="true" />PocketDesk, in motion.<span>Picture. Sound. A little freedom.</span></figcaption>
+  </figure>;
 }

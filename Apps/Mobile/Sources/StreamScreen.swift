@@ -53,7 +53,7 @@ struct StreamScreen: View {
             .overlay(alignment: .topLeading) {
                 if showsStatus && showStreamInfo {
                     StatusChip(hostName: hostName, config: config, link: controller.store.link,
-                               quality: controller.store.quality)
+                               quality: controller.store.quality, viaRelay: controller.store.connectionPath == .relay)
                         .padding(.leading, 16)
                         .padding(.top, topInset)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -250,11 +250,13 @@ private struct StatusChip: View {
     let config: StreamConfig
     let link: LinkQuality?
     let quality: StreamQuality
+    let viaRelay: Bool
 
     var body: some View {
         HStack(spacing: 8) {
             Circle().fill(link?.isWeak == true ? Color.orange : Brand.online).frame(width: 8, height: 8)
             Text(hostName).font(.footnote.weight(.semibold)).lineLimit(1)
+            if viaRelay { Label("Via relay", systemImage: "network").font(.caption) }
             Text("\(config.width)×\(config.height) · \(link?.fps ?? config.fps) fps\(quality == .best ? "" : " · \(quality.name)")")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)

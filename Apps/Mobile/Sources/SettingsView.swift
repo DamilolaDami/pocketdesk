@@ -49,6 +49,8 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.keyBarNavigation) private var keyBarNavigation = true
     @AppStorage(SettingsKey.keyBarFunction) private var keyBarFunction = true
     @State private var showingSiri = false
+    @AppStorage(RelayServer.enabledKey) private var relayEnabled = false
+    @AppStorage(RelayServer.addressKey) private var relayAddress = ""
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
 
@@ -97,6 +99,19 @@ struct SettingsView: View {
                 } footer: {
                     Text("Best keeps text sharp when you zoom in. Battery Saver lowers resolution and frame rate to save battery and data, and is used automatically in Low Power Mode.")
                 }
+
+                Section {
+                    NavigationLink {
+                        RelaySettingsView(controller: controller)
+                    } label: {
+                        HStack {
+                            SettingsLabel("Remote Access", symbol: "network", color: .blue)
+                            Spacer()
+                            Text(relayEnabled && RelayServer(address: relayAddress) != nil ? "On" : "Off")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: { Text("Connection") }
 
                 Section("Streaming") {
                     Toggle(isOn: $streamAudio) {
@@ -348,5 +363,42 @@ private struct SiriSettingsSheet: View {
                 }
             }
         }
+    }
+}
+
+private struct RelaySettingsView: View {
+    let controller: SessionController
+    @AppStorage(RelayServer.enabledKey) private var enabled = false
+    @AppStorage(RelayServer.addressKey) private var address = ""
+    @State private var draft = ""
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Connect Away from Home", isOn: $enabled)
+                    .disabled(RelayServer(address: address) == nil && !enabled)
+                    .onChange(of: enabled) { controller.relaySettingsChanged() }
+            } footer: {
+                Text("PocketDesk tries your local network first, then this relay. Your Mac must be awake with remote access enabled. Pair on the same network before using a relay.")
+            }
+            Section {
+                TextField("relay.example.com:4433", text: $draft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .accessibilityLabel("Relay hostname and port")
+                Button("Save Relay") {
+                    address = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    controller.relaySettingsChanged()
+                }
+                .disabled(RelayServer(address: draft) == nil || draft == address)
+                if !draft.isEmpty, RelayServer(address: draft) == nil {
+                    Text("Enter a hostname and optional port, without a URL path.").foregroundStyle(.red).font(.footnote)
+                }
+            } header: { Text("Relay server") } footer: {
+                Text("Use the same hostname as your Mac. The server needs a valid TLS certificate. Screen, audio and controls stay encrypted between your devices.")
+            }
+        }
+        .navigationTitle("Remote Access")
+        .onAppear { draft = address }
     }
 }

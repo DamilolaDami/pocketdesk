@@ -89,3 +89,16 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[test]
+fn swift_fixtures_match_server_contract() {
+    let fixtures: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+        "../../../Packages/PocketDeskKit/Tests/PDProtocolTests/Fixtures/relay-messages.json"
+    ))
+    .unwrap();
+    for value in fixtures {
+        let message: Message = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(message).unwrap(), value);
+    }
+}

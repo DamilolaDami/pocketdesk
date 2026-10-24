@@ -2,9 +2,9 @@ name: Relay
 on:
   push:
     branches: [main]
-    paths: ['Services/relay/**', '.github/workflows/relay.yml']
+    paths: ['Services/relay/**', 'Packages/PocketDeskKit/Tests/PDProtocolTests/Fixtures/**', '.github/workflows/relay.yml']
   pull_request:
-    paths: ['Services/relay/**', '.github/workflows/relay.yml']
+    paths: ['Services/relay/**', 'Packages/PocketDeskKit/Tests/PDProtocolTests/Fixtures/**', '.github/workflows/relay.yml']
 permissions:
   contents: read
 jobs:

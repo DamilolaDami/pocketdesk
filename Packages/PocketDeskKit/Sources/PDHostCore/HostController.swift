@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import PDSecurity
+import PDProtocol
 
 /// Wires `HostService` to `HostStore` for the Mac app, and owns the app-level choices:
 /// where files live, the persistent host ID, the Mac's display name.
@@ -30,6 +31,18 @@ public final class HostController {
 
     private static let askKey = "PocketDesk.askBeforeConnecting"
 
+    public var relayServer: RelayServer? {
+        guard UserDefaults.standard.bool(forKey: RelayServer.enabledKey),
+              let text = UserDefaults.standard.string(forKey: RelayServer.addressKey) else { return nil }
+        return RelayServer(address: text)
+    }
+
+    /// Settings are applied without interrupting the LAN listener.
+    public func relaySettingsChanged() {
+        let server = relayServer
+        Task { [service] in await service?.setRelayServer(server) }
+    }
+
     public func start() {
         guard runTask == nil else { return }
         do {
@@ -38,7 +51,7 @@ public final class HostController {
                 hostID: Self.persistentHostID(),
                 hostName: Host.current().localizedName ?? "Mac",
                 trustStoreURL: Self.supportDirectory.appending(path: "trusted-phones.json"),
-                askBeforeConnecting: askBeforeConnecting
+                askBeforeConnecting: askBeforeConnecting, relayServer: relayServer
             ), input: InputInjector()) { [weak self] event in
                 Task { @MainActor in
                     store.send(event)

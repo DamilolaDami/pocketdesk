@@ -4,9 +4,13 @@ Rust server using Quinn, Tokio and rustls. Implements the forwarding phase of
 [the relay design](../../docs/RELAY.md): device registration, replacement allow lists,
 authorized connection requests, and opaque UDP forwarding. State stays in memory.
 
-The Mac and iPhone relay clients/settings are still to be implemented. This server does
-not enable remote access in the existing apps. Direct candidate exchange/hole punching,
-multi-region presence and production monitoring remain future work.
+The apps include the Mac relay agent and loopback shim, the iPhone LAN-first fallback,
+and Remote Access settings. Remote access is off by default. Run a relay with a valid TLS
+certificate, save the same hostname/port on both devices, then enable it on each. Pair on
+the LAN first and keep the Mac awake. There is no bundled public relay address.
+
+Direct candidate exchange/hole punching, multi-region presence and production monitoring
+remain future work.
 
 ## Run
 
@@ -23,6 +27,7 @@ UDP access. `--listen` also selects the interface/address family for forwarding 
 Clients use that same public relay address with the returned port. IPv4 and IPv6 deployments
 can run separate instances. Ctrl-C closes control connections and allocations.
 
+Use a PEM private key in PKCS#8 format with named curves for EC keys.
 Clients must validate the relay's hostname/certificate. The relay requires client certificates
 and TLS 1.3 proof of private-key possession, but deliberately does not require a CA chain or
 certificate validity dates for device identities. It hashes the exact DER leaf certificate
@@ -91,5 +96,21 @@ cargo fmt --check
 
 Tests use real local Quinn mutual-TLS connections and UDP sockets: unknown/unpaired hosts,
 session ownership, full-size packet forwarding both ways, fragmentation, address locking,
-revocation and host disconnect cleanup. Cellular/NAT tests and native app integration have
-not been performed. This is a single-instance implementation, not a production launch.
+revocation and host disconnect cleanup. Rust and Swift decode and re-encode the same JSON
+fixtures under `Packages/PocketDeskKit/Tests/PDProtocolTests/Fixtures`.
+
+For the native Apple QUIC ↔ Quinn integration test, run from the repository root on macOS:
+
+```sh
+cargo build --locked --manifest-path Services/relay/Cargo.toml
+POCKETDESK_RELAY_BINARY="$PWD/Services/relay/target/debug/pocketdesk-relay" \
+  swift test --package-path Packages/PocketDeskKit --filter RelayIntegrationTests
+```
+
+That test creates throwaway certificates/Keychain identities and a local relay process. It
+verifies LAN failure → relay fallback, the pinned inner session, video/audio/input,
+unpaired rejection and revocation. CI runs it before the broader native package tests.
+The Mac uses a separate unadvertised, packet-bounded QUIC listener for relayed sessions,
+with the same HostService handlers and a pinned-only TLS gate. The LAN listener retains its
+existing settings. Cellular/NAT and physical-device verification remain outstanding.
+This is a single-instance implementation, not a production launch.

@@ -1,6 +1,6 @@
 # Relay: reaching your Mac away from home
 
-Status: **forwarding server implemented; app integration not started.** This is the plan for roadmap item v1.0 "Anywhere". It covers how
+Status: **forwarding server and native app integration implemented; network validation pending.** This is the plan for roadmap item v1.0 "Anywhere". It covers how
 the relay works, what it can and can't see, what has to change in the apps, and the steps to
 ship it. The checklist at the end tracks progress.
 
@@ -118,9 +118,10 @@ The relay forwards **UDP datagrams**, not decrypted data, much like a TURN serve
 - The phone's QUIC client connects to `relayAddr:port`, a port allocated for this session only.
 - The relay passes each datagram to the Mac over the Mac's existing relay connection, and the
   Mac's replies back to the phone.
-- On the Mac, the agent's **shim** delivers those datagrams to the normal `QUICHostListener`
-  through a loopback UDP socket, one per relayed phone. To the listener it's an ordinary peer,
-  so pinning, the TLS gate and `HostSession` all work unchanged.
+- On the Mac, the agent's **shim** delivers those datagrams through one loopback UDP socket
+  per relayed phone to an unadvertised `QUICHostListener`. It uses the same `HostService`
+  handlers, bounds inner UDP packets and only accepts pinned phones. The Bonjour listener's
+  settings and the end-to-end `HostSession` protocol stay unchanged.
 - A forwarding port requires a random allocation token and locks to the first valid sender, and it closes
   when the session ends or after 60 seconds idle.
 
@@ -216,7 +217,7 @@ apps use the internet") must describe the relay, as it already promises.
 - **Language:** Rust with `quinn` (selected). The forwarding server is in `Services/relay`.
   Its README specifies the implemented version-1 wire contract, token-bound forwarding and
   packet fragmentation. The messages in the protocol section describe the wider target design; candidate
-  exchange and native app integration are not implemented yet.
+  exchange is not implemented yet. Native clients implement the forwarding contract.
 - **Hosting:** small instances in a few regions (for example on Fly.io, near users), with the
   apps picking the nearest by latency.
 - **State:** in memory per instance. Macs connect to their nearest instance, and instances share
@@ -263,15 +264,17 @@ apps use the internet") must describe the relay, as it already promises.
 
 ### Phase 2: forwarding relay (works everywhere)
 
-- [ ] `Relay` message types in `PDProtocol`, with JSON fixtures shared with the server.
+- [x] `Relay` message types in `PDProtocol`, with JSON fixtures shared with the server.
 - [x] Relay server: registration, allow lists, `connect`, `allocate`, UDP forwarding, limits.
   See `Services/relay/README.md` for the implemented contract and remaining deployment work.
-- [ ] `RelayAgent` on the Mac: register, keep alive, publish the allow list on every pairing change.
-- [ ] Forwarding shim on the Mac: one loopback socket per relayed phone into `QUICHostListener`.
-- [ ] `PathFinder` on the phone: Bonjour first, then forwarded relay.
-- [ ] Mac setting: "Reach this Mac from anywhere" (off by default), plus a keep-awake option.
-- [ ] Phone: show "Via relay" on the Mac's card and in stream info.
-- [ ] Integration tests for allowed, unpaired and forgotten phones.
+- [x] `RelayAgent` on the Mac: register, keep alive, publish the allow list on every pairing change.
+- [x] Forwarding shim on the Mac: one loopback socket per relayed phone into `QUICHostListener`.
+- [x] `PathFinder` on the phone: Bonjour first, then forwarded relay.
+- [x] Mac setting: "Reach this Mac from anywhere" (off by default), with a custom relay address.
+- [ ] Keep-awake-on-power option.
+- [x] Phone: a relay connection option on paired Mac cards and "Via relay" in stream info.
+- [x] Local Quinn/Apple QUIC integration tests for allowed, unpaired and forgotten phones.
+- [ ] Validate physical devices across the real network matrix.
 
 ### Phase 3: direct connections
 

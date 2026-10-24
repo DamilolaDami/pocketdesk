@@ -26,6 +26,7 @@ public struct PairingApproval: Sendable, Equatable, Identifiable {
 
 /// Everything the Mac UI needs to know, as events into `HostState.reduce`.
 public enum HostEvent: Sendable, Equatable {
+    case relayStatus(HostRelayStatus)
     case listening(port: UInt16?)
     case stopped(error: String?)
     case inviteChanged(PairingInvite?)
@@ -51,6 +52,8 @@ public actor HostService: PairingAuthority {
         public var approvalTimeout: Duration
         /// `false` for tests that connect over 127.0.0.1.
         public var advertise: Bool
+        /// Nil keeps remote registration and forwarding off.
+        public var relayServer: RelayServer?
         /// Paired phones still need a yes from the person at the Mac for each session.
         public var askBeforeConnecting: Bool
 
@@ -58,7 +61,8 @@ public actor HostService: PairingAuthority {
                     identityLabel: String = "com.pocketdesk.host.identity",
                     trustStoreURL: URL, inviteLifetime: Duration = .seconds(300),
                     approvalTimeout: Duration = .seconds(120), advertise: Bool = true,
-                    askBeforeConnecting: Bool = false) {
+                    askBeforeConnecting: Bool = false, relayServer: RelayServer? = nil) {
+            self.relayServer = relayServer
             self.hostID = hostID
             self.hostName = hostName
             self.identityLabel = identityLabel
@@ -81,6 +85,9 @@ public actor HostService: PairingAuthority {
     private var invite: (value: PairingInvite, expires: ContinuousClock.Instant)?
     private var approvals: [UUID: CheckedContinuation<Bool, Never>] = [:]
     private var listener: QUICHostListener?
+    private var relayAgent: RelayAgent?
+    private var relayTask: Task<Void, Never>?
+    private var relayGeneration = UUID()
     /// Live sessions by phone (a phone can have a stream and a quick app-list fetch at once).
     private var sessions: [Fingerprint: [UUID: HostSession]] = [:]
 
@@ -113,12 +120,24 @@ public actor HostService: PairingAuthority {
         self.listener = listener
         let reportPort = Task { [onEvent] in
             for _ in 0..<200 {
-                if let port = listener.port { onEvent(.listening(port: port)); return }
+                if let port = listener.port {
+                    onEvent(.listening(port: port))
+                    self.refreshRelay()
+                    return
+                }
                 try await Task.sleep(for: .milliseconds(10))
             }
             onEvent(.listening(port: nil))
         }
-        defer { reportPort.cancel() }
+        defer {
+            reportPort.cancel()
+            relayGeneration = UUID()
+            relayTask?.cancel()
+            relayTask = nil
+            relayAgent = nil
+            self.listener = nil
+            onEvent(.relayStatus(.disabled))
+        }
 
         do {
             try await listener.run { [weak self] session in
@@ -129,6 +148,66 @@ public actor HostService: PairingAuthority {
             onEvent(.stopped(error: String(describing: error)))
             throw error
         }
+    }
+
+    public func setRelayServer(_ server: RelayServer?) {
+        configuration.relayServer = server
+        refreshRelay()
+    }
+
+    private func refreshRelay() {
+        relayGeneration = UUID()
+        relayTask?.cancel()
+        relayTask = nil
+        relayAgent = nil
+        guard let server = configuration.relayServer else { onEvent(.relayStatus(.disabled)); return }
+        guard listener?.port != nil else { onEvent(.relayStatus(.connecting)); return }
+        let generation = relayGeneration
+        relayTask = Task { await runRelay(server: server, generation: generation) }
+    }
+
+    private func runRelay(server: RelayServer, generation: UUID) async {
+        while !Task.isCancelled, relayGeneration == generation {
+            do {
+                // An unadvertised listener bounds nested packets without changing LAN transport
+                // settings. Its TLS gate only accepts pinned phones, even while an invite is open.
+                let endpoint = try QUICHostListener(identity: identity, advertise: nil, maxUDPPayloadSize: 1200, loopbackOnly: true) { [weak self] peer in
+                    await self?.isTrusted(peer) ?? false
+                }
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try await endpoint.run { [weak self] session in try await self?.serve(session) }
+                    }
+                    group.addTask {
+                        for _ in 0..<200 {
+                            try Task.checkCancellation()
+                            if let port = endpoint.port {
+                                await self.runRelayAgent(server: server, port: port, generation: generation)
+                                return
+                            }
+                            try await Task.sleep(for: .milliseconds(10))
+                        }
+                        throw TransportError.timedOut
+                    }
+                    defer { group.cancelAll() }
+                    try await group.next()
+                }
+            } catch { }
+            guard !Task.isCancelled, relayGeneration == generation else { return }
+            onEvent(.relayStatus(.unavailable))
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+        }
+    }
+
+    private func runRelayAgent(server: RelayServer, port: UInt16, generation: UUID) async {
+        guard relayGeneration == generation, !Task.isCancelled else { return }
+        let agent = RelayAgent(identity: identity, hostID: configuration.hostID, port: port,
+                               server: server, peers: Array(trustStore.peers.keys)) { [onEvent] status in
+            onEvent(.relayStatus(status))
+        }
+        relayAgent = agent
+        await agent.run()
+        if relayGeneration == generation { relayAgent = nil }
     }
 
     // MARK: Pairing
@@ -156,6 +235,7 @@ public actor HostService: PairingAuthority {
     /// Forgets the phone, and ends its sessions: an unpaired phone mustn't stay connected.
     public func revoke(_ peer: Fingerprint) async throws {
         trustStore.revoke(peer)
+        await relayAgent?.update(peers: Array(trustStore.peers.keys))
         try trustStore.save(to: configuration.trustStoreURL)
         onEvent(.pairedPeersChanged(Array(trustStore.peers.values)))
         await disconnect(peer, reason: "This iPhone was removed from the Mac's paired phones.")
@@ -195,6 +275,7 @@ public actor HostService: PairingAuthority {
             trustStore.revoke(peer)
             return false
         }
+        await relayAgent?.update(peers: Array(trustStore.peers.keys))
         // Invites are single use.
         closeInvite()
         onEvent(.pairedPeersChanged(Array(trustStore.peers.values)))

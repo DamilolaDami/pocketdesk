@@ -152,6 +152,13 @@ public final class SessionController {
         }
     }
 
+    public var relayServer: RelayServer? {
+        guard UserDefaults.standard.bool(forKey: RelayServer.enabledKey),
+              let text = UserDefaults.standard.string(forKey: RelayServer.addressKey) else { return nil }
+        return RelayServer(address: text)
+    }
+    public func relaySettingsChanged() { store.send(.hostsChanged(discoveredHosts())) }
+
     // MARK: Discovery
 
     public func startDiscovery() {
@@ -225,6 +232,7 @@ public final class SessionController {
             var host = host
             host.isLocked = locks.isLocked(host.hostID)
             host.needsUnlock = locks.needsUnlock(host.hostID)
+            host.canRelay = host.isPaired && relayServer != nil
             return host
         })
     }
@@ -233,7 +241,7 @@ public final class SessionController {
 
     /// Paired Macs connect straight away; unpaired ones show the pairing screen.
     public func select(_ host: DiscoveredHost) {
-        guard host.isOnline else { return }
+        guard host.isOnline || host.canRelay else { return }
         if let side = host.needsUpdate {
             store.post(notice: side == .mac ? "Update PocketDesk on \(host.name) to use it from this iPhone."
                                             : "Update PocketDesk on this iPhone to use \(host.name).")
@@ -245,9 +253,8 @@ public final class SessionController {
         }
         lastHost = host
         store.send(.select(host))
-        guard host.isPaired, let browsedHost = browsed[host.id],
-              let peer = host.hostID.flatMap(trustStore.peer(hostID:)) else { return }
-        connect(to: browsedHost, hostFingerprint: peer.fingerprint, invite: nil)
+        guard host.isPaired, let peer = host.hostID.flatMap(trustStore.peer(hostID:)) else { return }
+        connect(endpoint: browsed[host.id]?.endpoint, hostID: host.hostID, hostFingerprint: peer.fingerprint, invite: nil)
     }
 
     /// Sends magic packets to a sleeping Mac, then connects as soon as it shows up.
@@ -320,6 +327,10 @@ public final class SessionController {
     }
 
     private func connect(to host: BrowsedHost, hostFingerprint: Fingerprint, invite: PairingInvite?) {
+        connect(endpoint: host.endpoint, hostID: host.hostID, hostFingerprint: hostFingerprint, invite: invite)
+    }
+
+    private func connect(endpoint: NWEndpoint?, hostID: UUID?, hostFingerprint: Fingerprint, invite: PairingInvite?) {
         disconnectConnection()
         let identity: DeviceIdentity
         do {
@@ -330,13 +341,14 @@ public final class SessionController {
         }
         let connectionID = UUID()
         activeConnectionID = connectionID
-        connectionHostID = host.hostID ?? invite?.hostID
+        connectionHostID = hostID ?? invite?.hostID
         let connection = ClientConnection(
             identity: identity,
-            request: .init(endpoint: host.endpoint, hostFingerprint: hostFingerprint, invite: invite,
+            request: .init(endpoint: endpoint, hostFingerprint: hostFingerprint, invite: invite,
                            deviceName: deviceName, viewport: viewport, audioEnabled: audioEnabled,
                            preferredDisplayID: displayPreferences.displayID(for: connectionHostID),
-                           clipboardEnabled: clipboardEnabled, quality: quality),
+                           clipboardEnabled: clipboardEnabled, quality: quality, relay: invite == nil ? relayServer : nil,
+                           findLocal: { [weak self] in await self?.findNearby(hostID: hostID) }),
             display: display
         ) { [weak self] event in
             Task { @MainActor in
@@ -348,8 +360,19 @@ public final class SessionController {
         connectionTask = Task { await connection.run() }
     }
 
+    private func findNearby(hostID: UUID?) async -> NWEndpoint? {
+        guard let hostID else { return nil }
+        let deadline = ContinuousClock.now + .milliseconds(1500)
+        while !Task.isCancelled, ContinuousClock.now < deadline {
+            if let host = browsed.values.first(where: { $0.hostID == hostID }) { return host.endpoint }
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return nil }
+        }
+        return nil
+    }
+
     private func handle(_ event: ClientEvent) {
         switch event {
+        case .path(let path): store.update(path: path)
         case .awaitingApproval(let code):
             store.send(.pairingCode(code))
         case .paired(let peer):
@@ -474,7 +497,7 @@ public final class SessionController {
                 let target = try await quietTarget(hostID)
                 do {
                     try await ClientConnection.paste(item, endpoint: target.endpoint, hostFingerprint: target.fingerprint,
-                                                     identity: target.identity, deviceName: deviceName)
+                                                     identity: target.identity, deviceName: deviceName, relay: relayServer)
                 } catch {
                     throw .failed(ClientConnection.describe(error))
                 }
@@ -493,7 +516,7 @@ public final class SessionController {
                 let item: ClipboardItem
                 do {
                     item = try await ClientConnection.copy(endpoint: target.endpoint, hostFingerprint: target.fingerprint,
-                                                           identity: target.identity, deviceName: deviceName)
+                                                           identity: target.identity, deviceName: deviceName, relay: relayServer)
                 } catch {
                     throw .failed(ClientConnection.describe(error))
                 }
@@ -507,12 +530,12 @@ public final class SessionController {
 
     /// A Mac to reach without streaming, and how (unlocked first if it's locked).
     private func quietTarget(_ hostID: UUID?) async throws(FilesError)
-        -> (name: String, endpoint: NWEndpoint, fingerprint: Fingerprint, identity: DeviceIdentity) {
+        -> (name: String, endpoint: NWEndpoint?, fingerprint: Fingerprint, identity: DeviceIdentity) {
         guard let host = shortcutTarget(preferredHostID: hostID), let macID = host.hostID,
-              let browsedHost = browsed[host.id], let peer = trustStore.peer(hostID: macID) else { throw .noMac }
+              let peer = trustStore.peer(hostID: macID) else { throw .noMac }
         guard await unlock(host) else { throw .locked(host.name) }
         do {
-            return (host.name, browsedHost.endpoint, peer.fingerprint, try DeviceIdentity.loadOrCreate(label: identityLabel))
+            return (host.name, browsed[host.id]?.endpoint, peer.fingerprint, try DeviceIdentity.loadOrCreate(label: identityLabel))
         } catch {
             throw .failed("Couldn't load this phone's identity: \(error)")
         }
@@ -562,7 +585,7 @@ public final class SessionController {
         store.send(.cancel)
         startDiscovery()
         guard let hostID = lastHost?.hostID,
-              let host = discoveredHosts().first(where: { $0.hostID == hostID && $0.isOnline && $0.isPaired })
+              let host = discoveredHosts().first(where: { $0.hostID == hostID && ($0.isOnline || $0.canRelay) && $0.isPaired })
         else { return }
         select(host)
     }
@@ -619,7 +642,7 @@ public final class SessionController {
 
     /// Paired Macs that are online now, which shortcuts can run on.
     public var reachableMacs: [DiscoveredHost] {
-        discoveredHosts().filter { $0.isPaired && $0.isOnline }
+        discoveredHosts().filter { $0.isPaired && ($0.isOnline || $0.canRelay) }
     }
 
     /// Runs a shortcut on the Mac being streamed, or connects first (to `preferredHostID`, else
@@ -809,7 +832,7 @@ public final class SessionController {
     public func loadApps(preferredHostID: UUID?, force: Bool = false) {
         loadCachedIcons(for: library.shortcuts.compactMap(\.appBundleID))
         guard let host = shortcutTarget(preferredHostID: preferredHostID), let hostID = host.hostID,
-              let browsedHost = browsed[host.id], let peer = trustStore.peer(hostID: hostID) else {
+              let peer = trustStore.peer(hostID: hostID) else {
             store.update(catalogStatus: .unavailable)
             return
         }
@@ -832,8 +855,8 @@ public final class SessionController {
         let haveIcons = Set(store.appIcons.keys)
         // Shortcut tiles too, in case an app lives outside the usual folders.
         let shortcutApps = library.shortcuts.compactMap(\.appBundleID)
-        let updates = ClientConnection.catalog(endpoint: browsedHost.endpoint, hostFingerprint: peer.fingerprint,
-                                               identity: identity, deviceName: deviceName) { apps in
+        let updates = ClientConnection.catalog(endpoint: browsed[host.id]?.endpoint, hostFingerprint: peer.fingerprint,
+                                               identity: identity, deviceName: deviceName, relay: relayServer) { apps in
             var wanted: [String] = []
             for id in apps.map(\.bundleID) + shortcutApps where !haveIcons.contains(id) && !wanted.contains(id) {
                 wanted.append(id)
@@ -924,15 +947,15 @@ public final class SessionController {
             return FilesLink(files: streamFiles, macName: host.name, close: {})
         }
         guard let host = shortcutTarget(preferredHostID: hostID), let macID = host.hostID,
-              let browsedHost = browsed[host.id], let peer = trustStore.peer(hostID: macID) else { throw .noMac }
+              let peer = trustStore.peer(hostID: macID) else { throw .noMac }
         guard await unlock(host) else { throw .locked(host.name) }
         let identity: DeviceIdentity
         do { identity = try DeviceIdentity.loadOrCreate(label: identityLabel) } catch {
             throw .failed("Couldn't load this phone's identity: \(error)")
         }
         do {
-            let connection = try await ClientConnection.openFiles(endpoint: browsedHost.endpoint, hostFingerprint: peer.fingerprint,
-                                                                  identity: identity, deviceName: deviceName)
+            let connection = try await ClientConnection.openFiles(endpoint: browsed[host.id]?.endpoint, hostFingerprint: peer.fingerprint,
+                                                                  identity: identity, deviceName: deviceName, relay: relayServer)
             return FilesLink(files: connection.files, macName: host.name, close: { connection.close() })
         } catch {
             throw .failed(ClientConnection.describe(error))
@@ -1064,14 +1087,14 @@ public final class SessionController {
             for _ in 0..<3 { await Task.detached { WakeSender.wake(info) }.value }
             host = await waitForTarget(preferredHostID: sleeper, for: .seconds(25))
         }
-        guard let host, let hostID = host.hostID, let browsedHost = browsed[host.id],
+        guard let host, let hostID = host.hostID,
               let peer = trustStore.peer(hostID: hostID) else { throw .noMac }
         guard await unlock(host) else { throw .locked(host.name) }
         do {
             let identity = try DeviceIdentity.loadOrCreate(label: identityLabel)
-            try await ClientConnection.perform(action, endpoint: browsedHost.endpoint,
+            try await ClientConnection.perform(action, endpoint: browsed[host.id]?.endpoint,
                                                hostFingerprint: peer.fingerprint, identity: identity,
-                                               deviceName: deviceName)
+                                               deviceName: deviceName, relay: relayServer)
         } catch {
             throw .failed(ClientConnection.describe(error))
         }

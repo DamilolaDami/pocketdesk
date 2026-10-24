@@ -8,6 +8,8 @@ import PDProtocol
 @Observable
 public final class SessionStore {
     public private(set) var state: SessionState = .idle
+    public private(set) var connectionPath: ConnectionPath?
+    public func update(path: ConnectionPath) { connectionPath = path }
     /// The Mac's windows, from the last `listWindows`. Not part of the state machine.
     public private(set) var windows: [WindowInfo] = []
     public private(set) var displaySelection = DisplaySelection()
@@ -32,6 +34,7 @@ public final class SessionStore {
         switch event {
         case .connected(let config): displaySelection = displaySelection.reduce(.streaming(config.displayID))
         case .cancel, .disconnected, .select:
+            connectionPath = nil
             displaySelection = displaySelection.reduce(.reset)
             link = nil
             menus = .idle

@@ -93,7 +93,8 @@ final class ClientConnectionTests {
 
         let all = events.all
         let code = Pairing.verificationCode(host: invite.hostFingerprint, client: phone.fingerprint, token: invite.token)
-        #expect(all.first == .awaitingApproval(code: code))
+        #expect(all.first == .path(.local))
+        #expect(all.dropFirst().first == .awaitingApproval(code: code))
         #expect(all.contains(.paired(PairedPeer(fingerprint: invite.hostFingerprint, name: "Test Mac",
                                                 hostID: invite.hostID, pairedAt: pairedAt(in: all)))))
         #expect(all.contains { if case .streamConfig(let config) = $0 { config.width == 1280 } else { false } })

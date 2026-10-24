@@ -140,6 +140,10 @@ struct MenuContent: View {
                     }
                 }
                 Divider()
+                Button("Remote Access…") {
+                    openWindow(id: RelaySettingsWindow.id)
+                    NSApplication.shared.activate()
+                }
                 Button("Show Welcome…") {
                     openWindow(id: OnboardingWindow.id)
                     NSApplication.shared.activate()

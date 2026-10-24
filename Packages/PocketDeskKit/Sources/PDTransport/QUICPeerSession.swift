@@ -337,7 +337,7 @@ private final class OnFirstUse<Value: Sendable>: Sendable {
 }
 
 /// Phone-side streams that must never be released (see `QUICPeerSession.deinit`).
-private enum Retired {
+enum Retired {
     private static let objects = Mutex<[any Sendable]>([])
     static func keep(_ object: any Sendable) { objects.withLock { $0.append(object) } }
 }

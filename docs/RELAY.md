@@ -108,22 +108,26 @@ phone                          relay                             Mac
 2. The relay checks the allow list and tells the Mac a phone is coming.
 3. Both learn each other's public address (from what the relay sees) and their local addresses,
    and try to reach each other directly.
-4. If no direct path works within about two seconds, the relay allocates a forwarding port, and
-   the phone connects its normal QUIC session to that port.
+4. If no direct path works within about two seconds, the phone asks the relay to forward, and
+   its normal QUIC session runs through the relay.
 
 ## Forwarding
 
-The relay forwards **UDP datagrams**, not decrypted data, much like a TURN server:
+The relay forwards **sealed packets**, not decrypted data, much like a TURN server:
 
-- The phone's QUIC client connects to `relayAddr:port`, a port allocated for this session only.
-- The relay passes each datagram to the Mac over the Mac's existing relay connection, and the
-  Mac's replies back to the phone.
+- On each device, the inner QUIC session talks to a loopback **shim**. The shim splits each
+  packet into at most two pieces and sends them as QUIC datagrams on the device's relay
+  connection (protocol version 2).
+- The relay passes each piece to the other device's relay connection unchanged; the receiving
+  shim reassembles it. Every public UDP packet stays within 1,200 bytes, Fly's limit.
 - On the Mac, the agent's **shim** delivers those datagrams through one loopback UDP socket
   per relayed phone to an unadvertised `QUICHostListener`. It uses the same `HostService`
   handlers, bounds inner UDP packets and only accepts pinned phones. The Bonjour listener's
   settings and the end-to-end `HostSession` protocol stay unchanged.
-- A forwarding port requires a random allocation token and locks to the first valid sender, and it closes
-  when the session ends or after 60 seconds idle.
+- The relay forwards only between the session's two participants, while the Mac allows the
+  phone, and ends forwarding when the session ends or after 60 seconds idle. (Version 1 carried
+  the phone's packets as raw UDP with a token on a separate port; full-size packets came to 1,213
+  bytes, over Fly's limit, so version 2 moved them onto the phone's QUIC connection.)
 
 Why not let the relay terminate TLS and re-encrypt? Because then it could read and inject input
 into your Mac. Forwarding sealed packets keeps the relay out of the trust boundary.
@@ -148,7 +152,7 @@ public port, and the listener only ever sees loopback.
 
 ## Relay protocol
 
-The devices talk to the relay over QUIC with ALPN `pocketdesk-relay/1`, with JSON messages on
+The devices talk to the relay over QUIC with ALPN `pocketdesk-relay/2`, with JSON messages on
 one bidirectional stream, the same style as `ControlMessage`.
 
 | Message | From | Meaning |
@@ -159,8 +163,8 @@ one bidirectional stream, the same style as `ControlMessage`.
 | `incoming(phone: Fingerprint, public: Address, local: [Address], session)` | relay → Mac | A paired phone wants to connect |
 | `candidates(public: Address, local: [Address], session)` | relay → both | The other side's addresses, to punch |
 | `allocate(session)` | phone | Direct didn't work, so the phone asks for forwarding |
-| `forward(session, port)` | relay → both | The forwarding port is open |
-| `datagram(session, bytes)` | relay ↔ Mac | A forwarded packet, carried as a QUIC datagram |
+| `forward(session)` | relay → both | Forwarding is on for this session |
+| `datagram(session, bytes)` | relay ↔ both | A forwarded piece, carried as a QUIC datagram |
 | `notFound` / `error(reason)` | relay | No allowed Mac by that fingerprint, or a limit was hit |
 | `ping` / `pong` | any | Keepalive |
 
@@ -215,7 +219,7 @@ apps use the internet") must describe the relay, as it already promises.
 ## Server
 
 - **Language:** Rust with `quinn` (selected). The forwarding server is in `Services/relay`.
-  Its README specifies the implemented version-1 wire contract, token-bound forwarding and
+  Its README specifies the implemented version-2 wire contract, datagram forwarding and
   packet fragmentation. The messages in the protocol section describe the wider target design; candidate
   exchange is not implemented yet. Native clients implement the forwarding contract.
 - **Hosting:** small instances in a few regions (for example on Fly.io, near users), with the
@@ -265,7 +269,7 @@ apps use the internet") must describe the relay, as it already promises.
 ### Phase 2: forwarding relay (works everywhere)
 
 - [x] `Relay` message types in `PDProtocol`, with JSON fixtures shared with the server.
-- [x] Relay server: registration, allow lists, `connect`, `allocate`, UDP forwarding, limits.
+- [x] Relay server: registration, allow lists, `connect`, `allocate`, datagram forwarding, limits.
   See `Services/relay/README.md` for the implemented contract and remaining deployment work.
 - [x] `RelayAgent` on the Mac: register, keep alive, publish the allow list on every pairing change.
 - [x] Forwarding shim on the Mac: one loopback socket per relayed phone into `QUICHostListener`.
@@ -274,6 +278,10 @@ apps use the internet") must describe the relay, as it already promises.
 - [ ] Keep-awake-on-power option.
 - [x] Phone: a relay connection option on paired Mac cards and "Via relay" in stream info.
 - [x] Local Quinn/Apple QUIC integration tests for allowed, unpaired and forgotten phones.
+- [x] Deploy to Fly (London) and verify a pinned session end to end through it.
+- [ ] Fix throughput through the deployed relay: about one full-size packet in five is lost
+  while streaming, which holds video near 0.1 Mbps (a local relay runs at 40 Mbps). Ruled out:
+  packet size, piece ordering, drops in the apps, and this connection's plain packet loss.
 - [ ] Validate physical devices across the real network matrix.
 
 ### Phase 3: direct connections
@@ -299,6 +307,9 @@ apps use the internet") must describe the relay, as it already promises.
 
 ## Open questions
 
+- Where are full-size packets lost while streaming through the deployed relay? Next step:
+  aggregate per-leg loss counters on the relay (no identities), to tell the Mac → relay leg
+  from the relay → phone leg.
 - Should forwarding be free with a cap, and direct always free?
 - Is a helper on the home network (for waking) worth building, or is "keep awake on power" enough?
 - Do we want IPv6 first? Many mobile networks give phones public IPv6 addresses, which makes

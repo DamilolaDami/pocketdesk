@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const MAX_MESSAGE: usize = 16 * 1024;
-pub const MAX_PACKET: usize = 1500;
 /// JSON objects framed by a four-byte, big-endian byte length. Fingerprints are lowercase
 /// hex SHA-256 of DER leaf certificates (not display abbreviations). No client-supplied identity.
 #[derive(Debug, Serialize, Deserialize)]
@@ -28,10 +27,10 @@ pub enum Message {
     Allocate {
         session: Uuid,
     },
+    /// Forwarding is on: from now the phone's and the Mac's pieces for this session are
+    /// passed between their QUIC connections as datagrams.
     Forward {
         session: Uuid,
-        port: u16,
-        token: String,
     },
     Close {
         session: Uuid,

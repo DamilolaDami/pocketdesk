@@ -1,14 +1,19 @@
-use crate::protocol::{self, MAX_PACKET, Message};
+use crate::protocol::{self, Message};
 use quinn::Connection;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
-    net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::{net::UdpSocket, sync::mpsc};
+use tokio::sync::mpsc;
 use uuid::Uuid;
+
+/// A forwarded piece: 16-byte session ID, 16-byte packet ID, index and count bytes, and up to
+/// 1,000 payload bytes. Both devices split and reassemble packets themselves; the relay only
+/// checks the session and passes each piece to the other side unchanged.
+pub const MIN_PIECE: usize = 35;
+pub const MAX_PIECE: usize = 1034;
 
 type Outbox = mpsc::Sender<Message>;
 struct Host {
@@ -20,15 +25,11 @@ struct Session {
     host: String,
     phone: String,
     owner: usize,
+    phone_connection: Connection,
     phone_out: Outbox,
     created: Instant,
-    allocation: Option<Allocation>,
-}
-struct Allocation {
-    socket: Arc<UdpSocket>,
-    token: Uuid,
-    peer: Option<SocketAddr>,
-    task: tokio::task::AbortHandle,
+    /// Set once the phone asks to forward; the last time the phone sent a piece.
+    forwarding: Option<Instant>,
 }
 #[derive(Default)]
 struct State {
@@ -38,9 +39,6 @@ struct State {
 impl State {
     fn remove(&mut self, id: Uuid) {
         if let Some(session) = self.sessions.remove(&id) {
-            if let Some(a) = session.allocation {
-                a.task.abort();
-            }
             let _ = session.phone_out.try_send(Message::Close { session: id });
             if let Some(h) = self.hosts.get(&session.host) {
                 let _ = h.outbox.try_send(Message::Close { session: id });
@@ -51,8 +49,9 @@ impl State {
         let expired: Vec<_> = self
             .sessions
             .iter()
-            .filter(|(_, s)| {
-                s.allocation.is_none() && s.created.elapsed() > Duration::from_secs(60)
+            .filter(|(_, s)| match s.forwarding {
+                None => s.created.elapsed() > Duration::from_secs(60),
+                Some(last) => last.elapsed() > Duration::from_secs(60),
             })
             .map(|(id, _)| *id)
             .collect();
@@ -60,17 +59,31 @@ impl State {
             self.remove(id);
         }
     }
+    /// Where a piece from this connection goes: the session's other side, if the connection
+    /// is one of its two participants and the Mac still allows the phone.
+    fn route(&mut self, id: Uuid, fp: &str, connection: usize) -> Option<Connection> {
+        let session = self.sessions.get_mut(&id)?;
+        session.forwarding?;
+        let host = self.hosts.get(&session.host)?;
+        if !host.allowed.contains(&session.phone) {
+            return None;
+        }
+        if session.owner == connection && session.phone == fp {
+            session.forwarding = Some(Instant::now());
+            Some(host.connection.clone())
+        } else if session.host == fp && host.connection.stable_id() == connection {
+            Some(session.phone_connection.clone())
+        } else {
+            None
+        }
+    }
 }
 pub struct Relay {
-    bind: IpAddr,
-    forward_ports: Option<std::ops::RangeInclusive<u16>>,
     state: Mutex<State>,
 }
 impl Relay {
-    pub fn new(bind: IpAddr, forward_ports: Option<std::ops::RangeInclusive<u16>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            bind,
-            forward_ports,
             state: Mutex::new(State::default()),
         }
     }
@@ -104,8 +117,7 @@ impl Relay {
                     }
                     requests += 1;
                     anyhow::ensure!(requests <= 120, "control rate exceeded");
-                    self.message(&fingerprint, &connection, &out, message)
-                        .await?;
+                    self.message(&fingerprint, &connection, &out, message)?;
                 }
                 #[allow(unreachable_code)]
                 Ok::<(), anyhow::Error>(())
@@ -121,32 +133,27 @@ impl Relay {
                 Ok::<(), anyhow::Error>(())
             };
             let datagrams = async {
-                // Shared budget for all sessions on this host: 2 MiB/s, no unbounded queues.
+                // One budget per connection, shared by its sessions: 2 MiB/s, no unbounded queues.
                 let mut budget = Budget::new();
-                let mut assembly = crate::packets::Assembler::default();
                 loop {
                     let bytes = connection.read_datagram().await?;
-                    if bytes.len() <= 34 || bytes.len() > 1034 || !budget.take(bytes.len()) {
+                    if bytes.len() < MIN_PIECE
+                        || bytes.len() > MAX_PIECE
+                        || !budget.take(bytes.len())
+                    {
                         continue;
                     }
-                    let id = Uuid::from_slice(&bytes[..16])?;
-                    let target = {
-                        let state = self.state.lock().unwrap();
-                        state
-                            .sessions
-                            .get(&id)
-                            .filter(|s| s.host == fingerprint)
-                            .and_then(|s| s.allocation.as_ref())
-                            .and_then(|a| a.peer.map(|p| (a.socket.clone(), p, a.token)))
+                    let Ok(id) = Uuid::from_slice(&bytes[..16]) else {
+                        continue;
                     };
-                    if let Some((socket, peer, token)) = target {
-                        let Some(payload) = assembly.push(&bytes) else {
-                            continue;
-                        };
-                        let mut packet = Vec::with_capacity(bytes.len());
-                        packet.extend_from_slice(token.as_bytes());
-                        packet.extend_from_slice(&payload);
-                        let _ = socket.send_to(&packet, peer).await;
+                    let target =
+                        self.state
+                            .lock()
+                            .unwrap()
+                            .route(id, &fingerprint, connection.stable_id());
+                    if let Some(target) = target {
+                        // Datagrams are lossy: a full send buffer drops, and the inner session retransmits.
+                        let _ = target.send_datagram(bytes);
                     }
                 }
                 #[allow(unreachable_code)]
@@ -178,16 +185,13 @@ impl Relay {
             state.remove(id);
         }
     }
-    async fn message(
+    fn message(
         self: &Arc<Self>,
         fp: &str,
         conn: &Connection,
         out: &Outbox,
         message: Message,
     ) -> anyhow::Result<()> {
-        if let Message::Allocate { session } = message {
-            return self.allocate(fp, conn, out, session).await;
-        }
         let mut state = self.state.lock().unwrap();
         state.prune();
         match message {
@@ -253,11 +257,26 @@ impl Relay {
                         host,
                         phone: fp.into(),
                         owner: conn.stable_id(),
+                        phone_connection: conn.clone(),
                         phone_out: out.clone(),
                         created: Instant::now(),
-                        allocation: None,
+                        forwarding: None,
                     },
                 );
+            }
+            Message::Allocate { session: id } => {
+                let session = state.sessions.get(&id).filter(|s| {
+                    s.phone == fp && s.owner == conn.stable_id() && s.forwarding.is_none()
+                });
+                let host = session
+                    .and_then(|s| state.hosts.get(&s.host).filter(|h| h.allowed.contains(fp)));
+                let Some(host) = host else {
+                    out.try_send(Message::NotFound)?;
+                    return Ok(());
+                };
+                host.outbox.try_send(Message::Forward { session: id })?;
+                out.try_send(Message::Forward { session: id })?;
+                state.sessions.get_mut(&id).unwrap().forwarding = Some(Instant::now());
             }
             Message::Close { session } => {
                 if state.sessions.get(&session).is_some_and(|s| {
@@ -276,142 +295,6 @@ impl Relay {
             }
             _ => anyhow::bail!("unexpected control message"),
         }
-        Ok(())
-    }
-    async fn bind_forward_socket(&self) -> std::io::Result<UdpSocket> {
-        if let Some(ports) = &self.forward_ports {
-            for port in ports.clone() {
-                match UdpSocket::bind(SocketAddr::new(self.bind, port)).await {
-                    Ok(socket) => return Ok(socket),
-                    Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => continue,
-                    Err(error) => return Err(error),
-                }
-            }
-            Err(std::io::Error::new(
-                std::io::ErrorKind::AddrInUse,
-                "forwarding port pool exhausted",
-            ))
-        } else {
-            UdpSocket::bind(SocketAddr::new(self.bind, 0)).await
-        }
-    }
-
-    async fn allocate(
-        self: &Arc<Self>,
-        fp: &str,
-        conn: &Connection,
-        out: &Outbox,
-        id: Uuid,
-    ) -> anyhow::Result<()> {
-        // Reject unknown/foreign sessions before consuming any pool capacity. Authorization
-        // is checked again after binding because revocation can race with the await.
-        {
-            let state = self.state.lock().unwrap();
-            let authorized = state.sessions.get(&id).is_some_and(|s| {
-                s.phone == fp
-                    && s.owner == conn.stable_id()
-                    && s.allocation.is_none()
-                    && state
-                        .hosts
-                        .get(&s.host)
-                        .is_some_and(|h| h.allowed.contains(fp))
-            });
-            if !authorized {
-                out.try_send(Message::NotFound)?;
-                return Ok(());
-            }
-        }
-        let socket = match self.bind_forward_socket().await {
-            Ok(socket) => Arc::new(socket),
-            Err(_) => {
-                out.try_send(Message::Error {
-                    reason: "forwardingCapacity".into(),
-                })?;
-                return Ok(());
-            }
-        };
-        let port = socket.local_addr()?.port();
-        let token = Uuid::new_v4();
-        let mut state = self.state.lock().unwrap();
-        state.prune();
-        let Some(session) = state
-            .sessions
-            .get(&id)
-            .filter(|s| s.phone == fp && s.owner == conn.stable_id() && s.allocation.is_none())
-        else {
-            out.try_send(Message::NotFound)?;
-            return Ok(());
-        };
-        let Some(host) = state
-            .hosts
-            .get(&session.host)
-            .filter(|h| h.allowed.contains(fp))
-        else {
-            out.try_send(Message::NotFound)?;
-            return Ok(());
-        };
-        host.outbox.try_send(Message::Forward {
-            session: id,
-            port,
-            token: token.simple().to_string(),
-        })?;
-        out.try_send(Message::Forward {
-            session: id,
-            port,
-            token: token.simple().to_string(),
-        })?;
-        let host_conn = host.connection.clone();
-        let relay = self.clone();
-        let task_socket = socket.clone();
-        let task = tokio::spawn(async move {
-            let mut bytes = [0u8; MAX_PACKET + 17];
-            let mut last = Instant::now();
-            let mut budget = Budget::new();
-            loop {
-                let read =
-                    tokio::time::timeout(Duration::from_secs(1), task_socket.recv_from(&mut bytes))
-                        .await;
-                if last.elapsed() >= Duration::from_secs(60) {
-                    break;
-                }
-                let Ok(Ok((len, peer))) = read else { continue };
-                if len <= 16
-                    || len > MAX_PACKET + 16
-                    || bytes[..16] != token.as_bytes()[..]
-                    || !budget.take(len)
-                {
-                    continue;
-                }
-                let accepted = {
-                    let mut state = relay.state.lock().unwrap();
-                    let Some(a) = state
-                        .sessions
-                        .get_mut(&id)
-                        .and_then(|s| s.allocation.as_mut())
-                    else {
-                        break;
-                    };
-                    if a.peer.is_none() {
-                        a.peer = Some(peer);
-                    }
-                    a.peer == Some(peer)
-                };
-                if !accepted {
-                    continue;
-                }
-                last = Instant::now();
-                for packet in crate::packets::encode(id, &bytes[16..len]) {
-                    let _ = host_conn.send_datagram(packet.into());
-                }
-            }
-            relay.state.lock().unwrap().remove(id);
-        });
-        state.sessions.get_mut(&id).unwrap().allocation = Some(Allocation {
-            socket,
-            token,
-            peer: None,
-            task: task.abort_handle(),
-        });
         Ok(())
     }
 }
@@ -443,6 +326,7 @@ impl Budget {
 mod tests {
     use super::*;
     use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+    use std::net::SocketAddr;
     struct Peer {
         _endpoint: quinn::Endpoint,
         conn: Connection,
@@ -460,6 +344,14 @@ mod tests {
             PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()).into(),
         )
     }
+    /// A piece as the devices send it: session ID, packet ID, index, count, payload.
+    fn piece(session: Uuid, index: u8, count: u8, payload: &[u8]) -> Vec<u8> {
+        let mut bytes = session.as_bytes().to_vec();
+        bytes.extend_from_slice(Uuid::new_v4().as_bytes());
+        bytes.extend_from_slice(&[index, count]);
+        bytes.extend_from_slice(payload);
+        bytes
+    }
     impl Peer {
         async fn new(addr: SocketAddr, root: CertificateDer<'static>) -> Self {
             let (cert, key) = identity();
@@ -474,7 +366,7 @@ mod tests {
             .with_root_certificates(roots)
             .with_client_auth_cert(vec![cert], key)
             .unwrap();
-            tls.alpn_protocols = vec![b"pocketdesk-relay/1".to_vec()];
+            tls.alpn_protocols = vec![crate::tls::ALPN.to_vec()];
             let config = quinn::ClientConfig::new(Arc::new(
                 quinn::crypto::rustls::QuicClientConfig::try_from(tls).unwrap(),
             ));
@@ -499,20 +391,18 @@ mod tests {
                 .unwrap()
                 .unwrap()
         }
-    }
-    #[tokio::test]
-    async fn fixed_forwarding_pool_is_bounded_and_reuses_released_ports() {
-        let occupied = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let address = occupied.local_addr().unwrap();
-        let relay = Relay::new(address.ip(), Some(address.port()..=address.port()));
-        assert_eq!(
-            relay.bind_forward_socket().await.unwrap_err().kind(),
-            std::io::ErrorKind::AddrInUse
-        );
-        drop(occupied);
-        let allocated = relay.bind_forward_socket().await.unwrap();
-        assert_eq!(allocated.local_addr().unwrap().port(), address.port());
-        assert!(relay.bind_forward_socket().await.is_err());
+        async fn datagram(&self) -> Vec<u8> {
+            tokio::time::timeout(Duration::from_secs(3), self.conn.read_datagram())
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+        }
+        async fn no_datagram(&self) -> bool {
+            tokio::time::timeout(Duration::from_millis(150), self.conn.read_datagram())
+                .await
+                .is_err()
+        }
     }
 
     #[tokio::test]
@@ -524,7 +414,7 @@ mod tests {
         )
         .unwrap();
         let addr = endpoint.local_addr().unwrap();
-        let relay = Arc::new(Relay::new(addr.ip(), None));
+        let relay = Arc::new(Relay::new());
         let r = relay.clone();
         let accept = tokio::spawn(async move {
             while let Some(incoming) = endpoint.accept().await {
@@ -563,7 +453,7 @@ mod tests {
             panic!("expected ready")
         };
         assert!(matches!(host.next().await, Message::Incoming { .. }));
-        // Pending sessions count toward the same per-host capacity as allocations.
+        // Pending sessions count toward the same per-host capacity as forwarded ones.
         phone
             .send(Message::Connect {
                 host: host.fp.clone(),
@@ -584,54 +474,35 @@ mod tests {
         phone.send(Message::Close { session: second }).await;
         assert!(matches!(phone.next().await, Message::Close { .. }));
         assert!(matches!(host.next().await, Message::Close { .. }));
+
+        // Nothing is forwarded before the phone asks.
+        let early = piece(session, 0, 1, &[1; 100]);
+        phone.conn.send_datagram(early.into()).unwrap();
+        assert!(host.no_datagram().await);
+
         let mut stranger = Peer::new(addr, cert).await;
         stranger.send(Message::Allocate { session }).await;
         assert!(matches!(stranger.next().await, Message::NotFound));
         phone.send(Message::Allocate { session }).await;
-        let Message::Forward { port, token, .. } = phone.next().await else {
-            panic!("expected forwarding")
-        };
-        assert!(matches!(host.next().await, Message::Forward { .. }));
-        let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let token = hex::decode(token).unwrap();
-        let payload = vec![42; 1500];
-        let mut packet = token.clone();
-        packet.extend_from_slice(&payload);
-        udp.send_to(&packet, SocketAddr::new(addr.ip(), port))
-            .await
+        assert!(matches!(phone.next().await, Message::Forward { session: s } if s == session));
+        assert!(matches!(host.next().await, Message::Forward { session: s } if s == session));
+
+        // Full-size pieces pass unchanged both ways.
+        let up = piece(session, 0, 2, &[42; 1000]);
+        phone.conn.send_datagram(up.clone().into()).unwrap();
+        assert_eq!(host.datagram().await, up);
+        let down = piece(session, 1, 2, &[7; 200]);
+        host.conn.send_datagram(down.clone().into()).unwrap();
+        assert_eq!(phone.datagram().await, down);
+
+        // A connection outside the session can't inject into it, even knowing its ID.
+        stranger
+            .conn
+            .send_datagram(piece(session, 0, 1, &[9; 50]).into())
             .unwrap();
-        let mut assembler = crate::packets::Assembler::default();
-        let received = tokio::time::timeout(Duration::from_secs(3), async {
-            loop {
-                let fragment = host.conn.read_datagram().await.unwrap();
-                if let Some(packet) = assembler.push(&fragment) {
-                    break packet;
-                }
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(received, payload);
-        for p in crate::packets::encode(session, &payload) {
-            host.conn.send_datagram(p.into()).unwrap();
-        }
-        let mut bytes = [0; 1600];
-        let (len, _) = tokio::time::timeout(Duration::from_secs(3), udp.recv_from(&mut bytes))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(&bytes[..len], packet.as_slice());
-        // The allocation cannot be redirected by another UDP sender, even with the token.
-        let other = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        other
-            .send_to(&packet, SocketAddr::new(addr.ip(), port))
-            .await
-            .unwrap();
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), host.conn.read_datagram())
-                .await
-                .is_err()
-        );
+        assert!(host.no_datagram().await);
+        assert!(phone.no_datagram().await);
+
         host.send(Message::Allow {
             fingerprints: vec![],
         })
@@ -640,6 +511,11 @@ mod tests {
         assert!(matches!(host.next().await, Message::Close { .. }));
         assert!(matches!(host.next().await, Message::Pong));
         assert!(relay.state.lock().unwrap().sessions.is_empty());
+        phone
+            .conn
+            .send_datagram(piece(session, 0, 1, &[3; 50]).into())
+            .unwrap();
+        assert!(host.no_datagram().await);
         phone.send(Message::Allocate { session }).await;
         assert!(matches!(phone.next().await, Message::NotFound));
         host.conn.close(0u32.into(), b"test");

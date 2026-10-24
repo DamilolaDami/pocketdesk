@@ -1,4 +1,3 @@
-mod packets;
 mod protocol;
 mod relay;
 mod tls;
@@ -6,7 +5,6 @@ mod tls;
 use clap::Parser;
 use sha2::{Digest, Sha256};
 use std::{
-    ops::RangeInclusive,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -15,9 +13,6 @@ use std::{
 struct Options {
     #[arg(long, default_value = "0.0.0.0:4433")]
     listen: String,
-    /// Fixed public forwarding ports (required behind Fly's UDP routing).
-    #[arg(long, value_parser = parse_ports)]
-    forward_ports: Option<RangeInclusive<u16>>,
     #[arg(long)]
     cert: PathBuf,
     #[arg(long)]
@@ -37,16 +32,9 @@ async fn main() -> anyhow::Result<()> {
         options.max_connections > 0,
         "max-connections must be positive"
     );
-    anyhow::ensure!(
-        !options
-            .forward_ports
-            .as_ref()
-            .is_some_and(|ports| ports.contains(&listen.port())),
-        "forwarding pool overlaps control port"
-    );
     let (config, mut tls_digest) = load_tls(&options.cert, &options.key)?;
     let endpoint = quinn::Endpoint::server(config, listen)?;
-    let relay = Arc::new(relay::Relay::new(listen.ip(), options.forward_ports));
+    let relay = Arc::new(relay::Relay::new());
     let permits = Arc::new(tokio::sync::Semaphore::new(options.max_connections));
     let mut refresh = tokio::time::interval(std::time::Duration::from_secs(60));
     eprintln!("PocketDesk relay listening on {}", endpoint.local_addr()?);
@@ -93,25 +81,6 @@ fn load_tls(cert: &Path, key: &Path) -> anyhow::Result<(quinn::ServerConfig, [u8
     let key = rustls_pemfile::private_key(&mut key_bytes.as_slice())?
         .ok_or_else(|| anyhow::anyhow!("missing private key"))?;
     Ok((tls::server(certs, key)?, digest.finalize().into()))
-}
-
-fn parse_ports(value: &str) -> Result<RangeInclusive<u16>, String> {
-    let (start, end) = value.split_once('-').ok_or("use START-END")?;
-    let start: u16 = start.parse().map_err(|_| "invalid start port")?;
-    let end: u16 = end.parse().map_err(|_| "invalid end port")?;
-    if start == 0 || end < start || u32::from(end) - u32::from(start) >= 1024 {
-        return Err("use 1 to 1024 nonzero ports in ascending order".into());
-    }
-    Ok(start..=end)
-}
-
-#[cfg(test)]
-#[test]
-fn forwarding_port_range_validation() {
-    assert_eq!(parse_ports("50000-50031").unwrap(), 50000..=50031);
-    for value in ["0-10", "50001-50000", "1-2000", "65535-65536", "50000"] {
-        assert!(parse_ports(value).is_err());
-    }
 }
 
 #[cfg(test)]

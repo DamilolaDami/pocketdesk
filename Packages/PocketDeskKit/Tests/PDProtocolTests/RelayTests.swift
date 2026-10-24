@@ -46,7 +46,6 @@ struct RelayTests {
         #expect(assembler.receive(fragments[0], now: now) == nil)
         #expect(assembler.receive(fragments[1], now: now + .seconds(2)) == nil)
         #expect(RelayPacket.fragments(session: id, payload: Data(repeating: 0, count: 1501)).isEmpty)
-        #expect(RelayPacket.token("z".padding(toLength: 32, withPad: "z", startingAt: 0)) == nil)
     }
     @Test func addressValidation() {
         #expect(RelayServer(address: "relay.example.com") == RelayServer(host: "relay.example.com", port: 4433))

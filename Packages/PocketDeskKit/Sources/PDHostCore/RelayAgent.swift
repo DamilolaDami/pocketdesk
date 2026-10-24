@@ -97,20 +97,19 @@
                         continue
                     }
                     incoming[session] = phone
-                case .forward(let session, _, let token):
-                    guard incoming[session].map(peers.contains) == true, shims[session] == nil,
-                        RelayPacket.token(token) != nil
-                    else {
+                case .forward(let session):
+                    guard incoming[session].map(peers.contains) == true, shims[session] == nil else {
                         try await relay.send(.close(session: session))
                         continue
                     }
                     let socket = try RelayLoopbackSocket()
                     let listenerPort = port
                     let task = Task {
+                        let sender = OrderedDatagramSender(relay.datagrams)
                         do {
-                            for try await packet in socket.packets where packet.port == listenerPort {
+                            sending: for try await packet in socket.packets where packet.port == listenerPort {
                                 for fragment in RelayPacket.fragments(session: session, payload: packet.data) {
-                                    try await relay.datagrams.send(fragment)
+                                    guard sender.send(fragment) else { break sending }
                                 }
                             }
                         } catch {}

@@ -1,8 +1,8 @@
 # Fly.io single-instance deployment
 
 Deploy from `Services/relay`. The checked-in `fly.toml` uses one 512MB Machine in London,
-a dedicated IPv4, a 1GB `relay_certs` volume, UDP 4433 for Quinn, and 32 explicit forwarding
-ports (50000–50031). State is local to the Machine: **do not add replicas or regions**.
+a dedicated IPv4, a 1GB `relay_certs` volume, and UDP 4433 for Quinn, which carries both
+control and forwarded traffic. State is local to the Machine: **do not add replicas or regions**.
 There is no public UDP IPv6/shared-IPv4 support on Fly. Deployments use the immediate
 strategy and interrupt sessions; clients need to reconnect/retry afterwards.
 
@@ -72,9 +72,9 @@ updates its TLS server config for new handshakes without terminating existing co
 A temporarily incomplete/mismatched renewal leaves the previous good certificate active.
 Caddy handles certificate issuance only; PocketDesk QUIC never passes through its TLS proxy.
 
-The deployment resolves `fly-global-services` and binds **both** the control and forwarding
-UDP sockets to that address. Every forwarding port is listed separately because Fly does
-not rewrite UDP ports. Arbitrary OS-selected ephemeral forwarding ports won't work here.
+The deployment resolves `fly-global-services` and binds the relay's one UDP socket to that
+address. (Protocol version 1 also needed a pool of 32 forwarding ports, 50000–50031; version
+2 forwards over the QUIC connections and needs no extra ports.)
 
 ## Verify before use
 

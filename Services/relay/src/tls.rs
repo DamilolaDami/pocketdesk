@@ -1,5 +1,8 @@
 //! Device certificates are identities, not CA-issued accounts. CertificateVerify must still
 //! prove possession of the private key; authorization uses the SHA-256 leaf fingerprint.
+/// Version 2 carries the phone's traffic as QUIC datagrams, like the Mac's, instead of UDP.
+pub const ALPN: &[u8] = b"pocketdesk-relay/2";
+
 use rustls::{
     DigitallySignedStruct, DistinguishedName, Error, SignatureScheme,
     client::danger::HandshakeSignatureValid,
@@ -66,7 +69,7 @@ pub fn server(
     .with_protocol_versions(&[&rustls::version::TLS13])?
     .with_client_cert_verifier(Arc::new(DeviceVerifier))
     .with_single_cert(certs, key)?;
-    tls.alpn_protocols = vec![b"pocketdesk-relay/1".to_vec()];
+    tls.alpn_protocols = vec![ALPN.to_vec()];
     let mut config = quinn::ServerConfig::with_crypto(Arc::new(
         quinn::crypto::rustls::QuicServerConfig::try_from(tls)?,
     ));
@@ -108,7 +111,7 @@ mod tests {
         .unwrap()
         .with_root_certificates(roots)
         .with_no_client_auth();
-        tls.alpn_protocols = vec![b"pocketdesk-relay/1".to_vec()];
+        tls.alpn_protocols = vec![ALPN.to_vec()];
         let mut client = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
         client.set_default_client_config(quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(tls).unwrap(),

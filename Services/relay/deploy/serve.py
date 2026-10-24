@@ -52,7 +52,6 @@ def main():
             if relay is None and certificate.is_file() and key.is_file():
                 relay = subprocess.Popen([
                     "pocketdesk-relay", "--listen", "fly-global-services:4433",
-                    "--forward-ports", os.environ.get("RELAY_FORWARD_PORTS", "50000-50031"),
                     "--max-connections", os.environ.get("RELAY_MAX_CONNECTIONS", "256"),
                     "--cert", str(certificate), "--key", str(key),
                 ])

@@ -2,7 +2,8 @@ import Foundation
 
 /// Versioned independently from the end-to-end PocketDesk session. Flat JSON matches Quinn.
 public enum RelayMessage: Sendable, Equatable, Codable {
-    public static let alpn = "pocketdesk-relay/1"
+    /// Version 2: the phone's traffic travels as QUIC datagrams, like the Mac's.
+    public static let alpn = "pocketdesk-relay/2"
     public static let maximumSize = 16_384
     case register(hostID: UUID)
     case allow(fingerprints: [String])
@@ -10,13 +11,14 @@ public enum RelayMessage: Sendable, Equatable, Codable {
     case incoming(phone: String, session: UUID)
     case ready(session: UUID)
     case allocate(session: UUID)
-    case forward(session: UUID, port: UInt16, token: String)
+    /// Forwarding is on: both devices now send this session's pieces as datagrams.
+    case forward(session: UUID)
     case close(session: UUID)
     case notFound
     case error(reason: String)
     case ping
     case pong
-    private enum Keys: String, CodingKey { case type, hostID, fingerprints, host, phone, session, port, token, reason }
+    private enum Keys: String, CodingKey { case type, hostID, fingerprints, host, phone, session, reason }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         switch try c.decode(String.self, forKey: .type) {
@@ -28,10 +30,7 @@ public enum RelayMessage: Sendable, Equatable, Codable {
                 phone: try c.decode(String.self, forKey: .phone), session: try c.decode(UUID.self, forKey: .session))
         case "ready": self = .ready(session: try c.decode(UUID.self, forKey: .session))
         case "allocate": self = .allocate(session: try c.decode(UUID.self, forKey: .session))
-        case "forward":
-            self = .forward(
-                session: try c.decode(UUID.self, forKey: .session), port: try c.decode(UInt16.self, forKey: .port),
-                token: try c.decode(String.self, forKey: .token))
+        case "forward": self = .forward(session: try c.decode(UUID.self, forKey: .session))
         case "close": self = .close(session: try c.decode(UUID.self, forKey: .session))
         case "notFound": self = .notFound
         case "error": self = .error(reason: try c.decode(String.self, forKey: .reason))
@@ -62,11 +61,9 @@ public enum RelayMessage: Sendable, Equatable, Codable {
         case .allocate(let session):
             try c.encode("allocate", forKey: .type)
             try c.encode(session, forKey: .session)
-        case .forward(let session, let port, let token):
+        case .forward(let session):
             try c.encode("forward", forKey: .type)
             try c.encode(session, forKey: .session)
-            try c.encode(port, forKey: .port)
-            try c.encode(token, forKey: .token)
         case .close(let session):
             try c.encode("close", forKey: .type)
             try c.encode(session, forKey: .session)
@@ -132,13 +129,6 @@ public enum RelayPacket {
         return UUID(
             uuid: (b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15])
         )
-    }
-    public static func token(_ text: String) -> Data? {
-        guard text.count == 32, text.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
-            return nil
-        }
-        let chars = Array(text)
-        return Data(stride(from: 0, to: 32, by: 2).compactMap { UInt8(String(chars[$0...$0 + 1]), radix: 16) })
     }
     public static func fragments(session: UUID, payload: Data, packet: UUID = UUID()) -> [Data] {
         guard !payload.isEmpty, payload.count <= maximumPayload else { return [] }

@@ -12,6 +12,7 @@ export default defineConfig({
         privacy: "privacy.html",
         terms: "terms.html",
         built: "how-its-built.html",
+        releases: "releases.html",
       },
     },
   },

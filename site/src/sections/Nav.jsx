@@ -45,6 +45,7 @@ export function Nav({ home = "", page }) {
           ))}
           <a href={REPO}>GitHub</a>
           <a href="how-its-built.html" aria-current={page === "built" ? "page" : undefined}>How it’s built</a>
+          <a href="releases.html" aria-current={page === "releases" ? "page" : undefined}>Releases</a>
         </span>
         <button ref={menuButton} type="button" className="nav-toggle" aria-expanded={menuOpen} aria-controls="mobile-menu" onClick={() => setMenuOpen(!menuOpen)}>
           {menuOpen ? "Close" : "Explore"}
@@ -58,6 +59,7 @@ export function Nav({ home = "", page }) {
             ))}
             <a href={REPO}>GitHub<span aria-hidden="true">↗</span></a>
             <a href="how-its-built.html" aria-current={page === "built" ? "page" : undefined}>How it’s built<span aria-hidden="true">↗</span></a>
+            <a href="releases.html" aria-current={page === "releases" ? "page" : undefined}>Releases<span aria-hidden="true">↗</span></a>
             <a className="mobile-menu-cta" href={TESTFLIGHT}>Get the iPhone beta<span aria-hidden="true">→</span></a>
           </div>
         )}

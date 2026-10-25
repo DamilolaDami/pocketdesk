@@ -11,6 +11,7 @@ export default defineConfig({
         main: "index.html",
         privacy: "privacy.html",
         terms: "terms.html",
+        security: "security.html",
         built: "how-its-built.html",
         releases: "releases.html",
       },

@@ -1,0 +1,17 @@
+{
+  "id": "1-0-69",
+  "version": "1.0",
+  "build": "69",
+  "date": "2026-10-24",
+  "title": "The iPhone beta, updated.",
+  "summary": "An update to the public TestFlight beta.",
+  "changes": [
+    {
+      "platform": "iphone",
+      "title": "Try PocketDesk on your own iPhone",
+      "text": "Pair with your Mac, stream its screen and sound, use shortcuts, and send files. Remote Access is available as an optional beta setup for connections away from home."
+    }
+  ],
+  "status": "published",
+  "iphoneStatus": "available"
+}

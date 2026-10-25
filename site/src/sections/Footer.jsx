@@ -3,7 +3,7 @@ import { REPO } from "../ui.jsx";
 
 const COLUMNS = [
   ["Product", [["How it works", "#how"], ["Shortcuts", "#shortcuts"], ["Features", "#features"], ["Releases", "releases.html"]]],
-  ["Trust", [["Privacy Policy", "privacy.html"], ["Terms of Use", "terms.html"], ["Security", `${REPO}/blob/main/SECURITY.md`], ["License", `${REPO}/blob/main/LICENSE`]]],
+  ["Trust", [["Privacy Policy", "privacy.html"], ["Terms of Use", "terms.html"], ["Security", "security.html"], ["License", `${REPO}/blob/main/LICENSE`]]],
   ["Open source", [["GitHub", REPO], ["How it's built", "how-its-built.html"], ["Report a problem", `${REPO}/issues`]]],
 ];
 

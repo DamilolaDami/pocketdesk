@@ -9,9 +9,10 @@ import { Nav } from "./sections/Nav.jsx";
 import { Footer } from "./sections/Footer.jsx";
 import { PrivacyPolicy } from "./legal/PrivacyPolicy.jsx";
 import { Terms } from "./legal/Terms.jsx";
+import { Security } from "./legal/Security.jsx";
 
-// privacy.html and terms.html share this entry; each says which document it is on <body>.
-const PAGES = { privacy: PrivacyPolicy, terms: Terms };
+// Document pages share this entry; each selects its content on <body>.
+const PAGES = { privacy: PrivacyPolicy, terms: Terms, security: Security };
 
 function LegalApp() {
   useSmoothScroll();

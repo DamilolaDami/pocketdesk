@@ -3,8 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node --test ../scripts/releases.test.mjs",
     "dev": "vite --port 4173 --strictPort",
-    "build": "vite build",
+    "build": "node ../scripts/releases.mjs check && vite build",
     "preview": "vite preview --port 4173"
   },
   "dependencies": {

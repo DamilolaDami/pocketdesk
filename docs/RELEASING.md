@@ -32,6 +32,25 @@ Information" until this exists.
 
 ## Every release
 
+### Prepare the notes once
+
+The files in `releases/*.json` are the shared source for the website and GitHub notes.
+The Releases page imports them automatically; no JSX edits or manual latest-version labels
+are needed. Create an entry from the repo root:
+
+```sh
+node scripts/releases.mjs new                  # current project version and commit count
+node scripts/releases.mjs new 1.0 75           # or an explicit archive version/build
+```
+
+This creates a **draft**, hidden from the website. Fill in `title`, `summary` and
+`changes` in the new JSON file. Each change has `platform` (`mac` or `iphone`), `title`
+and `text`; see `releases/1-0-74.json` for a complete example. Use the build number
+from the archive you actually ship: another commit changes the scripts' next build number.
+The command refuses to overwrite an existing entry.
+
+### Build and publish the apps
+
 ```sh
 scripts/release-ios.sh   # archive, sign and upload to App Store Connect for TestFlight
 scripts/release-mac.sh   # archive, sign with Developer ID, DMG, notarize and staple
@@ -48,8 +67,35 @@ scripts/release-mac.sh   # archive, sign with Developer ID, DMG, notarize and st
 
   ```sh
   cp .build/release/PocketDesk-<version>-<build>.dmg /tmp/PocketDesk.dmg
-  gh release create v<version> /tmp/PocketDesk.dmg --title "PocketDesk <version>" --notes "…"
+  node scripts/releases.mjs notes <release-id> > /tmp/pocketdesk-release-notes.md
+  gh release create v<tag-version> /tmp/PocketDesk.dmg --title "PocketDesk <version>" --notes-file /tmp/pocketdesk-release-notes.md
   ```
+
+### Publish the website entry
+
+After verifying the download, set `macURL` to the versioned GitHub DMG URL and `source`
+to the GitHub release page. Keep the `PocketDesk.dmg` asset name. For iPhone changes,
+set `iphoneStatus` to `awaiting-review` until Apple approves the build and it is added
+to the public beta, then change it to `available`. The website shows the pending status;
+the public TestFlight link can still serve the previously approved build.
+
+Change `status` from `draft` to `published` when the notes are ready to be public, then run:
+
+```sh
+node scripts/releases.mjs check
+npm --prefix site test
+npm --prefix site run build
+```
+
+Commit the release JSON file and push to `main`. The Website workflow now watches
+`releases/**` as well as `site/**`, so a notes-only edit redeploys the page. It validates
+metadata before building. Public entries appear newest first by date and numeric build;
+the Mac download comes from the newest entry with a Mac download, even for iPhone-only
+updates. Dates use `YYYY-MM-DD`; the draft command uses Africa/Lagos time.
+
+This automates notes reuse and website updates. Signing, notarization, GitHub publication
+and Apple's public-beta approval still use the steps above; the JSON does not query Apple
+or assert that an uploaded artifact is ready by itself.
 
 ## What gets signed how
 

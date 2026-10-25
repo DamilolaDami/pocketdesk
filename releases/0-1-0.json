@@ -1,0 +1,17 @@
+{
+  "id": "0-1-0",
+  "version": "0.1.0",
+  "date": "2026-10-24",
+  "title": "Hello, Mac.",
+  "summary": "The first public Mac release: a small app in your menu bar, ready for your iPhone.",
+  "macURL": "https://github.com/DamilolaDami/pocketdesk/releases/download/v0.1.0/PocketDesk.dmg",
+  "source": "https://github.com/DamilolaDami/pocketdesk/releases/tag/v0.1.0",
+  "changes": [
+    {
+      "platform": "mac",
+      "title": "The Mac host arrives",
+      "text": "A Developer ID-signed, Apple-notarized download with setup for Screen Recording and Accessibility, plus a pairing code for the iPhone app. Requires macOS 26 or later."
+    }
+  ],
+  "status": "published"
+}

@@ -48,7 +48,7 @@ export function Privacy() {
         </p>
         <p className="privacy-links">
           <a className="text-link" href="privacy.html">Read the privacy policy <span aria-hidden="true">→</span></a>
-          <a className="text-link" href="https://github.com/DamilolaDami/pocketdesk/blob/main/SECURITY.md">How it's secured <span aria-hidden="true">→</span></a>
+          <a className="text-link" href="security.html">How it's secured <span aria-hidden="true">→</span></a>
         </p>
       </Reveal>
     </section>

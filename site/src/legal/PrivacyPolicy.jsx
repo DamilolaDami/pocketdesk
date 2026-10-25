@@ -68,7 +68,7 @@ const SECTIONS = [
           the relay described below. Either way it's encrypted with TLS 1.3. When you pair, both devices
           show the same six-digit code and remember each other's key. After that, each side only
           talks to the exact device it paired with, so someone else on the same Wi-Fi can't watch or
-          join. Details are in our <a href={`${REPO}/blob/main/SECURITY.md`}>security notes</a>.
+          join. Details are on our <a href="security.html">security page</a>.
         </p>
       </>
     ),

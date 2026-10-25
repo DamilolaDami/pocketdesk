@@ -1,0 +1,34 @@
+{
+  "id": "1-0-74",
+  "version": "1.0",
+  "build": "74",
+  "date": "2026-10-25",
+  "title": "A warmer welcome. A better way to find your files.",
+  "summary": "A little guidance to get connected, and a few useful tools once you’re there.",
+  "macURL": "https://github.com/DamilolaDami/pocketdesk/releases/download/v1.0.0/PocketDesk.dmg",
+  "source": "https://github.com/DamilolaDami/pocketdesk/releases/tag/v1.0.0",
+  "changes": [
+    {
+      "platform": "iphone",
+      "title": "A guided first connection",
+      "text": "New iPhone setup walks you through getting the Mac app ready and finding your Mac, then hands over to the familiar scan-and-confirm pairing screens. Skip it any time; paired users go straight to their Macs."
+    },
+    {
+      "platform": "iphone",
+      "title": "Find the file you came for",
+      "text": "Search filenames in the current Mac folder, filter by file type, and sort by name, date modified or size. Folders stay first, and a reset gets you back to the full listing."
+    },
+    {
+      "platform": "iphone",
+      "title": "A little help, when you need it",
+      "text": "Your first connection offers a dismissible touch and keyboard guide. Setup and controls help are also available in Settings. Download errors keep your file browser in place."
+    },
+    {
+      "platform": "mac",
+      "title": "Get the iPhone app before pairing",
+      "text": "Mac onboarding now includes a TestFlight QR code, an Open button and a copyable link. The installation code is separate from the private pairing code that follows."
+    }
+  ],
+  "status": "published",
+  "iphoneStatus": "available"
+}

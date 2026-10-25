@@ -100,6 +100,8 @@ struct OnboardingWindow: View {
                 }
                 .frame(width: 460)
             }
+        case .iPhoneApp:
+            IPhoneAppPage()
         case .pair:
             PairingWindow(controller: controller, compact: true)
         case .done:
@@ -198,6 +200,55 @@ struct OnboardingWindow: View {
     private func go(to target: OnboardingStep) {
         forward = target > step
         withAnimation(.spring(duration: 0.55, bounce: 0.15)) { step = target }
+    }
+}
+
+/// Installing the app is separate from trusting this Mac: the next page handles pairing.
+private struct IPhoneAppPage: View {
+    private static let testFlightURL = URL(string: "https://testflight.apple.com/join/bQbCmDK7")!
+    private static let code = HostQRCode.image(for: testFlightURL.absoluteString)
+    @State private var copied = false
+
+    var body: some View {
+        Page(title: "Get PocketDesk on your iPhone",
+             text: "Scan with your iPhone’s Camera to open the TestFlight beta. Install TestFlight if asked, then install PocketDesk.") {
+            VStack(spacing: 10) {
+                if let code = Self.code {
+                    Image(nsImage: code)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 156, height: 156)
+                        .padding(16)
+                        .background(.white, in: .rect(cornerRadius: 20, style: .continuous))
+                        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+                        .accessibilityLabel("QR code for the PocketDesk TestFlight beta")
+                }
+                Text("Install first. Pair with this Mac next.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } action: {
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    Link(destination: Self.testFlightURL) {
+                        Label("Open TestFlight", systemImage: "arrow.up.right.square")
+                    }
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(Self.testFlightURL.absoluteString, forType: .string)
+                        copied = true
+                    } label: {
+                        Label(copied ? "Copied" : "Copy Link", systemImage: copied ? "checkmark" : "link")
+                    }
+                }
+                .buttonStyle(.glass)
+                .controlSize(.large)
+                Text(Self.testFlightURL.absoluteString)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
     }
 }
 

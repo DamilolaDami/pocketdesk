@@ -35,6 +35,8 @@ targets:
       path: Apps/Host/Info.plist
       properties:
         CFBundleDisplayName: PocketDesk
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.productivity
         NSLocalNetworkUsageDescription: PocketDesk uses your local network so your phone can connect to this Mac.
@@ -86,6 +88,8 @@ targets:
       path: Apps/Mobile/Info.plist
       properties:
         CFBundleDisplayName: PocketDesk
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         PDAppGroup: group.$(BUNDLE_ID_PREFIX).app
         UILaunchScreen: {}
         # Landscape fits a Mac display far better; the stream re-fits on rotation.
@@ -127,6 +131,8 @@ targets:
       path: Apps/Widgets/Info.plist
       properties:
         CFBundleDisplayName: PocketDesk
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         PDAppGroup: group.$(BUNDLE_ID_PREFIX).app
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
@@ -155,6 +161,8 @@ targets:
       path: Apps/Share/Info.plist
       properties:
         CFBundleDisplayName: PocketDesk
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         PDAppGroup: group.$(BUNDLE_ID_PREFIX).app
         NSLocalNetworkUsageDescription: PocketDesk finds your Mac on the local network.
         NSBonjourServices: [_pocketdesk._udp]

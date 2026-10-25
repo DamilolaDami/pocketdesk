@@ -9,6 +9,8 @@ import PDTransport
 @MainActor
 public final class SessionController {
     public let store = SessionStore()
+    /// Loaded synchronously, including Macs that are currently offline. Used for first-run UI.
+    public var hasPairedMacs: Bool { !trustStore.peers.isEmpty }
     public let display = VideoDisplay()
     /// The stream view's: where the Mac's caret moved, to keep it in a zoomed-in view. Not
     /// through the store, which redraws for every change.

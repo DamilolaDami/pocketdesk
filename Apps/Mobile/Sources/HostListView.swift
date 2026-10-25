@@ -518,7 +518,7 @@ private struct Artwork: View {
     }
 }
 
-private struct NearbyMacRow: View {
+struct NearbyMacRow: View {
     let host: DiscoveredHost
     let pair: () -> Void
 
@@ -546,7 +546,7 @@ private struct NearbyMacRow: View {
 }
 
 /// Shown until the first Mac appears; after a while, what usually fixes it.
-private struct SearchingCard: View {
+struct SearchingCard: View {
     let pairWithLink: () -> Void
     @State private var showsHelp = false
 

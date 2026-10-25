@@ -1,6 +1,6 @@
 /// The Mac app's first-run steps, in order. Pure; the window draws them.
 public enum OnboardingStep: Int, CaseIterable, Sendable, Comparable {
-    case welcome, screenRecording, accessibility, wakeAndLogin, pair, done
+    case welcome, screenRecording, accessibility, wakeAndLogin, iPhoneApp, pair, done
 
     public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 

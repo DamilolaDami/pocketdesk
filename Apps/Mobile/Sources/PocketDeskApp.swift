@@ -56,6 +56,15 @@ struct RootView: View {
     let controller: SessionController
     @Environment(\.displayScale) private var displayScale
     @AppStorage(SettingsKey.haptics) private var haptics = true
+    @AppStorage(PhoneOnboarding.finishedKey) private var setupFinished = false
+    @State private var setup: PhoneOnboarding
+
+    init(controller: SessionController) {
+        self.controller = controller
+        _setup = State(initialValue: PhoneOnboarding(
+            finished: UserDefaults.standard.bool(forKey: PhoneOnboarding.finishedKey),
+            hasPairedMacs: controller.hasPairedMacs))
+    }
 
     private var state: SessionState { controller.store.state }
 
@@ -94,7 +103,31 @@ struct RootView: View {
             guard haptics, let notice else { return nil }
             return notice.kind == .done ? .success : .warning
         }
-        .task { controller.startDiscovery() }
+        .task {
+            // Migrate existing installs once, even if their last Mac is forgotten later.
+            if controller.hasPairedMacs { setupFinished = true }
+            // New users reach discovery deliberately, after the Local Network explanation.
+            if !setup.isPresented { controller.startDiscovery() }
+        }
+        .onOpenURL { url in
+            if setup.isPresented, url.scheme == "pocketdesk", url.host == "pair" { setup.findMac() }
+        }
+        .onChange(of: state) { _, state in
+            let wasSettingUp = setup.isPresented
+            setup.receive(state)
+            if case .streaming = state, wasSettingUp { setupFinished = true }
+        }
+        .sheet(isPresented: Binding(get: { setup.showsControls }, set: { if !$0 { setup.dismissControls() } })) {
+            NavigationStack {
+                ControlsGuideView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { setup.dismissControls() }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+        }
         // A search shortcut, from a tile, widget or the stream: ask, then run it.
         .alert(controller.store.textRequest?.shortcut.name ?? "", isPresented: Binding(
             get: { controller.store.textRequest != nil },
@@ -108,7 +141,15 @@ struct RootView: View {
         switch state {
         case .idle, .discovering:
             // Idle only lasts until discovery starts on appear.
-            MainTabs(controller: controller, hosts: hosts)
+            Group {
+                if setup.isPresented {
+                    PhoneSetupView(controller: controller, hosts: hosts, flow: $setup, finish: finishSetup)
+                } else {
+                    MainTabs(controller: controller, hosts: hosts) {
+                        setup = PhoneOnboarding(finished: false, hasPairedMacs: false)
+                    }
+                }
+            }
                 .transition(.opacity)
         case .pairing(let host, let code):
             NavigationStack {
@@ -126,6 +167,12 @@ struct RootView: View {
                        retry: { controller.retry() }, back: { controller.disconnect() })
                 .transition(.opacity)
         }
+    }
+
+    private func finishSetup() {
+        setup.dismiss()
+        setupFinished = true
+        controller.startDiscovery()
     }
 
     private var hosts: [DiscoveredHost] {
@@ -156,6 +203,7 @@ enum AppTab: String {
 struct MainTabs: View {
     let controller: SessionController
     let hosts: [DiscoveredHost]
+    let showSetup: () -> Void
     @SceneStorage("tab") private var tab = AppTab.macs
 
     var body: some View {
@@ -167,7 +215,7 @@ struct MainTabs: View {
                 ShortcutsView(controller: controller)
             }
             Tab("Settings", systemImage: "gearshape.fill", value: .settings) {
-                SettingsView(controller: controller, hosts: hosts)
+                SettingsView(controller: controller, hosts: hosts, showSetup: showSetup)
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)

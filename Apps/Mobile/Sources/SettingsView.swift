@@ -34,6 +34,7 @@ enum SettingsKey {
 struct SettingsView: View {
     let controller: SessionController
     let hosts: [DiscoveredHost]
+    let showSetup: () -> Void
     @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
     @AppStorage(SettingsKey.streamQuality) private var quality = StreamQuality.best
     @AppStorage(RelayServer.enabledKey) private var relayEnabled = false
@@ -82,6 +83,18 @@ struct SettingsView: View {
                         PrivacySettingsPage(controller: controller, paired: paired)
                     } label: {
                         SettingsLabel("Privacy & Security", symbol: "hand.raised.fill", color: .green)
+                    }
+                }
+
+                Section("Help") {
+                    Button(action: showSetup) {
+                        SettingsLabel("Set Up a Mac", symbol: "laptopcomputer", color: Brand.accent)
+                    }
+                    .foregroundStyle(.primary)
+                    NavigationLink {
+                        ControlsGuideView()
+                    } label: {
+                        SettingsLabel("Touch & Keyboard Guide", symbol: "hand.tap.fill", color: .blue)
                     }
                 }
 

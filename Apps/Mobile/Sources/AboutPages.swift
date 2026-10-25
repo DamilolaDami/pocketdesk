@@ -8,6 +8,7 @@ import UIKit
     static let website = URL(string: "https://pocketdesk.runmira.dev/")!
     static let privacyPolicy = website.appending(path: "privacy.html")
     static let terms = website.appending(path: "terms.html")
+    static let macDownload = URL(string: "https://github.com/DamilolaDami/pocketdesk/releases/latest/download/PocketDesk.dmg")!
 
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–"

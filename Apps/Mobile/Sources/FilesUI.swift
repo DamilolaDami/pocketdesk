@@ -148,24 +148,40 @@ private struct FolderView: View {
     let macName: String
     @State private var list: FileList?
     @State private var problem: String?
+    @State private var options = FileBrowserOptions()
+    @State private var downloadProblem: String?
     /// Fetches under way, by file name: how far along.
     @State private var fetching: [String: Double] = [:]
     @State private var preview: URL?
 
     var body: some View {
+        let entries = options.applying(to: list?.entries ?? [])
         List {
-            if let list {
-                ForEach(list.entries) { entry in
-                    if entry.isFolder {
-                        NavigationLink(value: entry.isFolder && path.root == nil
-                                       ? FolderPath(root: SharedFolder.allCases.first { $0.name == entry.name })
-                                       : path.appending(entry.name)) {
-                            FileRow(entry: entry, progress: nil)
+            if let list, !list.entries.isEmpty {
+                Section {
+                    ForEach(entries) { entry in
+                        if entry.isFolder {
+                            NavigationLink(value: entry.isFolder && path.root == nil
+                                           ? FolderPath(root: SharedFolder.allCases.first { $0.name == entry.name })
+                                           : path.appending(entry.name)) {
+                                FileRow(entry: entry, progress: nil)
+                            }
+                        } else {
+                            Button { fetch(entry) } label: { FileRow(entry: entry, progress: fetching[entry.name]) }
+                                .foregroundStyle(.primary)
+                                .disabled(fetching[entry.name] != nil)
                         }
-                    } else {
-                        Button { fetch(entry) } label: { FileRow(entry: entry, progress: fetching[entry.name]) }
-                            .foregroundStyle(.primary)
-                            .disabled(fetching[entry.name] != nil)
+                    }
+                } header: {
+                    HStack {
+                        Text(path.root == nil ? "Shared Folders" : options.kind.title)
+                        Spacer()
+                        Text(options.isFiltering ? "\(entries.count) of \(list.entries.count)" : "\(entries.count) items")
+                            .monospacedDigit()
+                    }
+                } footer: {
+                    if path.root != nil {
+                        Text("Search and filters apply to this folder only.")
                     }
                 }
             }
@@ -178,17 +194,75 @@ private struct FolderView: View {
                 ProgressView()
             } else if list?.entries.isEmpty == true {
                 ContentUnavailableView("Empty Folder", systemImage: "folder")
+            } else if entries.isEmpty {
+                ContentUnavailableView {
+                    Label(options.searchText.isEmpty ? "No \(options.kind.title)" : "No Matching Items",
+                          systemImage: options.searchText.isEmpty ? options.kind.symbol : "magnifyingglass")
+                } description: {
+                    Text(options.searchText.isEmpty
+                         ? "There are no \(options.kind.title.lowercased()) in this folder. Try another file type."
+                         : "Nothing in this folder matches “\(options.searchText)”\(options.kind == .all ? "." : " in \(options.kind.title.lowercased()).")")
+                } actions: {
+                    Button("Reset Search and Filters") { options.query = ""; options.kind = .all }
+                        .buttonStyle(.bordered)
+                }
             }
         }
         .navigationTitle(path.root == nil ? macName : path.title)
+        .searchable(text: $options.query, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: path.root == nil ? "Search shared folders" : "Search this folder")
+        .toolbar {
+            if path.root != nil {
+                ToolbarItem(placement: .topBarTrailing) { filterMenu }
+            }
+        }
         .refreshable { await load() }
         .task { await load() }
         // Quick Look, with Share › Save to Files to keep it.
         .quickLookPreview($preview)
+        .alert("Couldn’t Download", isPresented: Binding(get: { downloadProblem != nil }, set: { if !$0 { downloadProblem = nil } })) {
+            Button("OK", role: .cancel) { downloadProblem = nil }
+        } message: {
+            Text(downloadProblem ?? "")
+        }
+    }
+
+    private var filterMenu: some View {
+        Menu {
+            Picker("File Type", selection: $options.kind) {
+                ForEach(FileBrowserOptions.Kind.allCases, id: \.self) { kind in
+                    Label(kind.title, systemImage: kind.symbol).tag(kind)
+                }
+            }
+            Picker("Sort By", selection: $options.sort) {
+                ForEach(FileBrowserOptions.Sort.allCases, id: \.self) { sort in
+                    Text(sort.title).tag(sort)
+                }
+            }
+            Section {
+                Text(options.sort == .newest ? "Newest first · Folders first"
+                     : options.sort == .largest ? "Largest first · Folders first" : "A–Z · Folders first")
+                if options.kind != .all || options.sort != .newest {
+                    Button("Reset Filters and Sort", systemImage: "arrow.counterclockwise") {
+                        options.kind = .all
+                        options.sort = .newest
+                    }
+                }
+            }
+        } label: {
+            Label("Filter and Sort", systemImage: options.kind == .all && options.sort == .newest
+                  ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+        }
+        .tint(options.kind == .all && options.sort == .newest ? .primary : Brand.accent)
+        .accessibilityValue("\(options.kind.title), sorted by \(options.sort.title)")
+        .disabled(list == nil || list?.problem != nil || problem != nil)
     }
 
     private func load() async {
-        do { list = try await files.list(path) } catch {
+        do {
+            list = try await files.list(path)
+            problem = nil
+        } catch {
             problem = "The Mac went away. Close this and open it again."
         }
     }
@@ -208,7 +282,7 @@ private struct FolderView: View {
                     }
                 }
             } catch {
-                problem = String(describing: error)
+                downloadProblem = String(describing: error)
             }
             fetching[entry.name] = nil
         }
@@ -245,12 +319,6 @@ private struct FileRow: View {
     }
 
     private var symbol: String {
-        let type = UTType(filenameExtension: (entry.name as NSString).pathExtension)
-        if type?.conforms(to: .image) == true { return "photo" }
-        if type?.conforms(to: .movie) == true { return "film" }
-        if type?.conforms(to: .pdf) == true { return "doc.richtext" }
-        if type?.conforms(to: .archive) == true { return "doc.zipper" }
-        if type?.conforms(to: .audio) == true { return "waveform" }
-        return "doc"
+        FileBrowserOptions.kind(of: entry).symbol
     }
 }

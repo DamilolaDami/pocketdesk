@@ -21,7 +21,7 @@ struct ClipboardTests {
                                   pairing: TrustEveryone(), clipboard: clipboard)
         let host = Task { try await session.run() }
         let video = Task { for try await _ in phone.videoFrames {} }
-        defer { video.cancel() }
+        defer { video.cancel(); host.cancel() }
         try await phone.send(.hello(Hello(deviceName: "Phone", viewport: Viewport(width: 390, height: 844, scale: 3),
                                           clipboardEnabled: clipboardEnabled)))
         var messages = phone.controlMessages.makeAsyncIterator()
@@ -40,10 +40,23 @@ struct ClipboardTests {
             if case .ping(let value) = message { try await phone.send(.pong(value)) }
             if case .streamConfig = message { break }
         }
-        try await Task.sleep(for: .milliseconds(100))
+        // streamConfig is sent before startStreaming finishes. A control round trip waits
+        // until the host has sampled the initial clipboard and entered its message loop.
+        // A fixed delay races encoder startup on a busy CI runner.
+        try await synchronize(phone, next)
         try await body(phone, next)
         try await phone.send(.bye(reason: "done"))
         try await host.value
+    }
+
+    private func synchronize(_ phone: LoopbackSession,
+                             _ next: () async throws -> ControlMessage?) async throws {
+        try await phone.send(.listDisplays)
+        let response = try await next()
+        guard case .displays = response else {
+            Issue.record("Expected a display response after pending control messages, got \(String(describing: response))")
+            throw TransportError.closed
+        }
     }
 
     @Test func copyingOnTheMacReachesThePhone() async throws {
@@ -58,6 +71,7 @@ struct ClipboardTests {
     @Test func thePhonesClipboardLandsOnTheMacWithoutComingBack() async throws {
         try await withSession { phone, next in
             try await phone.send(.clipboard(ClipboardItem(text: "from the phone")))
+            try await synchronize(phone, next)
             // Give the poller a few rounds to (wrongly) echo it, then copy something real.
             try await Task.sleep(for: .milliseconds(150))
             await clipboard.copy(ClipboardItem(text: "next"))
@@ -73,7 +87,7 @@ struct ClipboardTests {
             try await Task.sleep(for: .milliseconds(150))
             // Turned on mid-session: only what's copied from now on goes out.
             try await phone.send(.setClipboardEnabled(true))
-            try await Task.sleep(for: .milliseconds(100))
+            try await synchronize(phone, next)
             await clipboard.copy(ClipboardItem(text: "shared"))
             #expect(try await next() == .clipboard(ClipboardItem(text: "shared")))
         }

@@ -28,6 +28,13 @@ enum SettingsKey {
     static let keyBarEditing = "keyBarEditing"
     static let keyBarNavigation = "keyBarNavigation"
     static let keyBarFunction = "keyBarFunction"
+    /// The Now Playing Live Activity (`SessionController` reads these).
+    static let nowPlayingActivity = NowPlayingActivityPreferences.Key.enabled
+    static let nowPlayingArtwork = NowPlayingActivityPreferences.Key.showsArtwork
+    static let nowPlayingSkipButtons = NowPlayingActivityPreferences.Key.showsSkipButtons
+    static let nowPlayingEndsWhenPaused = NowPlayingActivityPreferences.Key.endsWhenPaused
+    static let nowPlayingStyle = NowPlayingActivityPreferences.Key.style
+    static let nowPlayingStartsByPush = NowPlayingActivityPreferences.Key.startsByPush
 }
 
 /// The top level: one row per area, like the Settings app. Each area has its own page.
@@ -39,6 +46,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.streamQuality) private var quality = StreamQuality.best
     @AppStorage(RelayServer.enabledKey) private var relayEnabled = false
     @AppStorage(RelayServer.addressKey) private var relayAddress = RelayServer.defaultAddress
+    @AppStorage(SettingsKey.nowPlayingActivity) private var nowPlayingOn = true
 
     private var paired: [DiscoveredHost] { hosts.filter(\.isPaired) }
 
@@ -68,6 +76,11 @@ struct SettingsView: View {
                         StreamingSettingsPage(controller: controller)
                     } label: {
                         row("Streaming", symbol: "play.rectangle.fill", color: .purple, value: quality.name)
+                    }
+                    NavigationLink {
+                        NowPlayingSettingsPage(controller: controller)
+                    } label: {
+                        row("Now Playing", symbol: "play.square.stack.fill", color: .red, value: nowPlayingOn ? "On" : "Off")
                     }
                     NavigationLink {
                         KeyboardSettingsPage()
@@ -141,7 +154,7 @@ private func externalRow(_ title: String, symbol: String, color: Color) -> some 
     }
 }
 
-private extension View {
+extension View {
     /// The look every settings page shares.
     func settingsPage(_ title: String) -> some View {
         scrollContentBackground(.hidden)
@@ -427,7 +440,7 @@ private struct AboutSettingsPage: View {
 }
 
 /// A row title with a colored rounded-square icon, like the Settings app.
-private struct SettingsLabel: View {
+struct SettingsLabel: View {
     let title: String
     let symbol: String
     let color: Color

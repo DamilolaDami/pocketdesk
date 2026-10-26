@@ -8,6 +8,7 @@ struct PocketDeskWidgets: WidgetBundle {
     var body: some Widget {
         ShortcutsWidget()
         RunShortcutControl()
+        NowPlayingLiveActivity()
     }
 }
 

@@ -56,12 +56,22 @@ public actor HostService: PairingAuthority {
         public var relayServer: RelayServer?
         /// Paired phones still need a yes from the person at the Mac for each session.
         public var askBeforeConnecting: Bool
+        /// Where phones' Now Playing push tokens are kept; `nil` keeps them in memory (tests).
+        public var nowPlayingPushesURL: URL?
+        /// Delivers Now Playing pushes. `nil` (until the relay can) means none are sent, and
+        /// nothing watches what's playing while phones aren't connected.
+        public var pushSender: (any LiveActivityPushSender)?
+        /// How often what's playing is checked for pushes.
+        public var pushInterval: Duration = .seconds(3)
 
         public init(hostID: UUID, hostName: String,
                     identityLabel: String = "com.pocketdesk.host.identity",
                     trustStoreURL: URL, inviteLifetime: Duration = .seconds(300),
                     approvalTimeout: Duration = .seconds(120), advertise: Bool = true,
-                    askBeforeConnecting: Bool = false, relayServer: RelayServer? = nil) {
+                    askBeforeConnecting: Bool = false, relayServer: RelayServer? = nil,
+                    nowPlayingPushesURL: URL? = nil, pushSender: (any LiveActivityPushSender)? = nil) {
+            self.nowPlayingPushesURL = nowPlayingPushesURL
+            self.pushSender = pushSender
             self.relayServer = relayServer
             self.hostID = hostID
             self.hostName = hostName
@@ -90,6 +100,10 @@ public actor HostService: PairingAuthority {
     private var relayGeneration = UUID()
     /// Live sessions by phone (a phone can have a stream and a quick app-list fetch at once).
     private var sessions: [Fingerprint: [UUID: HostSession]] = [:]
+    private let nowPlayingPushes: NowPlayingPushes
+    private var pushWatch: Task<Void, Never>?
+    /// What the push watcher last saw, to log only changes.
+    private var lastPushStatus: NowPlaying?
 
     public init(configuration: Configuration,
                 makeFrameSource: @escaping @Sendable () -> any FrameSource = { ScreenCaptureSource() },
@@ -99,6 +113,7 @@ public actor HostService: PairingAuthority {
         self.configuration = configuration
         self.identity = try DeviceIdentity.loadOrCreate(label: configuration.identityLabel)
         self.trustStore = try TrustStore.load(from: configuration.trustStoreURL)
+        self.nowPlayingPushes = NowPlayingPushes(url: configuration.nowPlayingPushesURL)
         self.makeFrameSource = makeFrameSource
         self.clipboard = clipboard
         self.input = input
@@ -107,9 +122,63 @@ public actor HostService: PairingAuthority {
 
     public var port: UInt16? { listener?.port }
 
+    /// A phone's Now Playing push registration arrived.
+    func register(_ push: NowPlayingPush, from peer: Fingerprint) async {
+        await nowPlayingPushes.register(push, from: peer, hostID: configuration.hostID)
+        await watchForPushesIfNeeded()
+    }
+
+    /// What happened to each push (never tokens or titles): `log stream --predicate 'category == "push"'`.
+    private static let pushLog = Logger(subsystem: "com.pocketdesk.host", category: "push")
+
+    /// Who delivers pushes: the configured sender (tests), else the relay while Remote Access is on.
+    private var pushSender: (any LiveActivityPushSender)? { configuration.pushSender ?? relayAgent }
+
+    /// Follows what's playing while any phone wants pushes and there's a way to send them.
+    private func watchForPushesIfNeeded() async {
+        guard pushWatch == nil, configuration.pushSender != nil || configuration.relayServer != nil,
+              await !nowPlayingPushes.isEmpty else { return }
+        let catalog = InstalledApps()
+        pushWatch = Task {
+            while !Task.isCancelled, await !nowPlayingPushes.isEmpty,
+                  configuration.pushSender != nil || configuration.relayServer != nil {
+                // Nothing reads what's playing while there's no relay to tell.
+                if let sender = pushSender {
+                    let status = await catalog.status()
+                    var connected: Set<Fingerprint> = []
+                    for (peer, live) in sessions {
+                        for session in live.values where await session.phoneIsPresent() { connected.insert(peer) }
+                    }
+                    let pushes = await nowPlayingPushes.pushes(for: status.nowPlaying, hostID: configuration.hostID,
+                                                               macName: configuration.hostName, connected: connected)
+                    if status.nowPlaying != lastPushStatus {
+                        Self.pushLog.info("Now Playing changed: \(pushes.count, privacy: .public) push(es), \(connected.count, privacy: .public) phone(s) connected")
+                    }
+                    lastPushStatus = status.nowPlaying
+                    for push in pushes {
+                        do {
+                            try await sender.send(push)
+                            Self.pushLog.info("Now Playing \(push.event.rawValue, privacy: .public) push delivered")
+                        } catch let error as LiveActivityPushError where error.tokenIsDead {
+                            Self.pushLog.error("Now Playing \(push.event.rawValue, privacy: .public) push: dead token, \(String(describing: error), privacy: .public)")
+                            await nowPlayingPushes.tokenRejected(push)
+                        } catch {
+                            Self.pushLog.error("Now Playing \(push.event.rawValue, privacy: .public) push failed: \(String(describing: error), privacy: .public)")
+                            await nowPlayingPushes.pushFailed(push)
+                        }
+                    }
+                }
+                try? await Task.sleep(for: configuration.pushInterval)
+            }
+            pushWatch = nil
+        }
+    }
+
     /// Listens until the task is cancelled.
     public func run() async throws {
         onEvent(.pairedPeersChanged(Array(trustStore.peers.values)))
+        // Phones that asked for pushes before the Mac last quit.
+        Task { await watchForPushesIfNeeded() }
         let advertisement = configuration.advertise
             ? QUICHostListener.Advertisement(name: configuration.hostName, hostID: configuration.hostID,
                                              kind: MacModel.current())
@@ -153,6 +222,7 @@ public actor HostService: PairingAuthority {
     public func setRelayServer(_ server: RelayServer?) {
         configuration.relayServer = server
         refreshRelay()
+        Task { await watchForPushesIfNeeded() }
     }
 
     private func refreshRelay() {
@@ -234,6 +304,7 @@ public actor HostService: PairingAuthority {
 
     /// Forgets the phone, and ends its sessions: an unpaired phone mustn't stay connected.
     public func revoke(_ peer: Fingerprint) async throws {
+        await nowPlayingPushes.forget(peer)
         trustStore.revoke(peer)
         await relayAgent?.update(peers: Array(trustStore.peers.keys))
         try trustStore.save(to: configuration.trustStoreURL)
@@ -331,6 +402,8 @@ public actor HostService: PairingAuthority {
                 onEvent(.sessionStreaming(peer: peer, config: config, window: window))
             case .fileReceived(_, let deviceName, let url):
                 onEvent(.fileReceived(deviceName: deviceName, url: url))
+            case .nowPlayingPush(let peer, let push):
+                Task { await self.register(push, from: peer) }
             }
         }
         let id = UUID()

@@ -12,16 +12,25 @@ public struct Shortcut: Codable, Sendable, Equatable, Hashable, Identifiable {
     /// Whether tapping it opens the stream. `nil` (and shortcuts saved before this existed)
     /// follows the action: media keys run in the background, everything else shows the Mac.
     public var showsMac: Bool?
+    /// Asks "Run …?" before it does anything: for Quit, Sleep and the like.
+    public var asksFirst: Bool?
+    /// Always runs on this Mac, whatever Settings › Run On says. `nil` follows Settings.
+    public var macID: UUID?
 
     public init(id: UUID = UUID(), name: String, symbol: String, color: ShortcutColor, action: MacAction,
-                showsMac: Bool? = nil) {
+                showsMac: Bool? = nil, asksFirst: Bool? = nil, macID: UUID? = nil) {
         self.id = id
         self.name = name
         self.symbol = symbol
         self.color = color
         self.action = action
         self.showsMac = showsMac
+        self.asksFirst = asksFirst
+        self.macID = macID
     }
+
+    /// Whether a tap asks before running.
+    public var confirms: Bool { asksFirst ?? false }
 
     /// What a tap does: open the stream, or run quietly and stay put.
     public var opensStream: Bool { showsMac ?? action.needsPicture }
@@ -33,7 +42,47 @@ public struct Shortcut: Codable, Sendable, Equatable, Hashable, Identifiable {
 
     /// The same shortcut under a new identity, for "Duplicate" and for adding a preset twice.
     public func copy() -> Shortcut {
-        Shortcut(name: name, symbol: symbol, color: color, action: action, showsMac: showsMac)
+        Shortcut(name: name, symbol: symbol, color: color, action: action, showsMac: showsMac,
+                 asksFirst: asksFirst, macID: macID)
+    }
+}
+
+// MARK: Sharing
+
+extension Shortcut {
+    /// Longer links than this aren't shortcuts anyone typed.
+    public static let maxSharedLength = 24_000
+
+    /// `pocketdesk://add?shortcut=…`: opens PocketDesk on another phone with this shortcut in
+    /// the editor, to look over before saving. Leaves out its ID and its Mac, which mean
+    /// nothing on another phone.
+    public var sharingURL: URL {
+        var shared = self
+        shared.macID = nil
+        let json = (try? JSONEncoder().encode(shared)) ?? Data()
+        let encoded = json.base64EncodedString()
+            .replacing("+", with: "-").replacing("/", with: "_").replacing("=", with: "")
+        var components = URLComponents()
+        components.scheme = "pocketdesk"
+        components.host = "add"
+        components.queryItems = [URLQueryItem(name: "shortcut", value: encoded)]
+        return components.url!
+    }
+
+    /// The shortcut a `sharingURL` carries, under a new ID. `nil` for anything else, or for one
+    /// the Mac wouldn't run.
+    public init?(sharingURL url: URL) {
+        guard url.scheme == "pocketdesk", url.host() == "add", url.absoluteString.count <= Self.maxSharedLength,
+              var encoded = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "shortcut" })?.value else { return nil }
+        encoded = encoded.replacing("-", with: "+").replacing("_", with: "/")
+        encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
+        guard let json = Data(base64Encoded: encoded),
+              let shared = try? JSONDecoder().decode(Shortcut.self, from: json),
+              shared.action.isValid,
+              !shared.name.trimmingCharacters(in: .whitespaces).isEmpty, shared.name.count <= 100 else { return nil }
+        self = shared.copy()
+        macID = nil
     }
 }
 
@@ -123,7 +172,7 @@ public struct ShortcutLibrary: Codable, Sendable, Equatable {
 /// Ready-made shortcuts offered in the editor.
 public struct ShortcutPreset: Sendable, Identifiable {
     public enum Category: String, Sendable, CaseIterable {
-        case websites = "Websites", apps = "Apps", controls = "Mac Controls"
+        case websites = "Websites", apps = "Apps", text = "Text", controls = "Mac Controls"
     }
 
     public var category: Category
@@ -168,7 +217,23 @@ public struct ShortcutPreset: Sendable, Identifiable {
         keys("Full Screen", code: 0x03, command | control, symbol: "arrow.up.left.and.arrow.down.right", color: .mint),
         keys("Close Window", code: 0x0D, command, symbol: "xmark.square.fill", color: .orange),
         keys("Quit App", code: 0x0C, command, symbol: "power", color: .red),
-        keys("Lock Mac", code: 0x0C, command | control, symbol: "lock.fill", color: .gray),
+        command("Lock Mac", .lockScreen, symbol: "lock.fill", color: .gray),
+        command("Sleep Display", .sleepDisplay, symbol: "display", color: .indigo),
+        command("Sleep Mac", .sleep, symbol: "moon.zzz.fill", color: .indigo, asksFirst: true),
+        command("Dark Mode", .toggleDarkMode, symbol: "circle.lefthalf.filled", color: .gray),
+        command("Screenshot", .screenshot, symbol: "camera.viewfinder", color: .teal),
+        ShortcutPreset(category: .apps, shortcut: Shortcut(
+            name: "Quit Music", symbol: "xmark.circle.fill", color: .red,
+            action: .quitApp(bundleID: "com.apple.Music", name: "Music"))),
+        text("Type on Mac", .typeText(MacAction.textPlaceholder), symbol: "keyboard.fill", color: .blue),
+        text("Copy to Mac", .copyText(MacAction.textPlaceholder), symbol: "doc.on.clipboard.fill", color: .indigo),
+        text("Type Today's Date", .typeText(MacAction.datePlaceholder), symbol: "calendar", color: .orange),
+        text("Type the Time", .typeText(MacAction.timePlaceholder), symbol: "clock.fill", color: .orange),
+        ShortcutPreset(category: .text, shortcut: Shortcut(
+            name: "Search the Web", symbol: "magnifyingglass", color: .blue,
+            // Spotlight, then the words, then Return: whatever the Mac's default search is.
+            action: .steps([.keystroke(code: 0x31, modifiers: command), .wait(milliseconds: 400),
+                            .typeText(MacAction.textPlaceholder + "\n")]))),
         media("Play / Pause", .playPause, symbol: "playpause.fill", color: .red),
         media("Next Track", .next, symbol: "forward.fill", color: .pink),
         media("Previous Track", .previous, symbol: "backward.fill", color: .pink),
@@ -191,6 +256,16 @@ public struct ShortcutPreset: Sendable, Identifiable {
         ShortcutPreset(category: .controls, shortcut: Shortcut(name: name, symbol: symbol, color: color, action: .media(key)))
     }
 
+    private static func command(_ name: String, _ command: MacCommand, symbol: String, color: ShortcutColor,
+                                asksFirst: Bool? = nil) -> ShortcutPreset {
+        ShortcutPreset(category: .controls, shortcut: Shortcut(name: name, symbol: symbol, color: color,
+                                                               action: .system(command), asksFirst: asksFirst))
+    }
+
+    private static func text(_ name: String, _ action: MacAction, symbol: String, color: ShortcutColor) -> ShortcutPreset {
+        ShortcutPreset(category: .text, shortcut: Shortcut(name: name, symbol: symbol, color: color, action: action))
+    }
+
     private static func keys(_ name: String, code: UInt16, _ modifiers: UInt32, symbol: String,
                              color: ShortcutColor) -> ShortcutPreset {
         ShortcutPreset(category: .controls, shortcut: Shortcut(name: name, symbol: symbol, color: color,
@@ -202,24 +277,41 @@ extension MacAction {
     /// Where your words go in a website shortcut: `youtube.com/results?search_query={text}`.
     public static let textPlaceholder = "{text}"
 
+    /// Today's date and the time, as the phone has them when it runs ("26 October 2026", "11:45").
+    public static let datePlaceholder = "{date}"
+    public static let timePlaceholder = "{time}"
+
     /// It needs words before it can run (a search, say): the phone asks first.
     public var asksForText: Bool {
         switch self {
-        case .openURL(let url): url.contains(Self.textPlaceholder)
+        case .openURL(let text), .typeText(let text), .copyText(let text): text.contains(Self.textPlaceholder)
         case .steps(let steps): steps.contains(where: \.asksForText)
         default: false
         }
     }
 
-    /// With the words in place, URL-encoded; in every step of a routine.
+    /// With the words in place (URL-encoded in links); in every step of a routine.
     public func filling(_ text: String) -> MacAction {
+        replacing(Self.textPlaceholder, with: text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// With `{date}` and `{time}` filled in for `now`.
+    public func fillingClock(_ now: Date = .now) -> MacAction {
+        replacing(Self.datePlaceholder, with: now.formatted(date: .long, time: .omitted))
+            .replacing(Self.timePlaceholder, with: now.formatted(date: .omitted, time: .shortened))
+    }
+
+    private func replacing(_ placeholder: String, with value: String) -> MacAction {
         switch self {
         case .openURL(let url):
-            let encoded = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                .addingPercentEncoding(withAllowedCharacters: Self.unreserved) ?? ""
-            return .openURL(url.replacing(Self.textPlaceholder, with: encoded))
+            let encoded = value.addingPercentEncoding(withAllowedCharacters: Self.unreserved) ?? ""
+            return .openURL(url.replacing(placeholder, with: encoded))
+        case .typeText(let text):
+            return .typeText(text.replacing(placeholder, with: value))
+        case .copyText(let text):
+            return .copyText(text.replacing(placeholder, with: value))
         case .steps(let steps):
-            return .steps(steps.map { $0.filling(text) })
+            return .steps(steps.map { $0.replacing(placeholder, with: value) })
         default:
             return self
         }
@@ -238,9 +330,9 @@ extension MacAction {
     /// Mac Shortcuts you hear or feel, not see; steps need it if any of theirs does.
     public var needsPicture: Bool {
         switch self {
-        case .media, .mediaIn, .setVolume, .wait, .runShortcut: false
+        case .media, .mediaIn, .setVolume, .wait, .runShortcut, .copyText, .quitApp, .system: false
         case .steps(let steps): steps.contains(where: \.needsPicture)
-        case .openURL, .openApp, .keystroke: true
+        case .openURL, .openApp, .keystroke, .typeText: true
         }
     }
 
@@ -275,10 +367,30 @@ extension MacAction {
         case .wait(let milliseconds):
             return milliseconds % 1000 == 0 ? "Wait \(milliseconds / 1000) s"
                 : "Wait \((Double(milliseconds) / 1000).formatted(.number.precision(.fractionLength(1)))) s"
+        case .typeText(let text):
+            return "Types \(Self.quoted(text))"
+        case .copyText(let text):
+            return "Copies \(Self.quoted(text))"
+        case .quitApp(_, let name):
+            return "Quits \(name)"
+        case .system(let command):
+            return command.title
         case .steps(let steps):
             return steps.count == 1 ? steps[0].summary : "\(steps.count) steps"
         }
     }
+
+    /// A snippet for a summary: “what you type”, or "what you say" for one that asks.
+    private static func quoted(_ text: String) -> String {
+        if text == textPlaceholder { return "what you say" }
+        if text == datePlaceholder { return "today's date" }
+        if text == timePlaceholder { return "the time" }
+        let line = text.split(separator: "\n").first.map(String.init) ?? ""
+        return "“\(line.count > 24 ? line.prefix(24) + "…" : line)”"
+    }
+
+    /// Every placeholder, for the editor's insert buttons.
+    public static let placeholders = [textPlaceholder, datePlaceholder, timePlaceholder]
 
     static func keyName(code: UInt16, modifiers: UInt32) -> String {
         var name = ""
@@ -289,5 +401,17 @@ extension MacAction {
         let keys: [UInt16: String] = [0x31: "Space", 0x7E: "↑", 0x7D: "↓", 0x7B: "←", 0x7C: "→", 0x30: "⇥",
                                       0x24: "↩", 0x35: "⎋", 0x03: "F", 0x0C: "Q", 0x0D: "W"]
         return name + (keys[code] ?? "Key \(code)")
+    }
+}
+
+extension MacCommand {
+    public var title: String {
+        switch self {
+        case .lockScreen: "Lock screen"
+        case .sleepDisplay: "Sleep display"
+        case .sleep: "Sleep"
+        case .toggleDarkMode: "Dark mode on / off"
+        case .screenshot: "Screenshot to Desktop"
+        }
     }
 }

@@ -5,4 +5,12 @@
 //   BUNDLE_ID_PREFIX = com.you.pocketdesk
 //
 // Without it the app builds with the project's own prefix, which only its owner can sign.
+// The phone app's entitlements. Personal (free) teams can't have Push Notifications, so
+// builds leave it out unless Local.xcconfig or Release.xcconfig says otherwise:
+//
+//   PD_APP_ENTITLEMENTS = Apps/Mobile/PocketDesk-Push.entitlements
+//
+// Without push, the Mac can't start the Now Playing Live Activity while the app is closed.
+PD_APP_ENTITLEMENTS = Apps/Mobile/PocketDesk.entitlements
+
 #include? "Local.xcconfig"

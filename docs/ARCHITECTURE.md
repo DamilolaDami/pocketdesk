@@ -324,6 +324,70 @@ parameter (`needsValueError`). Quick picks include Search YouTube, Netflix, Goog
 - Tiles: Play / Pause shows the title and artist and swaps between play and pause; volume tiles
   show the level or "Muted".
 
+## More shortcut actions (protocol v19)
+
+- New `MacAction`s: `typeText` (Unicode key events, so any keyboard layout; new lines press
+  Return), `copyText` (the Mac's clipboard), `quitApp` (`terminate()`, as ⌘Q, so apps can ask
+  to save; already closed counts as done) and `system(MacCommand)`: lock (⌃⌘Q), sleep display
+  and sleep (`pmset`; sleep waits 2 s so the phone hears it worked), dark mode (System Events,
+  which macOS asks about once) and a silent screenshot to the Desktop. Text is capped at
+  `MacAction.maxTextLength`. None of this grants anything new: a paired phone can already
+  type, press ⌘Q and click the Apple menu.
+- Placeholders: `{text}` asks (links percent-encode it, text actions don't), and `{date}` and
+  `{time}` are filled on the phone when it runs (`fillingClock`).
+- Per shortcut (phone only, optional fields so older libraries load): `asksFirst` puts up a
+  "Run …?" dialog (Siri uses `requestConfirmation`), `macID` always runs it on one Mac, even
+  while streaming another.
+- Sharing: `Shortcut.sharingURL` is `pocketdesk://add?shortcut=<base64url JSON>` without its ID
+  or Mac. Opening one never saves it: it opens in the editor to look over first, and links
+  the Mac would refuse (`isValid`) or over `maxSharedLength` are ignored.
+- Siri and the Shortcuts app also get Type on Computer, Control Computer (lock, sleep,
+  display, dark mode, screenshot) and Set Computer Volume.
+
+## Now Playing Live Activity (no protocol change)
+
+What the watched Mac plays, on the Lock Screen and in the Dynamic Island, from the same
+`MacStatus` live tiles use.
+
+- `NowPlayingActivityModel` (pure, tested) turns each status into a step: start (only for
+  something playing, not a paused song), update (only on change), replace (another Mac) or
+  end (playback stopped, the Mac missing for two status checks, or switched off in Settings).
+  `SessionController` sends the steps, in order, to a `NowPlayingPresenter`; on iOS that's
+  `LiveActivityPresenter`, which adopts an activity left by an earlier launch.
+- Content stays under ActivityKit's 4 KB: the cover is saved in the App Group
+  (`NowPlayingArtwork`, one file named by its hash) and the card carries its name and average
+  color. The widget extension (`NowPlayingLiveActivity`) reads the file.
+- Buttons are `NowPlayingControlIntent`, a `LiveActivityIntent` compiled into both targets but
+  run in the app's process (`WIDGET_EXTENSION` leaves out the app-only part). Play / Pause
+  flips the card at once, sends the media key over a short catalog connection, then listens
+  to the Mac's status for 3 s to catch the new song.
+- From a browser, the card shows the site ("netflix.com on Studio") and its icon: on a white
+  tile without a cover, as a badge on one with a cover, and its color when there's no cover.
+  macOS only says the browser, so the host (`PlayingSite`) asks Safari, Chrome, Arc, Brave,
+  Edge or Vivaldi for their tabs (JXA through `osascript`, once per song; macOS asks the person
+  at the Mac once) and picks the tab whose title holds what's playing. `NowPlaying.site` is
+  optional, sent from v19. The phone fetches the icon from the site itself (`FaviconLoader`),
+  shrinks it to 96 px and saves it next to the cover.
+- **Push-to-start (protocol v20).** `Hello.nowPlayingPush` gives the Mac
+  the activity's APNs push-to-start token, the running activity's own token, what it shows,
+  the look (`NowPlayingActivityPreferences`) and site icon colors; it travels only inside the
+  encrypted session, on stream and status connections (left out means no change, a `nil`
+  start token withdraws). On by default (Settings › Now Playing › Start When Music Plays).
+  The Mac (`NowPlayingPushes`) keeps tokens per phone (0600 file, dropped when the phone is
+  forgotten), runs the same `NowPlayingActivityModel`, and builds Apple's Live Activity
+  payloads; phones that are connected draw their own card and get none. Covers keep the
+  phone's names (SHA-256 of the JPEG) so a pushed card shows one the phone already saved;
+  site icons are named by site and kept. The APNs key can't ship in the Mac app, so the relay
+  sends: the Mac's `RelayAgent` asks with `push` and the relay signs and posts to Apple
+  (`Services/relay/README.md`, "Live Activity pushes"). With Remote Access off nothing is
+  sent and nothing watches while phones are away. A dead token (410, `BadDeviceToken`) drops
+  the start token, or just the closed card's, so the next song starts a new one. Push content isn't end-to-end
+  encrypted: the relay and Apple see titles and sites.
+- No push server, so updates only come while the app runs: content goes stale after 15
+  minutes and the card says to open PocketDesk.
+- Settings › Now Playing: on/off, style (album colors, PocketDesk blue, classic), album art,
+  skip buttons, end when paused. They travel in the card, so a change redraws it at once.
+
 ## Files (protocol v16)
 
 Photos and files go to the Mac's Downloads folder; the phone browses and fetches files from the

@@ -1,5 +1,5 @@
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 18
+public let protocolVersion: UInt16 = 20
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -116,6 +116,15 @@ public indirect enum MacAction: Codable, Sendable, Equatable, Hashable {
     case setVolume(Int)
     /// A pause between steps.
     case wait(milliseconds: Int)
+    /// Types the text on the Mac as if on its keyboard, whatever the keyboard layout. New
+    /// lines press Return.
+    case typeText(String)
+    /// Puts the text on the Mac's clipboard.
+    case copyText(String)
+    /// Quits an app the way ⌘Q does, so it can ask to save. Already closed counts as done.
+    case quitApp(bundleID: String?, name: String)
+    /// Something about the Mac itself: locking it, sleeping, dark mode, a screenshot.
+    case system(MacCommand)
     /// Several actions in order, one level deep; the Mac stops at the first that fails.
     case steps([MacAction])
 }
@@ -133,9 +142,18 @@ extension MacAction {
         case .wait(let milliseconds): (0...Self.maxWaitMilliseconds).contains(milliseconds)
         case .setVolume(let level): (0...100).contains(level)
         case .mediaIn(let key, _): key.isTransport
+        case .typeText(let text), .copyText(let text): !text.isEmpty && text.count <= Self.maxTextLength
         default: true
         }
     }
+
+    /// Longer than any snippet, short enough that typing it doesn't take minutes.
+    public static let maxTextLength = 10_000
+}
+
+/// Things a Mac does that aren't an app or a key.
+public enum MacCommand: String, Codable, Sendable, Hashable, CaseIterable {
+    case lockScreen, sleepDisplay, sleep, toggleDarkMode, screenshot
 }
 
 public struct MacShortcut: Codable, Sendable, Equatable, Hashable, Identifiable {
@@ -197,9 +215,13 @@ public struct Hello: Codable, Sendable, Equatable {
     public var clipboardEnabled: Bool
     public var mode: Mode
     public var quality: StreamQuality
+    /// How this Mac may start and update the phone's Now Playing Live Activity by push. Left
+    /// out (most quick connections) changes nothing; `startToken: nil` withdraws it.
+    public var nowPlayingPush: NowPlayingPush?
 
     public init(version: UInt16 = protocolVersion, deviceName: String, viewport: Viewport, mode: Mode = .stream, audioEnabled: Bool = true, preferredDisplayID: String? = nil, clipboardEnabled: Bool = true,
-                quality: StreamQuality = .best) {
+                quality: StreamQuality = .best, nowPlayingPush: NowPlayingPush? = nil) {
+        self.nowPlayingPush = nowPlayingPush
         self.quality = quality
         self.clipboardEnabled = clipboardEnabled
         self.version = version
@@ -472,15 +494,19 @@ public struct NowPlaying: Codable, Sendable, Equatable {
     public var artwork: String?
     /// The Mac app playing it (Spotify, Music, or the browser a video is in), to show and open.
     public var app: PlayerApp?
+    /// When a browser is playing it, the site's host ("www.netflix.com"), for its icon.
+    public var site: String?
 
     public static let artworkSize = 240
 
-    public init(title: String, artist: String? = nil, isPlaying: Bool, artwork: String? = nil, app: PlayerApp? = nil) {
+    public init(title: String, artist: String? = nil, isPlaying: Bool, artwork: String? = nil, app: PlayerApp? = nil,
+                site: String? = nil) {
         self.title = title
         self.artist = artist
         self.isPlaying = isPlaying
         self.artwork = artwork
         self.app = app
+        self.site = site
     }
 }
 

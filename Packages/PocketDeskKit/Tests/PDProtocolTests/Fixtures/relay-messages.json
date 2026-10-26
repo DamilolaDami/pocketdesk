@@ -7,5 +7,8 @@
   {"type":"allocate","session":"00000000-0000-0000-0000-000000000002"},
   {"type":"forward","session":"00000000-0000-0000-0000-000000000002"},
   {"type":"close","session":"00000000-0000-0000-0000-000000000002"},
-  {"type":"notFound"}, {"type":"error","reason":"sessionLimit"}, {"type":"ping"}, {"type":"pong"}
+  {"type":"notFound"}, {"type":"error","reason":"sessionLimit"}, {"type":"ping"}, {"type":"pong"},
+  {"type":"push","id":"00000000-0000-0000-0000-000000000003","phone":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","token":"abababababababababababababababababababababababababababababababab","environment":"sandbox","topic":"app.pocketdesk.app.push-type.liveactivity","payload":"{\"aps\":{\"event\":\"start\"}}"},
+  {"type":"pushed","id":"00000000-0000-0000-0000-000000000003","status":200},
+  {"type":"pushed","id":"00000000-0000-0000-0000-000000000003","status":410,"reason":"Unregistered"}
 ]

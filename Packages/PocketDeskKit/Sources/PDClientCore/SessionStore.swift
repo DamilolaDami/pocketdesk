@@ -102,6 +102,24 @@ public final class SessionStore {
         textRequest = nil
     }
 
+    /// A shortcut set to ask first, waiting for "Run".
+    public private(set) var confirmRequest: TextRequest?
+
+    public func ask(toConfirm shortcut: Shortcut, preferredHostID: UUID?) {
+        confirmRequest = TextRequest(shortcut: shortcut, preferredHostID: preferredHostID)
+    }
+
+    public func clearConfirmRequest() {
+        confirmRequest = nil
+    }
+
+    /// A shortcut from a shared link, for the editor to show before it's saved.
+    public private(set) var importedShortcut: Shortcut?
+
+    public func offer(imported shortcut: Shortcut?) {
+        importedShortcut = shortcut
+    }
+
     /// The target Mac's volume and now playing while live tiles are on screen.
     public private(set) var macStatus: MacStatus?
 

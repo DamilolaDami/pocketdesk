@@ -66,10 +66,12 @@ public actor ClientConnection {
         public var audioEnabled: Bool
         public var clipboardEnabled: Bool
         public var quality: StreamQuality
+        public var nowPlayingPush: NowPlayingPush?
 
         public init(endpoint: NWEndpoint?, hostFingerprint: Fingerprint, invite: PairingInvite?,
                     deviceName: String, viewport: Viewport, audioEnabled: Bool = true, preferredDisplayID: String? = nil,
-                    clipboardEnabled: Bool = true, quality: StreamQuality = .best, relay: RelayServer? = nil, findLocal: (@Sendable () async -> NWEndpoint?)? = nil) {
+                    clipboardEnabled: Bool = true, quality: StreamQuality = .best, relay: RelayServer? = nil, findLocal: (@Sendable () async -> NWEndpoint?)? = nil, nowPlayingPush: NowPlayingPush? = nil) {
+            self.nowPlayingPush = nowPlayingPush
             self.findLocal = findLocal
             self.relay = invite == nil ? relay : nil
             self.quality = quality
@@ -152,7 +154,8 @@ public actor ClientConnection {
             try await pair(session, invite: invite)
         }
         try await session.send(.hello(Hello(deviceName: request.deviceName, viewport: request.viewport, audioEnabled: request.audioEnabled, preferredDisplayID: request.preferredDisplayID,
-                                             clipboardEnabled: request.clipboardEnabled, quality: request.quality)))
+                                             clipboardEnabled: request.clipboardEnabled, quality: request.quality,
+                                             nowPlayingPush: request.nowPlayingPush)))
 
         let display = display
         let inputs = inputs.stream
@@ -360,7 +363,8 @@ extension ClientConnection {
     /// The Mac's status as it changes, and a round-trip time every `pingInterval` (a Mac too
     /// old to answer pings just never sends one).
     public static func watchStatus(endpoint: NWEndpoint?, hostFingerprint: Fingerprint, identity: DeviceIdentity,
-                                   deviceName: String, pingInterval: Duration = .seconds(2), relay: RelayServer? = nil)
+                                   deviceName: String, pingInterval: Duration = .seconds(2), relay: RelayServer? = nil,
+                                   nowPlayingPush: NowPlayingPush? = nil)
         -> AsyncThrowingStream<StatusUpdate, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -368,7 +372,7 @@ extension ClientConnection {
                     try await PathFinder.connect(local: endpoint, relay: relay, identity: identity, host: hostFingerprint, onPath: { _ in }) { session in
                         var control = session.controlMessages.makeAsyncIterator()
                         try await session.send(.hello(Hello(deviceName: deviceName, viewport: Viewport(width: 0, height: 0, scale: 1),
-                                                            mode: .catalog)))
+                                                            mode: .catalog, nowPlayingPush: nowPlayingPush)))
                         try await session.send(.watchStatus)
                         let clock = ContinuousClock()
                         let start = clock.now

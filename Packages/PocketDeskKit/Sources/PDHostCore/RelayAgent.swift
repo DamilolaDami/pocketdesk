@@ -1,5 +1,6 @@
 #if os(macOS)
     import Foundation
+    import OSLog
     import PDProtocol
     import PDSecurity
     import PDTransport
@@ -29,6 +30,10 @@
         private var updates: AsyncStream<[String]>.Continuation?
         private var shims: [UUID: (socket: RelayLoopbackSocket, task: Task<Void, Never>)] = [:]
         private var incoming: [UUID: String] = [:]
+        /// The relay connection while there is one, for pushes.
+        private var current: RelayConnection?
+        /// Pushes waiting for the relay's `pushed`.
+        private var pushReplies: [UUID: CheckedContinuation<Void, any Error>] = [:]
 
         public init(
             identity: DeviceIdentity, hostID: UUID, port: UInt16, server: RelayServer,
@@ -57,15 +62,24 @@
                         relay in
                         try await self.connected(relay)
                     }
-                } catch {}
+                } catch {
+                    Self.log.error("Relay connection ended: \(String(describing: error), privacy: .public)")
+                }
                 clear()
                 guard !Task.isCancelled else { return }
                 onStatus(.unavailable)
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
+        private static let log = Logger(subsystem: "com.pocketdesk.host", category: "push")
+
         private func connected(_ relay: RelayConnection) async throws {
             try await relay.send(.register(hostID: hostID))
+            current = relay
+            defer {
+                current = nil
+                for id in Array(pushReplies.keys) { finishPush(id, .failure(LiveActivityPushError.relayUnavailable)) }
+            }
             // One serialized publisher prevents a stale allow list overtaking a newer one.
             let updates = AsyncStream<[String]>.makeStream(bufferingPolicy: .bufferingNewest(1))
             self.updates = updates.continuation
@@ -91,6 +105,7 @@
                 case .pong:
                     acknowledgements += 1
                     if acknowledgements >= 2 { onStatus(.ready) }
+                    if acknowledgements == 2 { Self.log.info("Relay ready") }
                 case .incoming(let phone, let session):
                     guard peers.contains(phone), incoming.count < 2 else {
                         try await relay.send(.close(session: session))
@@ -117,6 +132,8 @@
                     }
                     shims[session] = (socket, task)
                 case .close(let session): close(session)
+                case .pushed(let id, let status, let reason):
+                    finishPush(id, status == 200 ? .success(()) : .failure(LiveActivityPushError.refused(status: status, reason: reason)))
                 case .error(let reason): throw RelayError.server(reason)
                 default: throw RelayError.invalidResponse
                 }
@@ -140,6 +157,29 @@
             incoming[id] = nil
         }
         private func clear() { for id in Array(incoming.keys) { close(id) } }
+        private func finishPush(_ id: UUID, _ result: Result<Void, any Error>) {
+            pushReplies.removeValue(forKey: id)?.resume(with: result)
+        }
         private static func hex(_ fp: Fingerprint) -> String { fp.bytes.map { String(format: "%02x", $0) }.joined() }
+    }
+
+    /// The relay sends Now Playing pushes to Apple for this Mac, since only it holds the key.
+    extension RelayAgent: LiveActivityPushSender {
+        public func send(_ push: LiveActivityPush) async throws {
+            guard let relay = current else { throw LiveActivityPushError.relayUnavailable }
+            let id = UUID()
+            let message = RelayMessage.push(id: id, phone: Self.hex(push.phone), token: push.token,
+                                            environment: push.environment.rawValue, topic: push.topic,
+                                            payload: String(decoding: push.payload, as: UTF8.self))
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                // Waiting before sending, so a quick answer can't arrive first.
+                pushReplies[id] = continuation
+                Task {
+                    do { try await relay.send(message) } catch { finishPush(id, .failure(error)) }
+                    try? await Task.sleep(for: .seconds(15))
+                    finishPush(id, .failure(LiveActivityPushError.relayUnavailable))
+                }
+            }
+        }
     }
 #endif

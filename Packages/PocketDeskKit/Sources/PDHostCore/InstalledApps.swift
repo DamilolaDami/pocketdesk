@@ -90,6 +90,15 @@ actor PlayerIcons {
 extension InstalledApps {
     public func status() async -> MacStatus {
         var playing = await NowPlayingReader.current()
+        if let current = playing, let found = await PlayingSite.shared.site(for: current) {
+            playing?.site = found.site
+            // macOS often can't say which app a site plays in; the browser with the tab can.
+            if playing?.app == nil, let url = await MainActor.run(body: {
+                NSWorkspace.shared.urlForApplication(withBundleIdentifier: found.browser)
+            }) {
+                playing?.app = NowPlayingReader.app(at: url.path(percentEncoded: false))
+            }
+        }
         if let bundleID = playing?.app?.bundleID {
             playing?.app?.icon = await PlayerIcons.shared.icon(bundleID: bundleID, from: self)
         }

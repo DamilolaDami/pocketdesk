@@ -50,7 +50,8 @@ public final class HostController {
                 hostID: Self.persistentHostID(),
                 hostName: Host.current().localizedName ?? "Mac",
                 trustStoreURL: Self.supportDirectory.appending(path: "trusted-phones.json"),
-                askBeforeConnecting: askBeforeConnecting, relayServer: relayServer
+                askBeforeConnecting: askBeforeConnecting, relayServer: relayServer,
+                nowPlayingPushesURL: Self.supportDirectory.appending(path: "now-playing-pushes.json")
             ), input: InputInjector()) { [weak self] event in
                 Task { @MainActor in
                     store.send(event)

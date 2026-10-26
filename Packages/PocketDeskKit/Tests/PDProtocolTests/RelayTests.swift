@@ -22,7 +22,7 @@ struct RelayTests {
         let data = try Data(contentsOf: url)
         let messages = try JSONDecoder().decode([RelayMessage].self, from: data)
         let values = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        #expect(messages.count == 12)
+        #expect(messages.count == 15)
         for (message, value) in zip(messages, values) {
             let framed = try message.framed()
             let length = framed.prefix(4).reduce(0) { $0 << 8 | Int($1) }

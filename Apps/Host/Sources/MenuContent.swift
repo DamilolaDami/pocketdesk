@@ -10,6 +10,7 @@ struct MenuContent: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var askBeforeConnecting = false
     @State private var sharedFolders = SharedFolders.current.enabled
+    @State private var writableFolders = SharedFolders.current.writable
     /// `nil` until checked, or if `pmset` couldn't say.
     @State private var wakeForNetworkAccess: Bool?
     @Environment(\.openWindow) private var openWindow
@@ -133,12 +134,24 @@ struct MenuContent: View {
                         Toggle(folder.name, isOn: Binding(get: { sharedFolders.contains(folder) }, set: { shared in
                             SharedFolders.setShared(folder, shared)
                             sharedFolders = SharedFolders.current.enabled
+                            writableFolders = SharedFolders.current.writable
                             // Reading it now brings up macOS's "allow access" prompt while
                             // you're here, not later while you're away using your phone.
                             if shared, let url = SharedFolders.userLocations[folder] {
                                 _ = try? FileManager.default.contentsOfDirectory(atPath: url.path)
                             }
                         }))
+                    }
+                    Divider()
+                    Menu("Allow File Changes") {
+                        Text("Allows creating folders, renaming, moving and using Trash.")
+                        ForEach(SharedFolder.allCases, id: \.self) { folder in
+                            Toggle(folder.name, isOn: Binding(get: { writableFolders.contains(folder) }, set: { writable in
+                                SharedFolders.setWritable(folder, writable)
+                                writableFolders = SharedFolders.current.writable
+                            }))
+                            .disabled(!sharedFolders.contains(folder))
+                        }
                     }
                 }
                 Divider()

@@ -171,8 +171,11 @@ final class HostServiceTests {
             // No goodbye: exercise transport-loss cleanup rather than an orderly disconnect.
             await session.close()
         }
-        for _ in 0..<100 where assertion.calls.withLock({ $0.released.isEmpty }) {
-            try await Task.sleep(for: .milliseconds(10))
+        // QUIC can notice a vanished peer through the session's heartbeat timeout rather
+        // than immediately. Allow that existing grace period before checking cleanup.
+        let deadline = ContinuousClock.now + HostSession.lostAfter + .seconds(3)
+        while assertion.calls.withLock({ $0.released.isEmpty }), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
         }
         #expect(assertion.calls.withLock { $0.released } == [1])
     }
@@ -394,6 +397,23 @@ final class HostServiceTests {
             try await session.send(.bye(reason: "done"))
         }
         #expect(input.actions.isEmpty)
+    }
+
+    @Test func askBeforeConnectingCoversFileChanges() async throws {
+        try pinPhone()
+        let port = try await startService(askBeforeConnecting: true, approve: { _ in false })
+        try await connect(port: port) { session in
+            var control = PhoneControl(session)
+            try await session.send(.hello(Hello(deviceName: "Test iPhone", viewport: Viewport(width: 0, height: 0, scale: 1), mode: .catalog)))
+            guard case .helloAck? = try await control.next() else { Issue.record("expected helloAck"); return }
+            try await session.send(.mutateFile(.init(id: 44, action: .createFolder(parent: .init(root: .desktop), name: "Denied"))))
+            guard case .fileMutationResult(let result)? = try await control.next() else {
+                Issue.record("expected a file change refusal"); return
+            }
+            #expect(result.id == 44)
+            #expect(result.problem == .notAllowed)
+            try await session.send(.bye(reason: "done"))
+        }
     }
 
     @Test func askBeforeConnectingLetsTheMacSayYes() async throws {

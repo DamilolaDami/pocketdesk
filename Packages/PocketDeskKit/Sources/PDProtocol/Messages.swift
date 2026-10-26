@@ -1,7 +1,7 @@
 import Foundation
 
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 21
+public let protocolVersion: UInt16 = 22
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -91,6 +91,8 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// Phone → host: what's in a shared folder (`FolderPath.shared`: which folders are shared).
     case listFiles(FolderPath)
     case fileList(FileList)
+    case mutateFile(FileMutation)
+    case fileMutationResult(FileMutationResult)
     case ping(UInt64)
     case pong(UInt64)
     case bye(reason: String)

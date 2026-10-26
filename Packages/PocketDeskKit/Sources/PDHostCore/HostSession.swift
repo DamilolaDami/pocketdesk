@@ -280,6 +280,9 @@ public actor HostSession {
                             try await session.send(.fileFailed(id: offer.id, reason: "The Mac didn't allow this."))
                         } else if case .getFile(let request) = message {
                             try await session.send(.fileFailed(id: request.id, reason: "The Mac didn't allow this."))
+                        } else if case .mutateFile(let request) = message {
+                            try await session.send(.fileMutationResult(.init(id: request.id, problem: .notAllowed,
+                                                                            message: "The Mac didn't allow this file change.")))
                         }
                         continue
                     }
@@ -384,7 +387,7 @@ public actor HostSession {
             case .watchMenus(let watch):
                 menusTask?.cancel()
                 menusTask = watch ? Task { await self.watchMenus() } : nil
-            case .sendFile, .getFile, .fileProgress, .fileFailed, .listFiles:
+            case .sendFile, .getFile, .fileProgress, .fileFailed, .listFiles, .mutateFile:
                 await files.handle(message)
             case .pressMenuItem(let press):
                 do {
@@ -406,7 +409,7 @@ public actor HostSession {
                 return
             case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
                  .actionFailed, .actionDone, .apps, .appIcon, .macShortcuts, .macStatus, .menuBar, .caret,
-                 .fileAccepted, .fileOffer, .fileData, .fileSaved, .fileList:
+                 .fileAccepted, .fileOffer, .fileData, .fileSaved, .fileList, .fileMutationResult:
                 continue
             }
         }

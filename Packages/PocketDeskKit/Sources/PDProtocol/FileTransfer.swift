@@ -92,6 +92,8 @@ public struct FolderPath: Codable, Sendable, Hashable {
 }
 
 public struct FileEntry: Codable, Sendable, Equatable, Identifiable {
+    /// An opaque host revision. Mutations must present the revision from a fresh listing.
+    public var revision: String?
     public var name: String
     public var isFolder: Bool
     public var size: UInt64
@@ -99,7 +101,8 @@ public struct FileEntry: Codable, Sendable, Equatable, Identifiable {
     public var modified: Int64
     public var id: String { name }
 
-    public init(name: String, isFolder: Bool, size: UInt64 = 0, modified: Int64 = 0) {
+    public init(name: String, isFolder: Bool, size: UInt64 = 0, modified: Int64 = 0, revision: String? = nil) {
+        self.revision = revision
         self.name = name
         self.isFolder = isFolder
         self.size = size
@@ -128,12 +131,14 @@ public struct FileEntry: Codable, Sendable, Equatable, Identifiable {
 }
 
 public struct FileList: Codable, Sendable, Equatable {
+    public var canWrite: Bool
     public var path: FolderPath
     public var entries: [FileEntry]
     /// Why the folder couldn't be listed (not shared, or the Mac wasn't allowed to read it).
     public var problem: String?
 
-    public init(path: FolderPath, entries: [FileEntry], problem: String? = nil) {
+    public init(path: FolderPath, entries: [FileEntry], problem: String? = nil, canWrite: Bool = false) {
+        self.canWrite = canWrite
         self.path = path
         self.entries = entries
         self.problem = problem

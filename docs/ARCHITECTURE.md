@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 21), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 22), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|

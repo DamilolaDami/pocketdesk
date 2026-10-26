@@ -10,6 +10,8 @@ let package = Package(
         .library(name: "PDTransport", targets: ["PDTransport"]),
         .library(name: "PDHostCore", targets: ["PDHostCore"]),
         .library(name: "PDClientCore", targets: ["PDClientCore"]),
+        // Developer-only feasibility executable; neither app links this product/backend.
+        .executable(name: "PDVirtualDisplayProbe", targets: ["PDVirtualDisplayProbe"]),
     ],
     dependencies: [
         // Apache-2.0. Builds the self-signed device certificates QUIC/TLS needs.
@@ -28,6 +30,9 @@ let package = Package(
         .target(name: "PDHostCore", dependencies: ["PDProtocol", "PDSecurity", "PDTransport"]),
         // iOS client: session state machine, discovery, decode, render.
         .target(name: "PDClientCore", dependencies: ["PDProtocol", "PDSecurity", "PDTransport"]),
+        .target(name: "PDVirtualDisplayProbeBackend", cSettings: [.unsafeFlags(["-fobjc-arc"])],
+                linkerSettings: [.linkedFramework("Foundation"), .linkedFramework("CoreGraphics")]),
+        .executableTarget(name: "PDVirtualDisplayProbe", dependencies: ["PDHostCore", "PDVirtualDisplayProbeBackend"]),
 
         .testTarget(name: "PDProtocolTests", dependencies: ["PDProtocol"], resources: [.copy("Fixtures")]),
         .testTarget(name: "PDSecurityTests", dependencies: ["PDSecurity"]),

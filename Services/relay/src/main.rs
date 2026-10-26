@@ -1,3 +1,4 @@
+mod apns;
 mod protocol;
 mod relay;
 mod tls;
@@ -34,7 +35,17 @@ async fn main() -> anyhow::Result<()> {
     );
     let (config, mut tls_digest) = load_tls(&options.cert, &options.key)?;
     let endpoint = quinn::Endpoint::server(config, listen)?;
-    let relay = Arc::new(relay::Relay::new());
+    // Pushes are on only when the operator gave an APNs key (APNS_* in the environment).
+    let apns = apns::Apns::from_env()?.map(Arc::new);
+    eprintln!(
+        "Live Activity pushes {}",
+        if apns.is_some() {
+            "on"
+        } else {
+            "off (no APNS_KEY)"
+        }
+    );
+    let relay = Arc::new(relay::Relay::new(apns));
     let permits = Arc::new(tokio::sync::Semaphore::new(options.max_connections));
     let mut refresh = tokio::time::interval(std::time::Duration::from_secs(60));
     eprintln!("PocketDesk relay listening on {}", endpoint.local_addr()?);

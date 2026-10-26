@@ -52,6 +52,14 @@ Client requests:
 {"type":"ping"}
 ```
 
+Macs can also ask the relay to deliver a Now Playing Live Activity push to Apple (see
+"Live Activity pushes" below):
+
+```json
+{"type":"push","id":"00000000-0000-0000-0000-000000000003","phone":"<64 hex>","token":"<device token hex>","environment":"sandbox","topic":"app.pocketdesk.app.push-type.liveactivity","payload":"{\"aps\":{…}}"}
+{"type":"pushed","id":"00000000-0000-0000-0000-000000000003","status":200}
+```
+
 Register/allow reply with `pong`. Connect replies `ready(session)` to the phone and
 `incoming(phone, session)` to the Mac; absent and unauthorized hosts both return `notFound`.
 Allocate replies `forward(session)` to both. Only the requesting control connection can
@@ -76,6 +84,29 @@ inner QUIC MTU accordingly. Fragmentation lets 1200-byte QUIC Initial packets fi
 outer QUIC connection without increasing its minimum MTU. Devices expire incomplete packets
 after one second and buffer one pending packet per session.
 Datagrams are lossy; inner QUIC handles loss and retransmission.
+
+## Live Activity pushes
+
+The APNs key can't ship in the open-source Mac app, so the relay holds it and sends for Macs.
+A `push` is sent only if it comes from the connection that registered the Mac, for a phone on
+that Mac's allow list, to a topic in `APNS_TOPICS`, with a hex token and an `aps` object of at
+most 4 KB. The relay signs an ES256 provider token (refreshed every 50 minutes), posts it over
+HTTP/2 to Apple's sandbox or production server with `apns-push-type: liveactivity`, and replies
+`pushed` with Apple's status and reason. It refuses with its own: `400` (`notPaired`,
+`badToken`, `badEnvironment`, `badTopic`, `badPayload`), `429` (`pushLimit`, 60 per Mac per
+minute) and `503` (`pushUnavailable`, no key). Payloads are never logged.
+
+Push content isn't end-to-end encrypted: the relay and Apple can read the titles and site
+names in it. Phones turn this off in Settings › Now Playing.
+
+Configure with environment variables (Fly secrets), never arguments or files in the image:
+
+| Variable | What |
+|---|---|
+| `APNS_KEY` | The `.p8` auth key's PEM text. Without it pushes are refused. |
+| `APNS_KEY_ID` | Its Key ID. |
+| `APNS_TEAM_ID` | The Apple team that owns the key and the app. |
+| `APNS_TOPICS` | Comma-separated topics Macs may push to: `<bundle ID>.push-type.liveactivity`. |
 
 ## Limits and validation
 

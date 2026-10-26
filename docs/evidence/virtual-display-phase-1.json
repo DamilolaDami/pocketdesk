@@ -1,0 +1,59 @@
+{
+  "phase": 1,
+  "issue": 53,
+  "phase0_base": "72c2d6f",
+  "verification_date": "2026-10-27",
+  "hardware": "MacBookPro17,1 (Apple M1)",
+  "os": "macOS 26.3 (25D125)",
+  "xcode": "26.2",
+  "supported_mode": {
+    "width": 1280,
+    "height": 800,
+    "scale": 1,
+    "requested_refresh_hz": 60
+  },
+  "native": {
+    "test": "VirtualDisplayNativeTests.realServiceCreatesAndRemovesOwnedDisplaysWithStableIdentity",
+    "passed": true,
+    "cycles": 3,
+    "logical_identity_stable": true,
+    "stale_lease_preserves_next_display": true,
+    "physical_inventory_restored_each_cycle": true,
+    "new_display_nonprimary_and_unmirrored": true,
+    "cgdisplaymode_available": false,
+    "dimensions_verified_using": "CGDisplayPixelsWide/High fallback",
+    "refresh_rate_independently_measured": false
+  },
+  "rejected_mode": {
+    "width": 1920,
+    "height": 1080,
+    "reason": "macOS moved existing secondary display origin from x=1440 to x=3360 during allocation; removed from accepted service modes and UI"
+  },
+  "regression": {
+    "passed": true,
+    "tests": 74,
+    "suites": 14,
+    "filter": "VirtualDisplay|HostServiceTests|FileMutation|FileTransfer|SharedFolders",
+    "native_test_opt_in_skipped_in_this_run": true
+  },
+  "builds": {
+    "signed_mac_host": "passed",
+    "signed_iphone": "passed",
+    "mac_private_runtime_marker": true,
+    "iphone_private_runtime_marker": false,
+    "protocol_version": 22
+  },
+  "local_logs": [
+    ".build/virtual-display-phase1-native.log",
+    ".build/virtual-display-phase1-regression.log",
+    ".build/virtual-display-phase1-host-build.log",
+    ".build/virtual-display-phase1-ios-build.log"
+  ],
+  "limits": [
+    "Mac owner creation only; no phone creation controls until Phase 2",
+    "One experimental ephemeral display; capability defaults off",
+    "No Retina, Intel, closed-lid or headless qualification",
+    "No new notarization or release publication in Phase 1",
+    "Physical screen rearrangement by macOS can occur transiently before safety rollback on unqualified topologies"
+  ]
+}

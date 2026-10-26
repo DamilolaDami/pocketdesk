@@ -95,6 +95,8 @@ public actor HostSession {
     private let caret: any CaretSource
     private let onEvent: @Sendable (Event) -> Void
     private let keepAwake: KeepAwake?
+    private let virtualDisplays: VirtualDisplayService?
+    private let viewingSessionID: UUID
     private let keepAwakeID = UUID()
 
     /// When the phone last sent anything. A suspended app's connection can linger for a while
@@ -167,8 +169,11 @@ public actor HostSession {
                 catalog: any AppCatalogSource = InstalledApps(), clipboard: any ClipboardSink = MacPasteboard(),
                 menus: any MenuBarSource = AccessibilityMenus(), caret: any CaretSource = AccessibilityCaret(),
                 keepAwake: KeepAwake? = nil,
+                virtualDisplays: VirtualDisplayService? = nil, viewingSessionID: UUID = UUID(),
                 onEvent: @escaping @Sendable (Event) -> Void = { _ in }) {
         self.keepAwake = keepAwake
+        self.virtualDisplays = virtualDisplays
+        self.viewingSessionID = viewingSessionID
         self.catalog = catalog
         self.menus = menus
         self.caret = caret
@@ -303,7 +308,7 @@ public actor HostSession {
         onEvent(.connected(peer: peer, deviceName: hello.deviceName))
         do {
             // Listing displays already needs Screen Recording, so it's inside the goodbye path.
-            let displays = try await frameSource.displays()
+            let displays = try await visibleDisplays()
             try await session.send(.helloAck(HelloAck(hostName: configuration.hostName, displays: displays,
                                                       wake: configuration.wake, wallpaper: configuration.wallpaper)))
             let preferred = hello.preferredDisplayID.flatMap { saved in displays.first { $0.persistentID == saved }?.id }
@@ -320,6 +325,12 @@ public actor HostSession {
         }
 
         adaptTask = Task { await self.adaptToLink() }
+        try Task.checkCancellation()
+        guard await pairing.isTrusted(peer) else {
+            await session.close()
+            throw TransportError.closed
+        }
+        await virtualDisplays?.registerViewingSession(id: viewingSessionID, peer: peer, name: hello.deviceName)
         clipboardEnabled = hello.clipboardEnabled
         clipboardSeen = await clipboard.changeCount()
         clipboardTask = Task { await self.watchClipboard() }
@@ -354,13 +365,13 @@ public actor HostSession {
                 // Turning it back on mustn't send whatever was copied while it was off.
                 if enabled { clipboardSeen = await clipboard.changeCount() }
             case .listDisplays:
-                try await session.send(.displays(try await frameSource.displays()))
+                try await session.send(.displays(try await visibleDisplays()))
             case .selectDisplay(let id):
                 // Resolve before stopping the current pump: a stale picker must not end it.
                 do {
                     try await startStreaming(.display(id))
                 } catch CaptureError.sourceNotFound {
-                    try await session.send(.displays(try await frameSource.displays()))
+                    try await session.send(.displays(try await visibleDisplays()))
                     try await session.send(.actionFailed("That display is no longer connected. Choose another display."))
                 }
             case .listWindows:
@@ -571,7 +582,12 @@ public actor HostSession {
     }
 
     private func restartStreaming(_ source: CaptureSource?) async throws {
+        guard isStreaming else { throw CancellationError() }
+        if case .display(let id) = source, await virtualDisplays?.canView(displayID: id, sessionID: viewingSessionID) == false {
+            throw CaptureError.sourceNotFound
+        }
         let resolved = try await frameSource.resolve(source)
+        guard isStreaming else { throw CancellationError() }
         let full = StreamSizing.fit(sourceWidth: resolved.pixelWidth, sourceHeight: resolved.pixelHeight, into: viewport,
                                     zoomHeadroom: ceiling.zoomHeadroom)
         let size = StreamSizing.scale(full, by: rate.step.scale)
@@ -583,7 +599,9 @@ public actor HostSession {
                                   bitrateKbps: streamBitrateKbps, displayID: displayID)
         let encoder = try await HEVCEncoder.make(width: config.width, height: config.height, fps: config.fps,
                                       bitrateKbps: config.bitrateKbps)
+        guard isStreaming else { throw CancellationError() }
         await stopPump()
+        guard isStreaming else { throw CancellationError() }
         currentSource = resolved.source
         if let displayID { selectedDisplayID = displayID }
         generation &+= 1
@@ -599,6 +617,7 @@ public actor HostSession {
         try await session.send(.streamConfig(config))
         await frameSource.configureAudio(enabled: audioEnabled, generation: generation)
         let frames = try await frameSource.start(resolved, width: config.width, height: config.height, fps: config.fps)
+        guard isStreaming else { await frameSource.stop(); throw CancellationError() }
         onEvent(.streaming(peer: peer, config: config, window: resolved.window))
         settling = true
 
@@ -824,6 +843,33 @@ public actor HostSession {
         input.releaseKeys()
         await stopPump()
         await frameSource.stop()
+        await virtualDisplays?.unregisterViewingSession(viewingSessionID)
+    }
+
+    private func visibleDisplays() async throws -> [DisplayInfo] {
+        let displays = try await frameSource.displays()
+        var visible: [DisplayInfo] = []
+        for display in displays {
+            if await virtualDisplays?.canView(displayID: display.id, sessionID: viewingSessionID) != false { visible.append(display) }
+        }
+        return visible
+    }
+
+    func prepareToRemoveVirtualDisplay(_ id: UInt32) async {
+        guard isStreaming else { return }
+        if selectedDisplayID == id { selectedDisplayID = nil }
+        let onDisplay: Bool
+        if currentSource == .display(id) { onDisplay = true }
+        else { onDisplay = sourceFrame?.intersects(CGDisplayBounds(id)) == true }
+        guard onDisplay else { return }
+        do {
+            try await startStreaming(nil)
+            try await session.send(.actionFailed("The Mac ended the virtual display. Showing the main display instead."))
+        } catch {
+            await frameSource.stop()
+            try? await session.send(.bye(reason: "The virtual display ended and the main display isn't available."))
+            await session.close()
+        }
     }
 }
 #endif

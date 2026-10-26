@@ -15,6 +15,10 @@ public final class HostController {
     private lazy var keepAwake = KeepAwake(settings: .load()) { [store] state in
         Task { @MainActor in store.send(.keepAwakeChanged(state)) }
     }
+    private lazy var virtualDisplays = VirtualDisplayService(hostID: Self.persistentHostID(),
+        enabled: UserDefaults.standard.bool(forKey: VirtualDisplayService.enabledKey)) { [store] state in
+            Task { @MainActor in store.send(.virtualDisplayChanged(state)) }
+        }
 
     /// For the app's notifications; called after the store has the event.
     public var onEvent: ((HostEvent) -> Void)?
@@ -50,10 +54,24 @@ public final class HostController {
     public func endKeepAwake() async { await keepAwake.send(.endNow) }
 
     public func stop() async {
+        await virtualDisplays.shutdown()
         await keepAwake.stop()
         runTask?.cancel()
         runTask = nil
     }
+
+    public func setVirtualDisplaysEnabled(_ enabled: Bool) async {
+        UserDefaults.standard.set(enabled, forKey: VirtualDisplayService.enabledKey)
+        await virtualDisplays.setEnabled(enabled)
+    }
+
+    public func createVirtualDisplay(for viewer: UUID, mode: VirtualDisplayMode) async {
+        do { _ = try await virtualDisplays.create(for: viewer, mode: mode) }
+        catch { await virtualDisplays.reportRequestError(String(describing: error)) }
+    }
+
+    public func endVirtualDisplay(_ lease: UUID) async { await virtualDisplays.end(lease) }
+    public func cancelVirtualDisplay() async { await virtualDisplays.endNow() }
 
     /// Ends every session of `peer` (the menu's Disconnect, or a notification action).
     public func disconnect(_ peer: Fingerprint) async {
@@ -84,7 +102,9 @@ public final class HostController {
     public func start() {
         guard runTask == nil else { return }
         let keepAwake = keepAwake
+        let virtualDisplays = virtualDisplays
         Task { await keepAwake.start() }
+        Task { await virtualDisplays.start() }
         do {
             let store = store
             let service = try HostService(configuration: .init(
@@ -93,7 +113,8 @@ public final class HostController {
                 trustStoreURL: Self.supportDirectory.appending(path: "trusted-phones.json"),
                 askBeforeConnecting: askBeforeConnecting, relayServer: relayServer,
                 nowPlayingPushesURL: Self.supportDirectory.appending(path: "now-playing-pushes.json")
-            ), input: InputInjector(), keepAwake: keepAwake) { [weak self] event in
+            ), input: InputInjector(), makeSessionInput: { InputInjector() },
+                keepAwake: keepAwake, virtualDisplays: virtualDisplays) { [weak self] event in
                 Task { @MainActor in
                     store.send(event)
                     self?.onEvent?(event)

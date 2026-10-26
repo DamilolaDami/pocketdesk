@@ -6,7 +6,7 @@ import CoreVideo
 import Foundation
 import PDHostCore
 import PDProtocol
-import PDVirtualDisplayProbeBackend
+import PDVirtualDisplayRuntime
 
 struct Options {
     var report: URL
@@ -154,6 +154,7 @@ actor Probe {
     private let source = ScreenCaptureSource()
     private var surface: Surface?
     private var liveDisplay: UInt32?
+    private var liveHandle: UInt64?
 
     init(options: Options) { self.options = options }
 
@@ -183,7 +184,8 @@ actor Probe {
         } catch {
             report.error = String(describing: error)
             await source.stop()
-            PDVDDestroy()
+            if let liveHandle { PDVDDestroy(liveHandle) }
+            liveHandle = nil
             liveDisplay = nil
             await surface?.close()
             report.final = (try? DisplaySnapshot.current()) ?? []
@@ -194,8 +196,10 @@ actor Probe {
 
     private func cycle() async throws {
         var error = [CChar](repeating: 0, count: 512)
-        let id = PDVDCreate(1280, 800, UInt32.random(in: 1...UInt32.max), &error, error.count)
-        guard id != 0 else { throw ProbeError(message(error)) }
+        let handle = PDVDCreate(1280, 800, 60, UInt32.random(in: 1...UInt32.max), &error, error.count)
+        guard handle != 0 else { throw ProbeError(message(error)) }
+        liveHandle = handle
+        let id = PDVDCaptureID(handle)
         liveDisplay = id
         report.cycles.append(Cycle(displayID: id))
         try save() // Checkpoint before capture/hold so a supervisor can verify crash cleanup.
@@ -236,7 +240,8 @@ actor Probe {
             try await Task.sleep(for: .seconds(options.hold))
             await source.stop()
         }
-        PDVDDestroy()
+        PDVDDestroy(handle)
+        liveHandle = nil
         liveDisplay = nil
         let cleanupDeadline = ContinuousClock.now + .seconds(5)
         while (try DisplaySnapshot.current()).contains(where: { $0.id == id }), ContinuousClock.now < cleanupDeadline {

@@ -57,6 +57,21 @@ already allowed, but cannot be used for file changes. Each attempt refreshes the
 a disconnected or unconfirmed operation is never retried automatically. These controls
 require protocol 22 on both the phone and Mac, so update them together.
 
+## Experimental virtual workspace (Phase 1)
+
+In the Mac menu bar panel, enable **Allow Virtual Displays**, connect a phone to view
+this Mac, then click **Create** beside that viewing session. Refresh the phone's display
+picker and select **PocketDesk Virtual Display**. The workspace is 1280×800 at 1×,
+with a requested refresh rate of 60 Hz. Phone-side creation comes in a later phase.
+
+The setting defaults off. **End** removes the workspace and falls back to the main display;
+disconnecting its owner, disabling the setting, sleep, or quitting also ends it. Failed
+cleanup stays visible with **Retry End**. Only one workspace can exist at a time. It is
+an extra desktop, not a privacy curtain; physical screens remain on. Closed-lid/headless
+operation is not qualified. The backend uses experimental macOS private APIs and fails
+closed if compatibility or layout checks fail. See the
+[Phase 1 decision and verification](docs/decisions/0002-virtual-display-lifecycle.md).
+
 ## Security
 
 Please report vulnerabilities privately; see [SECURITY.md](SECURITY.md).

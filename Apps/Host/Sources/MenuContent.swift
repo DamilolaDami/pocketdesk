@@ -42,6 +42,7 @@ struct MenuContent: View {
             }
 
             keepAwakePanel
+            virtualDisplayPanel
 
             if !state.pairedPeers.isEmpty {
                 Panel(title: "Paired phones") {
@@ -235,6 +236,64 @@ struct MenuContent: View {
             Text("Prevents idle sleep; your display can turn off. Battery use may increase. Sleep from the Apple menu and closing the lid still work.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var virtualDisplayPanel: some View {
+        let display = state.virtualDisplay
+        return Panel(title: "Virtual display · Experimental", tint: display.active == nil ? nil : HostBrand.accent) {
+            Toggle("Allow Virtual Displays", isOn: Binding(get: { display.enabled }, set: { enabled in
+                Task { await controller.setVirtualDisplaysEnabled(enabled) }
+            }))
+            .font(.callout)
+            .disabled(!display.available && !display.enabled)
+
+            if let active = display.active {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(active.owner.name).font(.callout.weight(.medium))
+                        Text("\(active.mode.width)×\(active.mode.height) · \(active.mode.refreshRate) Hz")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(display.phase == .cleanupFailed ? "Retry End" : "End") {
+                        Task { await controller.endVirtualDisplay(active.id) }
+                    }
+                    .disabled(display.phase == .ending)
+                }
+            } else if display.phase == .creating {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Creating workspace…").font(.caption)
+                    Spacer()
+                    Button("Cancel") { Task { await controller.cancelVirtualDisplay() } }
+                }
+            } else if display.enabled && display.available {
+                if display.viewers.isEmpty {
+                    Text("Start viewing this Mac from a phone, then create its workspace here.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("1280×800 · 60 Hz · 1×").font(.caption).foregroundStyle(.secondary)
+                    ForEach(display.viewers) { viewer in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(viewer.name).font(.callout)
+                                Text("Viewing since \(viewer.connectedAt.formatted(date: .omitted, time: .shortened))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Create") {
+                                Task { await controller.createVirtualDisplay(for: viewer.id, mode: .standard) }
+                            }
+                            .disabled(display.suspended)
+                        }
+                    }
+                }
+            }
+            if let reason = display.unavailableReason { Text(reason).font(.caption).foregroundStyle(.secondary) }
+            if let error = display.error { Text(error).font(.caption).foregroundStyle(.orange) }
+            Text("A temporary extra Mac workspace, removed when its viewing session ends. Physical screens stay on.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 

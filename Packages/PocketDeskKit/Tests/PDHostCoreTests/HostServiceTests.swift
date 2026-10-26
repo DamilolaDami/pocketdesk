@@ -6,6 +6,7 @@ import CoreMedia
 import Foundation
 import Network
 import Testing
+import Synchronization
 import PDProtocol
 import PDSecurity
 import PDTransport
@@ -39,13 +40,15 @@ final class HostServiceTests {
     /// Starts the service. `approve` answers the verification-code prompt.
     func startService(askBeforeConnecting: Bool = false,
                       keepAwake: KeepAwake? = nil,
-                      approve: @escaping @Sendable (PairingApproval) -> Bool = { _ in true }) async throws -> UInt16 {
+                      approve: @escaping @Sendable (PairingApproval) -> Bool = { _ in true },
+                      makeSessionInput: (@Sendable () -> any InputSink)? = nil) async throws -> UInt16 {
         let events = events
         let box = ServiceBox()
         let service = try HostService(
             configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
                                  trustStoreURL: trustStoreURL, advertise: false, askBeforeConnecting: askBeforeConnecting),
-            makeFrameSource: { [frames] in frames }, clipboard: FakeClipboard(), input: input, keepAwake: keepAwake
+            makeFrameSource: { [frames] in frames }, clipboard: FakeClipboard(), input: input,
+            makeSessionInput: makeSessionInput, keepAwake: keepAwake
         ) { event in
             events.append(event)
             if case .approvalRequested(let approval) = event {

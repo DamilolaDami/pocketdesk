@@ -10,7 +10,7 @@ let package = Package(
         .library(name: "PDTransport", targets: ["PDTransport"]),
         .library(name: "PDHostCore", targets: ["PDHostCore"]),
         .library(name: "PDClientCore", targets: ["PDClientCore"]),
-        // Developer-only feasibility executable; neither app links this product/backend.
+        // Developer-only executable; the Mac host shares its isolated runtime backend.
         .executable(name: "PDVirtualDisplayProbe", targets: ["PDVirtualDisplayProbe"]),
     ],
     dependencies: [
@@ -27,12 +27,13 @@ let package = Package(
         // Channel abstractions + QUIC implementation (Network.framework) + Bonjour.
         .target(name: "PDTransport", dependencies: ["PDProtocol", "PDSecurity"]),
         // macOS host engines: capture, encode, input injection, permissions.
-        .target(name: "PDHostCore", dependencies: ["PDProtocol", "PDSecurity", "PDTransport"]),
+        .target(name: "PDHostCore", dependencies: ["PDProtocol", "PDSecurity", "PDTransport",
+                .target(name: "PDVirtualDisplayRuntime", condition: .when(platforms: [.macOS]))]),
         // iOS client: session state machine, discovery, decode, render.
         .target(name: "PDClientCore", dependencies: ["PDProtocol", "PDSecurity", "PDTransport"]),
-        .target(name: "PDVirtualDisplayProbeBackend", cSettings: [.unsafeFlags(["-fobjc-arc"])],
+        .target(name: "PDVirtualDisplayRuntime",
                 linkerSettings: [.linkedFramework("Foundation"), .linkedFramework("CoreGraphics")]),
-        .executableTarget(name: "PDVirtualDisplayProbe", dependencies: ["PDHostCore", "PDVirtualDisplayProbeBackend"]),
+        .executableTarget(name: "PDVirtualDisplayProbe", dependencies: ["PDHostCore", "PDVirtualDisplayRuntime"]),
 
         .testTarget(name: "PDProtocolTests", dependencies: ["PDProtocol"], resources: [.copy("Fixtures")]),
         .testTarget(name: "PDSecurityTests", dependencies: ["PDSecurity"]),

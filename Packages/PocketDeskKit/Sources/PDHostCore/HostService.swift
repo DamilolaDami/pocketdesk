@@ -26,6 +26,7 @@ public struct PairingApproval: Sendable, Equatable, Identifiable {
 
 /// Everything the Mac UI needs to know, as events into `HostState.reduce`.
 public enum HostEvent: Sendable, Equatable {
+    case virtualDisplayChanged(VirtualDisplayState)
     case keepAwakeChanged(KeepAwakeState)
     case relayStatus(HostRelayStatus)
     case listening(port: UInt16?)
@@ -89,9 +90,10 @@ public actor HostService: PairingAuthority {
     private var configuration: Configuration
     private let makeFrameSource: @Sendable () -> any FrameSource
     private let clipboard: any ClipboardSink
-    private let input: any InputSink
+    private let makeSessionInput: @Sendable () -> any InputSink
     private let onEvent: @Sendable (HostEvent) -> Void
     private let keepAwake: KeepAwake?
+    private let virtualDisplays: VirtualDisplayService?
 
     private var trustStore: TrustStore
     private var invite: (value: PairingInvite, expires: ContinuousClock.Instant)?
@@ -113,16 +115,19 @@ public actor HostService: PairingAuthority {
                 makeFrameSource: @escaping @Sendable () -> any FrameSource = { ScreenCaptureSource() },
                 clipboard: any ClipboardSink = MacPasteboard(),
                 input: any InputSink,
+                makeSessionInput: (@Sendable () -> any InputSink)? = nil,
                 keepAwake: KeepAwake? = nil,
+                virtualDisplays: VirtualDisplayService? = nil,
                 onEvent: @escaping @Sendable (HostEvent) -> Void) throws {
         self.keepAwake = keepAwake
+        self.virtualDisplays = virtualDisplays
         self.configuration = configuration
         self.identity = try DeviceIdentity.loadOrCreate(label: configuration.identityLabel)
         self.trustStore = try TrustStore.load(from: configuration.trustStoreURL)
         self.nowPlayingPushes = NowPlayingPushes(url: configuration.nowPlayingPushesURL)
         self.makeFrameSource = makeFrameSource
         self.clipboard = clipboard
-        self.input = input
+        self.makeSessionInput = makeSessionInput ?? { input }
         self.onEvent = onEvent
     }
 
@@ -189,6 +194,7 @@ public actor HostService: PairingAuthority {
 
     /// Send end pushes now, before macOS takes the network away.
     public func prepareForSleep() async {
+        await virtualDisplays?.suspend(true)
         sleeping = true
         pushWatch?.cancel()
         pushWatch = nil
@@ -206,12 +212,15 @@ public actor HostService: PairingAuthority {
     }
 
     public func resumeAfterSleep() async {
+        await virtualDisplays?.suspend(false)
         sleeping = false
         await watchForPushesIfNeeded()
     }
 
     /// Listens until the task is cancelled.
     public func run() async throws {
+        await virtualDisplays?.setBeforeRemoval { [weak self] id in await self?.prepareToRemoveVirtualDisplay(id) }
+        await virtualDisplays?.start()
         onEvent(.pairedPeersChanged(Array(trustStore.peers.values)))
         // Phones that asked for pushes before the Mac last quit.
         Task { await watchForPushesIfNeeded() }
@@ -248,8 +257,10 @@ public actor HostService: PairingAuthority {
             try await listener.run { [weak self] session in
                 try await self?.serve(session)
             }
+            await virtualDisplays?.shutdown()
             onEvent(.stopped(error: nil))
         } catch {
+            await virtualDisplays?.shutdown()
             onEvent(.stopped(error: String(describing: error)))
             throw error
         }
@@ -340,8 +351,9 @@ public actor HostService: PairingAuthority {
 
     /// Forgets the phone, and ends its sessions: an unpaired phone mustn't stay connected.
     public func revoke(_ peer: Fingerprint) async throws {
-        await nowPlayingPushes.forget(peer)
         trustStore.revoke(peer)
+        await virtualDisplays?.revoke(peer)
+        await nowPlayingPushes.forget(peer)
         await relayAgent?.update(peers: Array(trustStore.peers.keys))
         try trustStore.save(to: configuration.trustStoreURL)
         onEvent(.pairedPeersChanged(Array(trustStore.peers.values)))
@@ -384,6 +396,7 @@ public actor HostService: PairingAuthority {
         }
         await relayAgent?.update(peers: Array(trustStore.peers.keys))
         // Invites are single use.
+        await virtualDisplays?.allowPeer(peer)
         closeInvite()
         onEvent(.pairedPeersChanged(Array(trustStore.peers.values)))
         return true
@@ -421,6 +434,7 @@ public actor HostService: PairingAuthority {
 
     private func serve(_ session: QUICPeerSession) async throws {
         let peer = session.peer
+        let id = UUID()
         // Catalog sessions never say "connected", so they mustn't say "ended" either: that
         // would hide the same phone's live stream from the menu.
         let started = StartedFlag()
@@ -428,7 +442,8 @@ public actor HostService: PairingAuthority {
             session: ThrottledSession.fromEnvironment(session), peer: peer,
             configuration: .init(hostName: configuration.hostName, wake: WakeAddresses.current(),
                                  wallpaper: await DesktopWallpaper.current()),
-            frameSource: makeFrameSource(), input: input, pairing: self, clipboard: clipboard, keepAwake: keepAwake
+            frameSource: makeFrameSource(), input: makeSessionInput(), pairing: self, clipboard: clipboard, keepAwake: keepAwake,
+            virtualDisplays: virtualDisplays, viewingSessionID: id
         ) { [onEvent, started] event in
             switch event {
             case .connected(let peer, let deviceName):
@@ -442,7 +457,6 @@ public actor HostService: PairingAuthority {
                 Task { await self.register(push, from: peer) }
             }
         }
-        let id = UUID()
         sessions[peer, default: [:]][id] = hostSession
         defer {
             sessions[peer]?[id] = nil
@@ -458,6 +472,11 @@ public actor HostService: PairingAuthority {
     }
 
     private static let log = Logger(subsystem: "com.pocketdesk.host", category: "session")
+
+    private func prepareToRemoveVirtualDisplay(_ id: UInt32) async {
+        let live = sessions.values.flatMap { $0.values }
+        for session in live { await session.prepareToRemoveVirtualDisplay(id) }
+    }
 }
 
 /// Set once from a session's event callback, read when it ends.

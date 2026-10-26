@@ -1,4 +1,4 @@
-#import "PDVirtualDisplayProbeBackend.h"
+#import "PDVirtualDisplayRuntime.h"
 #import <TargetConditionals.h>
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -8,7 +8,16 @@
 // Independently written runtime bridge. No private headers or third-party implementation
 // are vendored. Runtime signature checks bound this experiment; they do not make a private
 // ABI supported or guarantee that Apple preserves its semantics.
-static id ownedDisplay;
+// SwiftPM enables ARC for Objective-C. Only this dictionary retains live displays;
+// every operation holds its monitor, and destruction requires the exact ownership token.
+static NSMutableDictionary<NSNumber *, id> *ownedDisplays;
+static uint64_t nextToken = 0;
+
+static NSMutableDictionary *registry(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ ownedDisplays = [[NSMutableDictionary alloc] init]; });
+    return ownedDisplays;
+}
 
 // Method-family declarations let ARC correctly consume alloc/init ownership. Only these
 // messages are sent after the runtime signatures above have been checked.
@@ -80,10 +89,12 @@ bool PDVDAvailable(char *error, size_t capacity) {
 #endif
 }
 
-uint32_t PDVDCreate(uint32_t width, uint32_t height, uint32_t serial, char *error, size_t capacity) {
+uint64_t PDVDCreate(uint32_t width, uint32_t height, double refreshRate, uint32_t serial, char *error, size_t capacity) {
     @autoreleasepool {
-        if (ownedDisplay || width < 640 || height < 480 || width > 2560 || height > 1600) {
-            failure(error, capacity, @"Probe permits one bounded display at a time."); return 0;
+      @synchronized (registry()) {
+        if (ownedDisplays.count || width < 640 || height < 480 || width > 1920 || height > 1200
+            || (refreshRate != 30 && refreshRate != 60) || nextToken == UINT64_MAX) {
+            failure(error, capacity, @"Only one bounded 1x display at 30 or 60 Hz is supported."); return 0;
         }
         if (!PDVDAvailable(error, capacity)) return 0;
         @try {
@@ -91,18 +102,20 @@ uint32_t PDVDCreate(uint32_t width, uint32_t height, uint32_t serial, char *erro
             void (*setObject)(id, SEL, id) = (void *)objc_msgSend;
             void (*setInteger)(id, SEL, unsigned int) = (void *)objc_msgSend;
             void (*setSize)(id, SEL, CGSize) = (void *)objc_msgSend;
-            setObject(descriptor, NSSelectorFromString(@"setName:"), @"PocketDesk Phase 0 Probe");
+            setObject(descriptor, NSSelectorFromString(@"setName:"), @"PocketDesk Virtual Display");
             setObject(descriptor, NSSelectorFromString(@"setDispatchQueue:"), dispatch_get_main_queue());
             setInteger(descriptor, NSSelectorFromString(@"setMaxPixelsWide:"), width);
             setInteger(descriptor, NSSelectorFromString(@"setMaxPixelsHigh:"), height);
             setInteger(descriptor, NSSelectorFromString(@"setVendorID:"), 0x5044);
             setInteger(descriptor, NSSelectorFromString(@"setProductID:"), 0x5052);
             setInteger(descriptor, NSSelectorFromString(@"setSerialNum:"), serial);
-            setSize(descriptor, NSSelectorFromString(@"setSizeInMillimeters:"), CGSizeMake(300, 190));
+            // Keep the intended 1x desktop density consistent across sizes. A fixed small
+            // physical size can make macOS choose a different desktop scale for larger modes.
+            setSize(descriptor, NSSelectorFromString(@"setSizeInMillimeters:"), CGSizeMake(width * 25.4 / 110.0, height * 25.4 / 110.0));
             id display = [(id<PDVDDisplayConstruction>)[NSClassFromString(@"CGVirtualDisplay") alloc] initWithDescriptor:descriptor];
             if (!display) { failure(error, capacity, @"WindowServer refused display creation."); return 0; }
             id settings = [[NSClassFromString(@"CGVirtualDisplaySettings") alloc] init];
-            id mode = [(id<PDVDModeConstruction>)[NSClassFromString(@"CGVirtualDisplayMode") alloc] initWithWidth:width height:height refreshRate:60];
+            id mode = [(id<PDVDModeConstruction>)[NSClassFromString(@"CGVirtualDisplayMode") alloc] initWithWidth:width height:height refreshRate:refreshRate];
             setInteger(settings, NSSelectorFromString(@"setHiDPI:"), 0);
             setObject(settings, NSSelectorFromString(@"setModes:"), @[mode]);
             BOOL (*apply)(id, SEL, id) = (void *)objc_msgSend;
@@ -112,15 +125,30 @@ uint32_t PDVDCreate(uint32_t width, uint32_t height, uint32_t serial, char *erro
             CGDirectDisplayID (*getID)(id, SEL) = (void *)objc_msgSend;
             CGDirectDisplayID displayID = getID(display, NSSelectorFromString(@"displayID"));
             if (!displayID) { failure(error, capacity, @"Virtual display has no capture ID."); return 0; }
-            ownedDisplay = display;
-            return displayID;
+            uint64_t token = ++nextToken;
+            ownedDisplays[@(token)] = display;
+            return token;
         } @catch (NSException *exception) {
             failure(error, capacity, [@"Virtual-display exception: " stringByAppendingString:exception.name]);
             return 0;
         }
+      }
     }
 }
 
-void PDVDDestroy(void) {
-    @autoreleasepool { ownedDisplay = nil; }
+uint32_t PDVDCaptureID(uint64_t token) {
+    @autoreleasepool { @synchronized (registry()) {
+        id display = ownedDisplays[@(token)];
+        if (!display) return 0;
+        CGDirectDisplayID (*getID)(id, SEL) = (void *)objc_msgSend;
+        return getID(display, NSSelectorFromString(@"displayID"));
+    } }
+}
+
+bool PDVDDestroy(uint64_t token) {
+    @autoreleasepool { @synchronized (registry()) {
+        if (!ownedDisplays[@(token)]) return false;
+        [ownedDisplays removeObjectForKey:@(token)];
+        return true;
+    } }
 }

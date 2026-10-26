@@ -7,6 +7,7 @@ import PDProtocol
 extension NowPlayingActivityPreferences {
     public enum Key {
         public static let enabled = "nowPlayingActivity"
+        public static let showsDetailsInPushes = "nowPlayingDetailsInPushes"
         public static let showsArtwork = "nowPlayingArtwork"
         public static let showsSkipButtons = "nowPlayingSkipButtons"
         public static let endsWhenPaused = "nowPlayingEndsWhenPaused"
@@ -18,6 +19,7 @@ extension NowPlayingActivityPreferences {
     public init(defaults: UserDefaults) {
         self.init()
         isEnabled = defaults.object(forKey: Key.enabled) as? Bool ?? true
+        showsDetailsInPushes = defaults.object(forKey: Key.showsDetailsInPushes) as? Bool ?? true
         showsArtwork = defaults.object(forKey: Key.showsArtwork) as? Bool ?? true
         showsSkipButtons = defaults.object(forKey: Key.showsSkipButtons) as? Bool ?? true
         endsWhenPaused = defaults.bool(forKey: Key.endsWhenPaused)

@@ -23,6 +23,7 @@ public struct LiveActivityPush: Sendable, Equatable {
     public var topic: String
     /// The `aps` JSON, at most `maxPayload` bytes.
     public var payload: Data
+    public var priority: Int = 10
 
     /// What Apple accepts for a Live Activity push.
     public static let maxPayload = 4096
@@ -169,6 +170,29 @@ public actor NowPlayingPushes {
         return pushes
     }
 
+    /// End known cards immediately on sleep/power-off. Keep each phone's tokens for wake.
+    public func endAll(hostID: UUID, macName: String, now: Date = .now) -> [LiveActivityPush] {
+        var result: [LiveActivityPush] = []
+        for (peer, phone) in phones {
+            var model = models[peer] ?? NowPlayingActivityModel(preferences: phone.preferences)
+            if model.card == nil, let showing = phone.showing { model.adopt(hostID: hostID, card: showing) }
+            let shown = model.card
+            let before = model
+            let step = model.macWentAway()
+            models[peer] = model
+            if let push = Self.push(for: step, shown: shown, to: phone, from: peer,
+                                    hostID: hostID, macName: macName, now: now) {
+                beforePush[peer] = before
+                result.append(push)
+            }
+            phones[peer]?.showing = nil
+        }
+        pausedSince.removeAll()
+        lastStart.removeAll()
+        save()
+        return result
+    }
+
     /// Whether an update should be a fresh card instead: after a long pause (the card may
     /// have been swiped away), or when there's no token to update with, but not again right
     /// after starting one.
@@ -191,6 +215,12 @@ public actor NowPlayingPushes {
     static func push(for step: NowPlayingActivityStep, shown: NowPlayingCard?, to phone: NowPlayingPush, from peer: Fingerprint,
                      hostID: UUID, macName: String, now: Date) -> LiveActivityPush? {
         let timestamp = Int(now.timeIntervalSince1970)
+        func shared(_ card: NowPlayingCard) -> NowPlayingCard {
+            guard !phone.preferences.showsDetailsInPushes else { return card }
+            return NowPlayingCard(title: "Playing on \(macName)", macName: macName, isPlaying: card.isPlaying,
+                                  style: card.style, showsSkipButtons: card.showsSkipButtons)
+        }
+        var priority = 10
         var aps: [String: Any] = ["timestamp": timestamp]
         let event: LiveActivityPush.Event
         let token: String?
@@ -200,29 +230,30 @@ public actor NowPlayingPushes {
         case .start(_, let card), .replace(_, let card):
             event = .start
             token = phone.startToken
-            aps["content-state"] = json(card)
+            aps["content-state"] = json(shared(card))
             aps["attributes-type"] = "NowPlayingAttributes"
             aps["attributes"] = ["hostID": hostID.uuidString]
-            aps["alert"] = ["title": card.title, "body": "Playing on \(macName)"]
+            aps["alert"] = ["title": shared(card).title, "body": "Playing on \(macName)"]
             aps["stale-date"] = timestamp + 15 * 60
             aps["relevance-score"] = card.isPlaying ? 100 : 50
         case .update(let card):
+            priority = shown?.isPlaying == card.isPlaying ? 5 : 10
             event = .update
             token = phone.activityToken
-            aps["content-state"] = json(card)
+            aps["content-state"] = json(shared(card))
             aps["stale-date"] = timestamp + 15 * 60
             aps["relevance-score"] = card.isPlaying ? 100 : 50
         case .end:
             event = .end
             token = phone.activityToken
-            if let shown { aps["content-state"] = json(shown) }
+            if let shown { aps["content-state"] = json(shared(shown)) }
             aps["dismissal-date"] = timestamp
         }
         aps["event"] = event.rawValue
         guard let token, let payload = try? JSONSerialization.data(withJSONObject: ["aps": aps], options: [.sortedKeys]),
               payload.count <= LiveActivityPush.maxPayload else { return nil }
         return LiveActivityPush(event: event, phone: peer, token: token, environment: phone.environment,
-                                topic: "\(phone.bundleID).push-type.liveactivity", payload: payload)
+                                topic: "\(phone.bundleID).push-type.liveactivity", payload: payload, priority: priority)
     }
 
     private static func json(_ card: NowPlayingCard) -> Any {

@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import AppKit
 import PDSecurity
 import PDProtocol
 
@@ -10,11 +11,22 @@ public final class HostController {
     public let store = HostStore()
     private var service: HostService?
     private var runTask: Task<Void, Never>?
+    private var powerObservers: [any NSObjectProtocol] = []
 
     /// For the app's notifications; called after the store has the event.
     public var onEvent: ((HostEvent) -> Void)?
 
-    public init() {}
+    public init() {
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.willPowerOffNotification] {
+            powerObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in await self?.service?.prepareForSleep() }
+            })
+        }
+        powerObservers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.service?.resumeAfterSleep() }
+        })
+    }
 
     /// Ends every session of `peer` (the menu's Disconnect, or a notification action).
     public func disconnect(_ peer: Fingerprint) async {

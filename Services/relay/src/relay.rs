@@ -204,7 +204,22 @@ impl Relay {
         state.prune();
         match message {
             Message::Register { .. } => {
-                anyhow::ensure!(!state.hosts.contains_key(fp), "already registered");
+                if let Some(old) = state.hosts.get(fp) {
+                    anyhow::ensure!(
+                        old.connection.stable_id() != conn.stable_id(),
+                        "already registered"
+                    );
+                    old.connection.close(0u32.into(), b"replaced");
+                    let ids: Vec<_> = state
+                        .sessions
+                        .iter()
+                        .filter(|(_, s)| s.host == fp)
+                        .map(|(id, _)| *id)
+                        .collect();
+                    for id in ids {
+                        state.remove(id);
+                    }
+                }
                 state.hosts.insert(
                     fp.into(),
                     Host {
@@ -309,6 +324,7 @@ impl Relay {
                 environment,
                 topic,
                 payload,
+                priority,
             } => {
                 let host = state
                     .hosts
@@ -334,6 +350,7 @@ impl Relay {
                     &topic,
                     &payload,
                     &apns.topics,
+                    priority,
                 ) {
                     refuse(400, reason)?;
                     return Ok(());
@@ -349,7 +366,13 @@ impl Relay {
                 let out = out.clone();
                 tokio::spawn(async move {
                     let (status, reason) = apns
-                        .send(environment == "sandbox", &token, &topic, payload)
+                        .send(
+                            environment == "sandbox",
+                            &token,
+                            &topic,
+                            payload,
+                            priority.unwrap_or(10),
+                        )
                         .await;
                     let _ = out.try_send(Message::Pushed { id, status, reason });
                 });
@@ -415,7 +438,16 @@ mod tests {
     }
     impl Peer {
         async fn new(addr: SocketAddr, root: CertificateDer<'static>) -> Self {
-            let (cert, key) = identity();
+            Self::with_identity(addr, root, identity()).await
+        }
+        async fn with_identity(
+            addr: SocketAddr,
+            root: CertificateDer<'static>,
+            (cert, key): (
+                CertificateDer<'static>,
+                rustls::pki_types::PrivateKeyDer<'static>,
+            ),
+        ) -> Self {
             let fp = hex::encode(Sha256::digest(cert.as_ref()));
             let mut roots = rustls::RootCertStore::empty();
             roots.add(root).unwrap();
@@ -495,6 +527,7 @@ mod tests {
             environment: "sandbox".into(),
             topic: topic.into(),
             payload: r#"{"aps":{"event":"start"}}"#.into(),
+            priority: None,
         }
     }
 
@@ -557,6 +590,68 @@ mod tests {
         assert!(
             matches!(host.next().await, Message::Pushed { status: 503, reason: Some(r), .. } if r == "pushUnavailable")
         );
+    }
+
+    #[tokio::test]
+    async fn replacement_registration_closes_old_sessions_and_keeps_new_host() {
+        let relay = Arc::new(Relay::new(None));
+        let (addr, root) = listen(relay.clone()).await;
+        let (cert, key) = identity();
+        let mut old =
+            Peer::with_identity(addr, root.clone(), (cert.clone(), key.clone_key())).await;
+        let mut phone = Peer::new(addr, root.clone()).await;
+        old.send(Message::Register {
+            host_id: Uuid::new_v4(),
+        })
+        .await;
+        assert!(matches!(old.next().await, Message::Pong));
+        old.send(Message::Allow {
+            fingerprints: vec![phone.fp.clone()],
+        })
+        .await;
+        assert!(matches!(old.next().await, Message::Pong));
+        phone
+            .send(Message::Connect {
+                host: old.fp.clone(),
+            })
+            .await;
+        let Message::Ready { session } = phone.next().await else {
+            panic!("expected ready")
+        };
+        assert!(matches!(old.next().await, Message::Incoming { .. }));
+        let mut new = Peer::with_identity(addr, root, (cert, key)).await;
+        new.send(Message::Register {
+            host_id: Uuid::new_v4(),
+        })
+        .await;
+        assert!(matches!(new.next().await, Message::Pong));
+        assert!(matches!(phone.next().await, Message::Close { session: s } if s == session));
+        tokio::time::timeout(Duration::from_secs(3), old.conn.closed())
+            .await
+            .unwrap();
+        // Wait for the old serve's cleanup; it must not erase the new registration.
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        new.send(Message::Allow {
+            fingerprints: vec![phone.fp.clone()],
+        })
+        .await;
+        assert!(matches!(new.next().await, Message::Pong));
+        phone
+            .send(Message::Connect {
+                host: new.fp.clone(),
+            })
+            .await;
+        assert!(matches!(phone.next().await, Message::Ready { .. }));
+        assert!(matches!(new.next().await, Message::Incoming { .. }));
+        new.send(Message::Register {
+            host_id: Uuid::new_v4(),
+        })
+        .await;
+        tokio::time::timeout(Duration::from_secs(3), new.conn.closed())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

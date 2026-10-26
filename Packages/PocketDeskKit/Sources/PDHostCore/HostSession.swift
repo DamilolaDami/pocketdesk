@@ -437,7 +437,8 @@ public actor HostSession {
     private func watchStatus() async {
         var last: MacStatus?
         while !Task.isCancelled {
-            let status = await catalog.status()
+            var status = await catalog.status()
+            status.nowPlaying = status.nowPlaying?.coalescingTimeline(with: last?.nowPlaying)
             if status != last {
                 guard (try? await session.send(.macStatus(status))) != nil else { return }
                 last = status

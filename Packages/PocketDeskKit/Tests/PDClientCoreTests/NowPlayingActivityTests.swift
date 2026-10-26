@@ -11,6 +11,43 @@ struct NowPlayingActivityTests {
     private let song = NowPlaying(title: "Midnight City", artist: "M83", isPlaying: true,
                                   app: PlayerApp(bundleID: "com.spotify.client", name: "Spotify"))
 
+    @Test func timelineDriftIsIgnoredWhileSeeksAndPausesUpdate() throws {
+        var model = NowPlayingActivityModel()
+        var timed = song
+        timed.startedAt = Date(timeIntervalSince1970: 1000)
+        timed.duration = 240
+        _ = model.receive(timed, from: studio, macName: "Studio")
+        let initial = try #require(model.card)
+        timed.startedAt = timed.startedAt! + 0.6
+        #expect(model.receive(timed, from: studio, macName: "Studio") == .none)
+        #expect(model.card == initial)
+        timed.startedAt = timed.startedAt! - 30
+        guard case .update = model.receive(timed, from: studio, macName: "Studio") else {
+            Issue.record("Seeking should update the timeline"); return
+        }
+        timed.isPlaying = false
+        timed.pausedElapsed = 90
+        guard case .update(let paused) = model.receive(timed, from: studio, macName: "Studio") else {
+            Issue.record("Pausing should freeze the position"); return
+        }
+        #expect(paused.pausedElapsed == 90 && !paused.isPlaying)
+        #expect(try JSONEncoder().encode(paused).count < 4096)
+    }
+
+    @Test func oldPreferencesDefaultToSharingAndNewChoicePersists() throws {
+        let old = Data(#"{"isEnabled":true,"showsArtwork":true,"showsSkipButtons":true,"endsWhenPaused":false,"style":"album"}"#.utf8)
+        var preferences = try JSONDecoder().decode(NowPlayingActivityPreferences.self, from: old)
+        #expect(preferences.showsDetailsInPushes)
+        preferences.showsDetailsInPushes = false
+        #expect(try JSONDecoder().decode(NowPlayingActivityPreferences.self, from: JSONEncoder().encode(preferences)) == preferences)
+        let name = "details-test-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        #expect(NowPlayingActivityPreferences(defaults: defaults).showsDetailsInPushes)
+        defaults.set(false, forKey: NowPlayingActivityPreferences.Key.showsDetailsInPushes)
+        #expect(!NowPlayingActivityPreferences(defaults: defaults).showsDetailsInPushes)
+    }
+
     private func paused(_ playing: NowPlaying) -> NowPlaying {
         var playing = playing
         playing.isPlaying = false

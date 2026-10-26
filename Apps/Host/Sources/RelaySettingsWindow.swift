@@ -44,6 +44,9 @@ struct RelaySettingsWindow: View {
                         }
                         Spacer(minLength: 0)
                     }
+                    if enabled, controller.store.state.relayStatus == .unavailable {
+                        Button("Retry Relay Connection") { controller.relaySettingsChanged() }
+                    }
                     HStack(spacing: 8) {
                         Text(address).font(.system(.footnote, design: .monospaced))
                             .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

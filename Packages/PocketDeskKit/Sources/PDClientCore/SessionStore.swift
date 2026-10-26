@@ -8,6 +8,8 @@ import PDProtocol
 @Observable
 public final class SessionStore {
     public private(set) var state: SessionState = .idle
+    public private(set) var relayHealth = RelayHealthState()
+    public func update(relayHealth: RelayHealthState) { self.relayHealth = relayHealth }
     public private(set) var connectionPath: ConnectionPath?
     public func update(path: ConnectionPath) { connectionPath = path }
     /// The Mac's windows, from the last `listWindows`. Not part of the state machine.

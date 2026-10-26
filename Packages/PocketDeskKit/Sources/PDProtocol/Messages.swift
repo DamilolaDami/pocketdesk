@@ -1,5 +1,7 @@
+import Foundation
+
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 20
+public let protocolVersion: UInt16 = 21
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -489,6 +491,11 @@ public struct NowPlaying: Codable, Sendable, Equatable {
     public var title: String
     public var artist: String?
     public var isPlaying: Bool
+    /// Stable playback origin, not an elapsed counter. Nil for live/unknown media.
+    public var startedAt: Date?
+    public var duration: Double?
+    /// Frozen position while paused.
+    public var pausedElapsed: Double?
     /// The cover, as base64 JPEG at most `artworkSize` pixels on a side, when the player has one.
     /// Optional, so phones and Macs without it still understand each other.
     public var artwork: String?
@@ -500,13 +507,44 @@ public struct NowPlaying: Codable, Sendable, Equatable {
     public static let artworkSize = 240
 
     public init(title: String, artist: String? = nil, isPlaying: Bool, artwork: String? = nil, app: PlayerApp? = nil,
-                site: String? = nil) {
+                site: String? = nil,
+                startedAt: Date? = nil, duration: Double? = nil, pausedElapsed: Double? = nil) {
         self.title = title
         self.artist = artist
         self.isPlaying = isPlaying
+        self.startedAt = startedAt
+        self.duration = duration
+        self.pausedElapsed = pausedElapsed
         self.artwork = artwork
         self.app = app
         self.site = site
+    }
+}
+
+extension NowPlaying {
+    /// Keep a previously sent timeline when the reader's sampling jitter is at most a second.
+    public func coalescingTimeline(with previous: Self?) -> Self {
+        guard let previous, title == previous.title, artist == previous.artist,
+              app == previous.app, site == previous.site, isPlaying == previous.isPlaying else { return self }
+        var result = self
+        if PlaybackTimeline.matches(startedAt, previous.startedAt) { result.startedAt = previous.startedAt }
+        if PlaybackTimeline.matches(duration, previous.duration) { result.duration = previous.duration }
+        if PlaybackTimeline.matches(pausedElapsed, previous.pausedElapsed) { result.pausedElapsed = previous.pausedElapsed }
+        return result
+    }
+}
+
+/// Suppress at most a second of sampling drift without suppressing seeks or state changes.
+public enum PlaybackTimeline {
+    public static func matches(_ a: Date?, _ b: Date?) -> Bool {
+        matches(a?.timeIntervalSince1970, b?.timeIntervalSince1970)
+    }
+    public static func matches(_ a: Double?, _ b: Double?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): true
+        case (.some(let a), .some(let b)): abs(a - b) <= 1
+        default: false
+        }
     }
 }
 

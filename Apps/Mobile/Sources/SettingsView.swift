@@ -30,6 +30,7 @@ enum SettingsKey {
     static let keyBarFunction = "keyBarFunction"
     /// The Now Playing Live Activity (`SessionController` reads these).
     static let nowPlayingActivity = NowPlayingActivityPreferences.Key.enabled
+    static let nowPlayingDetailsInPushes = NowPlayingActivityPreferences.Key.showsDetailsInPushes
     static let nowPlayingArtwork = NowPlayingActivityPreferences.Key.showsArtwork
     static let nowPlayingSkipButtons = NowPlayingActivityPreferences.Key.showsSkipButtons
     static let nowPlayingEndsWhenPaused = NowPlayingActivityPreferences.Key.endsWhenPaused
@@ -532,6 +533,9 @@ private struct RelaySettingsView: View {
     @AppStorage(RelayServer.enabledKey) private var enabled = false
     @AppStorage(RelayServer.addressKey) private var address = RelayServer.defaultAddress
 
+    @State private var relayRetry = 0
+    @Environment(\.scenePhase) private var scenePhase
+
     private var usingDefault: Bool { address == RelayServer.defaultAddress }
 
     var body: some View {
@@ -545,6 +549,10 @@ private struct RelaySettingsView: View {
                 }
                 .onChange(of: enabled) { controller.relaySettingsChanged() }
                 RemoteAccessStatus(status: status)
+                if enabled {
+                    Button("Check Relay Now") { relayRetry += 1 }
+                        .disabled(controller.store.relayHealth.status == .checking)
+                }
             }
 
             Section {
@@ -590,16 +598,26 @@ private struct RelaySettingsView: View {
         .navigationTitle("Remote Access")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { if address.isEmpty { address = RelayServer.defaultAddress } }
+        .task(id: "\(enabled)-\(address)-\(scenePhase)-\(relayRetry)") {
+            guard enabled, scenePhase == .active else { return }
+            await controller.watchRelayStatus()
+        }
     }
 
     private var status: RemoteAccessStatus.Status {
         guard enabled else { return .off }
-        guard controller.store.connectionPath == .relay else { return .ready }
-        switch controller.store.state {
-        case .streaming: return .connected
-        case .connecting: return .connecting
-        case .failed: return .unreachable
-        default: return .ready
+        if controller.store.connectionPath == .relay {
+            switch controller.store.state {
+            case .streaming: return .connected
+            case .connecting: return .connecting
+            case .failed: return .unreachable
+            default: break
+            }
+        }
+        switch controller.store.relayHealth.status {
+        case .unchecked, .checking: return .checkingRelay
+        case .reachable: return .ready
+        case .unreachable: return .relayUnavailable
         }
     }
 }
@@ -656,7 +674,7 @@ private struct RemoteAccessHeader: View {
 
 /// One line that says, in plain words, what Remote Access is doing right now.
 private struct RemoteAccessStatus: View {
-    enum Status { case off, ready, connecting, connected, unreachable }
+    enum Status { case off, ready, connecting, connected, unreachable, checkingRelay, relayUnavailable }
     let status: Status
 
     var body: some View {
@@ -676,6 +694,8 @@ private struct RemoteAccessStatus: View {
 
     private var symbol: String {
         switch status {
+        case .checkingRelay: "arrow.triangle.2.circlepath"
+        case .relayUnavailable: "exclamationmark.triangle.fill"
         case .off: "wifi"
         case .ready: "checkmark.circle.fill"
         case .connecting: "arrow.triangle.2.circlepath"
@@ -685,6 +705,8 @@ private struct RemoteAccessStatus: View {
     }
     private var color: Color {
         switch status {
+        case .checkingRelay: Brand.accent
+        case .relayUnavailable: .orange
         case .off: .secondary
         case .ready: Brand.accent
         case .connecting: Brand.accent
@@ -694,8 +716,10 @@ private struct RemoteAccessStatus: View {
     }
     private var title: String {
         switch status {
+        case .checkingRelay: "Checking relay…"
+        case .relayUnavailable: "Can’t reach the relay"
         case .off: "Only on the same Wi-Fi"
-        case .ready: "Ready"
+        case .ready: "Relay is reachable"
         case .connecting: "Connecting from away…"
         case .connected: "Connected from away"
         case .unreachable: "Couldn't reach your Mac"
@@ -703,8 +727,10 @@ private struct RemoteAccessStatus: View {
     }
     private var detail: String {
         switch status {
+        case .checkingRelay: "Checking your connection to the configured relay."
+        case .relayUnavailable: "The relay couldn’t be reached from this iPhone. Check your internet connection or try again. Home Wi-Fi still connects directly."
         case .off: "Turn on Remote Access to reach your Mac when you're out."
-        case .ready: "When your Mac isn't nearby, PocketDesk connects through the relay."
+        case .ready: "This iPhone can reach the relay. Your Mac still needs to be awake, with Remote Access on."
         case .connecting: "Reaching your Mac through the relay."
         case .connected: "Your Mac is streaming through the relay."
         case .unreachable: "Check that it's awake, PocketDesk is open, and Remote Access is on on the Mac."

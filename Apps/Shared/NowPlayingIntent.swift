@@ -42,8 +42,16 @@ struct NowPlayingControlIntent: LiveActivityIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         #if !WIDGET_EXTENSION
-        await AppModel.controller.pressNowPlaying(control.key)
+        guard await AppModel.controller.pressNowPlaying(control.key) else {
+            throw NowPlayingControlFailure()
+        }
         #endif
         return .result()
+    }
+}
+
+private struct NowPlayingControlFailure: LocalizedError {
+    var errorDescription: String? {
+        "Couldn’t control playback. Open PocketDesk and check the computer’s connection."
     }
 }

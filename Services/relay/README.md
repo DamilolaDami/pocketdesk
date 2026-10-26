@@ -64,7 +64,7 @@ Register/allow reply with `pong`. Connect replies `ready(session)` to the phone 
 `incoming(phone, session)` to the Mac; absent and unauthorized hosts both return `notFound`.
 Allocate replies `forward(session)` to both. Only the requesting control connection can
 allocate. Close is allowed for either session participant. Revocation, expiry and
-disconnect send `close(session)`. Duplicate registration closes the newer control connection.
+disconnect send `close(session)`. Duplicate registration closes the older control connection and its sessions; a repeat on the same connection is an error.
 Invalid messages close the control connection; exhausted session capacity returns
 `error(reason: "sessionLimit")`. No direct candidates are exchanged in this phase.
 
@@ -93,8 +93,9 @@ that Mac's allow list, to a topic in `APNS_TOPICS`, with a hex token and an `aps
 most 4 KB. The relay signs an ES256 provider token (refreshed every 50 minutes), posts it over
 HTTP/2 to Apple's sandbox or production server with `apns-push-type: liveactivity`, and replies
 `pushed` with Apple's status and reason. It refuses with its own: `400` (`notPaired`,
-`badToken`, `badEnvironment`, `badTopic`, `badPayload`), `429` (`pushLimit`, 60 per Mac per
-minute) and `503` (`pushUnavailable`, no key). Payloads are never logged.
+`badToken`, `badEnvironment`, `badTopic`, `badPayload`, `badPriority`), `429` (`pushLimit`, 60 per Mac per
+minute) and `503` (`pushUnavailable`, no key). Payloads are never logged. Optional `priority` is 5 or 10 (default 10); it becomes
+`apns-priority`. Playback state changes, starts and ends use 10; other updates use 5.
 
 Push content isn't end-to-end encrypted: the relay and Apple can read the titles and site
 names in it. Phones turn this off in Settings › Now Playing.

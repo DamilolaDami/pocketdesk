@@ -102,6 +102,8 @@ public actor HostService: PairingAuthority {
     private var sessions: [Fingerprint: [UUID: HostSession]] = [:]
     private let nowPlayingPushes: NowPlayingPushes
     private var pushWatch: Task<Void, Never>?
+    private var pushWatchID = UUID()
+    private var sleeping = false
     /// What the push watcher last saw, to log only changes.
     private var lastPushStatus: NowPlaying?
 
@@ -136,19 +138,23 @@ public actor HostService: PairingAuthority {
 
     /// Follows what's playing while any phone wants pushes and there's a way to send them.
     private func watchForPushesIfNeeded() async {
-        guard pushWatch == nil, configuration.pushSender != nil || configuration.relayServer != nil,
-              await !nowPlayingPushes.isEmpty else { return }
+        guard await !nowPlayingPushes.isEmpty, !sleeping, pushWatch == nil,
+              configuration.pushSender != nil || configuration.relayServer != nil else { return }
         let catalog = InstalledApps()
+        let watchID = UUID()
+        pushWatchID = watchID
         pushWatch = Task {
             while !Task.isCancelled, await !nowPlayingPushes.isEmpty,
                   configuration.pushSender != nil || configuration.relayServer != nil {
                 // Nothing reads what's playing while there's no relay to tell.
                 if let sender = pushSender {
-                    let status = await catalog.status()
+                    var status = await catalog.status()
+                    status.nowPlaying = status.nowPlaying?.coalescingTimeline(with: lastPushStatus)
                     var connected: Set<Fingerprint> = []
                     for (peer, live) in sessions {
                         for session in live.values where await session.phoneIsPresent() { connected.insert(peer) }
                     }
+                    guard !sleeping, !Task.isCancelled else { break }
                     let pushes = await nowPlayingPushes.pushes(for: status.nowPlaying, hostID: configuration.hostID,
                                                                macName: configuration.hostName, connected: connected)
                     if status.nowPlaying != lastPushStatus {
@@ -156,13 +162,16 @@ public actor HostService: PairingAuthority {
                     }
                     lastPushStatus = status.nowPlaying
                     for push in pushes {
+                        guard !sleeping, !Task.isCancelled else { break }
                         do {
                             try await sender.send(push)
                             Self.pushLog.info("Now Playing \(push.event.rawValue, privacy: .public) push delivered")
                         } catch let error as LiveActivityPushError where error.tokenIsDead {
+                            guard pushWatchID == watchID else { break }
                             Self.pushLog.error("Now Playing \(push.event.rawValue, privacy: .public) push: dead token, \(String(describing: error), privacy: .public)")
                             await nowPlayingPushes.tokenRejected(push)
                         } catch {
+                            guard pushWatchID == watchID else { break }
                             Self.pushLog.error("Now Playing \(push.event.rawValue, privacy: .public) push failed: \(String(describing: error), privacy: .public)")
                             await nowPlayingPushes.pushFailed(push)
                         }
@@ -170,8 +179,31 @@ public actor HostService: PairingAuthority {
                 }
                 try? await Task.sleep(for: configuration.pushInterval)
             }
-            pushWatch = nil
+            if pushWatchID == watchID { pushWatch = nil }
         }
+    }
+
+    /// Send end pushes now, before macOS takes the network away.
+    public func prepareForSleep() async {
+        sleeping = true
+        pushWatch?.cancel()
+        pushWatch = nil
+        pushWatchID = UUID()
+        guard let sender = pushSender else { return }
+        let pushes = await nowPlayingPushes.endAll(hostID: configuration.hostID, macName: configuration.hostName)
+        await withTaskGroup(of: Void.self) { group in
+            for push in pushes {
+                group.addTask {
+                    do { try await sender.send(push) }
+                    catch { Self.pushLog.error("Sleep end push failed: \(String(describing: error), privacy: .public)") }
+                }
+            }
+        }
+    }
+
+    public func resumeAfterSleep() async {
+        sleeping = false
+        await watchForPushesIfNeeded()
     }
 
     /// Listens until the task is cancelled.

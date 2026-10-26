@@ -68,6 +68,14 @@ void pocketdesk_now_playing(void *interpreter, void *cv) {
             if ([artist isKindOfClass:[NSString class]] && artist.length > 0) out[@"artist"] = artist;
             NSNumber *rate = all[@"kMRMediaRemoteNowPlayingInfoPlaybackRate"];
             out[@"isPlaying"] = @((BOOL)([rate isKindOfClass:[NSNumber class]] && rate.doubleValue > 0));
+            out[@"rate"] = rate ?: @0;
+            for (NSString *name in @[@"ElapsedTime", @"Duration"]) {
+                id value = all[[@"kMRMediaRemoteNowPlayingInfo" stringByAppendingString:name]];
+                if ([value isKindOfClass:[NSNumber class]] && isfinite([value doubleValue]))
+                    out[[name isEqualToString:@"ElapsedTime"] ? @"elapsed" : @"duration"] = value;
+            }
+            id timestamp = all[@"kMRMediaRemoteNowPlayingInfoTimestamp"];
+            if ([timestamp isKindOfClass:[NSDate class]]) out[@"timestamp"] = @([timestamp timeIntervalSince1970]);
             NSData *cover = all[@"kMRMediaRemoteNowPlayingInfoArtworkData"];
             NSString *artwork = [cover isKindOfClass:[NSData class]] ? ArtworkString(cover) : nil;
             if (artwork) out[@"artwork"] = artwork;

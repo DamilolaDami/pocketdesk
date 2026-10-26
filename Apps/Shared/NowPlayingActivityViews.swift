@@ -77,6 +77,7 @@ struct NowPlayingLockScreenView: View {
                 NowPlayingBars(isPlaying: card.isPlaying && !isStale, color: palette.accent)
                     .frame(width: 22, height: 18)
             }
+            NowPlayingProgress(card: card, foreground: palette.foreground)
             HStack(spacing: 10) {
                 NowPlayingSource(card: card, isStale: isStale)
                 Spacer(minLength: 8)
@@ -237,5 +238,33 @@ extension NowPlayingCard {
     /// The site icon saved for this card, when a browser is playing it.
     var savedSiteIcon: UIImage? {
         siteIconID.flatMap { UIImage(contentsOfFile: NowPlayingArtwork.url(for: $0).path(percentEncoded: false)) }
+    }
+}
+
+/// System timers continue on the Lock Screen when the app isn't running.
+struct NowPlayingProgress: View {
+    let card: NowPlayingCard
+    let foreground: Color
+
+    var body: some View {
+        if let duration = card.duration, duration.isFinite, duration > 0 {
+            VStack(spacing: 4) {
+                if card.isPlaying, let start = card.startedAt, start.timeIntervalSince1970.isFinite {
+                    let interval = start...start.addingTimeInterval(duration)
+                    ProgressView(timerInterval: interval, countsDown: false)
+                        .labelsHidden()
+                    Text(timerInterval: interval, countsDown: false)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if !card.isPlaying, let elapsed = card.pausedElapsed, elapsed.isFinite {
+                    ProgressView(value: min(max(elapsed, 0), duration), total: duration)
+                    Text(Duration.seconds(min(max(elapsed, 0), duration)), format: .time(pattern: .minuteSecond))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .tint(foreground)
+            .foregroundStyle(foreground.opacity(0.7))
+            .font(.caption2.monospacedDigit())
+            .accessibilityLabel("Playback progress")
+        }
     }
 }

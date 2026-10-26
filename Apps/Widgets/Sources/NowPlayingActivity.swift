@@ -40,11 +40,14 @@ struct NowPlayingLiveActivity: Widget {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    HStack {
-                        NowPlayingSource(card: card, isStale: context.isStale)
-                        Spacer(minLength: 8)
-                        // The island is always black: draw the buttons as on a dark card.
-                        NowPlayingControls(card: darkCard(card), palette: NowPlayingPalette(card: darkCard(card)), size: 38)
+                    VStack(spacing: 6) {
+                        NowPlayingProgress(card: card, foreground: .white)
+                        HStack {
+                            NowPlayingSource(card: card, isStale: context.isStale)
+                            Spacer(minLength: 8)
+                            // The island is always black: draw the buttons as on a dark card.
+                            NowPlayingControls(card: darkCard(card), palette: NowPlayingPalette(card: darkCard(card)), size: 38)
+                        }
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 4)

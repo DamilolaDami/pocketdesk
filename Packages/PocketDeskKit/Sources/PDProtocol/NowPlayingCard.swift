@@ -10,6 +10,11 @@ public struct NowPlayingCard: Codable, Hashable, Sendable {
     public var appName: String?
     public var macName: String
     public var isPlaying: Bool
+    /// Stable playback origin, not an elapsed counter. Nil for live/unknown media.
+    public var startedAt: Date?
+    public var duration: Double?
+    /// Frozen position while paused.
+    public var pausedElapsed: Double?
     /// `nil` when there's no cover, or Settings hides it.
     public var artworkID: String?
     /// The cover's average color (else the site icon's), which the album style paints the
@@ -24,12 +29,16 @@ public struct NowPlayingCard: Codable, Hashable, Sendable {
 
     public init(title: String, artist: String? = nil, appName: String? = nil, macName: String, isPlaying: Bool,
                 artworkID: String? = nil, tint: CardColor? = nil, style: NowPlayingStyle = .album,
-                showsSkipButtons: Bool = true, site: String? = nil, siteIconID: String? = nil) {
+                showsSkipButtons: Bool = true, site: String? = nil, siteIconID: String? = nil,
+                startedAt: Date? = nil, duration: Double? = nil, pausedElapsed: Double? = nil) {
         self.title = title
         self.artist = artist
         self.appName = appName
         self.macName = macName
         self.isPlaying = isPlaying
+        self.startedAt = startedAt
+        self.duration = duration
+        self.pausedElapsed = pausedElapsed
         self.artworkID = artworkID
         self.tint = tint
         self.style = style
@@ -68,12 +77,26 @@ public enum NowPlayingStyle: String, Codable, CaseIterable, Sendable {
 public struct NowPlayingActivityPreferences: Codable, Equatable, Sendable {
     public var isEnabled = true
     public var showsArtwork = true
+    public var showsDetailsInPushes = true
     public var showsSkipButtons = true
     /// End the activity when playback pauses, instead of keeping a paused card.
     public var endsWhenPaused = false
     public var style = NowPlayingStyle.album
 
     public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case isEnabled, showsArtwork, showsDetailsInPushes, showsSkipButtons, endsWhenPaused, style
+    }
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        showsArtwork = try c.decodeIfPresent(Bool.self, forKey: .showsArtwork) ?? true
+        showsDetailsInPushes = try c.decodeIfPresent(Bool.self, forKey: .showsDetailsInPushes) ?? true
+        showsSkipButtons = try c.decodeIfPresent(Bool.self, forKey: .showsSkipButtons) ?? true
+        endsWhenPaused = try c.decodeIfPresent(Bool.self, forKey: .endsWhenPaused) ?? false
+        style = try c.decodeIfPresent(NowPlayingStyle.self, forKey: .style) ?? .album
+    }
 }
 
 /// What to do with the Live Activity.
@@ -103,6 +126,9 @@ public struct NowPlayingActivityModel: Equatable, Sendable {
         var site: String?
         var siteIconID: String?
         var siteTint: CardColor?
+        var startedAt: Date?
+        var duration: Double?
+        var pausedElapsed: Double?
     }
 
     public private(set) var hostID: UUID?
@@ -121,7 +147,8 @@ public struct NowPlayingActivityModel: Equatable, Sendable {
         self.card = card
         playing = Playing(hostID: hostID, macName: card.macName, title: card.title, artist: card.artist,
                           appName: card.appName, isPlaying: card.isPlaying, artworkID: card.artworkID, tint: card.tint,
-                          site: card.site, siteIconID: card.siteIconID)
+                          site: card.site, siteIconID: card.siteIconID,
+                          startedAt: card.startedAt, duration: card.duration, pausedElapsed: card.pausedElapsed)
     }
 
     /// The watched Mac's status. `artworkID` and `tint` describe `nowPlaying.artwork`;
@@ -132,7 +159,8 @@ public struct NowPlayingActivityModel: Equatable, Sendable {
         playing = nowPlaying.map {
             Playing(hostID: hostID, macName: macName, title: $0.title, artist: $0.artist, appName: $0.app?.name,
                     isPlaying: $0.isPlaying, artworkID: artworkID, tint: tint,
-                    site: $0.site.map(Self.spoken), siteIconID: $0.site == nil ? nil : siteIconID, siteTint: siteTint)
+                    site: $0.site.map(Self.spoken), siteIconID: $0.site == nil ? nil : siteIconID, siteTint: siteTint,
+                    startedAt: $0.startedAt, duration: $0.duration, pausedElapsed: $0.pausedElapsed)
         }
         return reconcile()
     }
@@ -161,7 +189,14 @@ public struct NowPlayingActivityModel: Equatable, Sendable {
     }
 
     private mutating func reconcile() -> NowPlayingActivityStep {
-        let wanted = playing.flatMap(render)
+        var wanted = playing.flatMap(render)
+        if let old = card, var next = wanted, old.isPlaying == next.isPlaying,
+           old.title == next.title, old.artist == next.artist {
+            if PlaybackTimeline.matches(old.startedAt, next.startedAt) { next.startedAt = old.startedAt }
+            if PlaybackTimeline.matches(old.duration, next.duration) { next.duration = old.duration }
+            if PlaybackTimeline.matches(old.pausedElapsed, next.pausedElapsed) { next.pausedElapsed = old.pausedElapsed }
+            wanted = next
+        }
         guard let wanted, let playing else {
             guard card != nil else { return .none }
             card = nil
@@ -193,7 +228,8 @@ public struct NowPlayingActivityModel: Equatable, Sendable {
                               // A Netflix card takes Netflix's red when there's no cover to take a color from.
                               tint: (preferences.showsArtwork ? playing.tint : nil) ?? playing.siteTint ?? playing.tint,
                               style: preferences.style, showsSkipButtons: preferences.showsSkipButtons,
-                              site: playing.site, siteIconID: playing.siteIconID)
+                              site: playing.site, siteIconID: playing.siteIconID,
+                              startedAt: playing.startedAt, duration: playing.duration, pausedElapsed: playing.pausedElapsed)
     }
 }
 

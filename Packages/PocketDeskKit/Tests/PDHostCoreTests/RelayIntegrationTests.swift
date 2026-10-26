@@ -11,6 +11,21 @@
     /// Run with POCKETDESK_RELAY_BINARY pointing to `cargo build`'s Quinn executable.
     @Suite(.serialized, .timeLimit(.minutes(1)))
     struct RelayIntegrationTests {
+        @Test func healthCheckTimesOutWhenNoRelayAnswers() async throws {
+            let label = "com.pocketdesk.test.relay.health.\(UUID())"
+            let identity = try DeviceIdentity.loadOrCreate(label: label)
+            defer { DeviceIdentity.delete(label: label) }
+            let blackhole = try RelayLoopbackSocket()
+            defer { blackhole.close() }
+            do {
+                try await RelayConnection.check(server: RelayServer(host: "127.0.0.1", port: blackhole.port),
+                                                identity: identity, timeout: .milliseconds(100))
+                Issue.record("An unanswered check must not be marked reachable")
+            } catch TransportError.timedOut {
+                // Expected: the whole connection, including its handshake, is bounded.
+            }
+        }
+
         @Test(.enabled(if: ProcessInfo.processInfo.environment["POCKETDESK_RELAY_BINARY"] != nil))
         func appleQUICThroughQuinnPreservesPinnedSession() async throws {
             let binary = try #require(ProcessInfo.processInfo.environment["POCKETDESK_RELAY_BINARY"])
@@ -120,6 +135,9 @@
                 if await status.ready { break }
                 try await Task.sleep(for: .milliseconds(10))
             }
+            try #require(await status.ready)
+            // The settings probe gets a real pong and leaves the registered Mac untouched.
+            try await RelayConnection.check(server: server, identity: phone, serverPin: relayPin)
             try #require(await status.ready)
             do {
                 try await RelayPhonePath.connect(

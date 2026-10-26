@@ -110,6 +110,29 @@ public final class RelayConnection: Sendable {
             while let finished = try await group.next(), !finished {}
         }
     }
+    /// Verify this device can reach the relay's control service, without touching host registrations.
+    public static func check(server: RelayServer, identity: DeviceIdentity,
+                             serverPin: Fingerprint? = nil, timeout: Duration = .seconds(8)) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await withConnection(server: server, identity: identity, serverPin: serverPin) { relay in
+                    try await relay.send(.ping)
+                    for try await message in relay.messages {
+                        guard message == .pong else { throw RelayError.invalidResponse }
+                        return
+                    }
+                    throw RelayError.closed
+                }
+            }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                throw TransportError.timedOut
+            }
+            defer { group.cancelAll() }
+            try await group.next()
+        }
+    }
+
     private actor Writer {
         let stream: QUIC.Stream<QUICStream>
         init(stream: QUIC.Stream<QUICStream>) { self.stream = stream }

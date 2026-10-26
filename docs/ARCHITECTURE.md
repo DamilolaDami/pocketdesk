@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 18), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 21), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -344,7 +344,7 @@ parameter (`needsValueError`). Quick picks include Search YouTube, Netflix, Goog
 - Siri and the Shortcuts app also get Type on Computer, Control Computer (lock, sleep,
   display, dark mode, screenshot) and Set Computer Volume.
 
-## Now Playing Live Activity (no protocol change)
+## Now Playing Live Activity (protocol v21)
 
 What the watched Mac plays, on the Lock Screen and in the Dynamic Island, from the same
 `MacStatus` live tiles use.
@@ -360,7 +360,12 @@ What the watched Mac plays, on the Lock Screen and in the Dynamic Island, from t
 - Buttons are `NowPlayingControlIntent`, a `LiveActivityIntent` compiled into both targets but
   run in the app's process (`WIDGET_EXTENSION` leaves out the app-only part). Play / Pause
   flips the card at once, sends the media key over a short catalog connection, then listens
-  to the Mac's status for 3 s to catch the new song.
+  to the Mac's status for 3 s to catch the new song. A cold-started button first waits for
+  activity adoption, binds the request to that activity's Mac, and uses an acknowledged
+  one-shot connection rather than a streaming socket that may have been suspended. Failure
+  restores the previous card exactly; end-when-paused waits for confirmed delivery.
+  The latest attempt's phase/error is kept locally in `now-playing-control.json`, without
+  titles, tokens or fingerprints, for device diagnosis.
 - From a browser, the card shows the site ("netflix.com on Studio") and its icon: on a white
   tile without a cover, as a badge on one with a cover, and its color when there's no cover.
   macOS only says the browser, so the host (`PlayingSite`) asks Safari, Chrome, Arc, Brave,
@@ -382,11 +387,35 @@ What the watched Mac plays, on the Lock Screen and in the Dynamic Island, from t
   (`Services/relay/README.md`, "Live Activity pushes"). With Remote Access off nothing is
   sent and nothing watches while phones are away. A dead token (410, `BadDeviceToken`) drops
   the start token, or just the closed card's, so the next song starts a new one. Push content isn't end-to-end
-  encrypted: the relay and Apple see titles and sites.
-- No push server, so updates only come while the app runs: content goes stale after 15
-  minutes and the card says to open PocketDesk.
+  encrypted: the relay and Apple see titles and sites when Show Details in Pushes is on.
+  With it off, every push (including the alert and end state) has only “Playing on <Mac>”,
+  playback state and appearance preferences; no artist, app, site, artwork identifiers,
+  artwork/site color, or timeline. The phone restores details through its encrypted session.
+  Missing `showsDetailsInPushes` decodes as true for older saved registrations.
+- Priority is 10 for start/end and playback-state changes, 5 for other updates. The relay
+  accepts optional `priority` (5 or 10, default 10). Deploy it before Macs that send priority.
+- Progress (v21): MediaRemote elapsed/duration/timestamp become a rounded stable `startedAt`,
+  `duration` and, while paused, `pausedElapsed`. Status and activity models coalesce at most
+  one second of sampling drift against the last sent timeline; seeks and playback changes
+  still update. System timer views animate Lock Screen and expanded Island progress without
+  periodic pushes. Unknown durations, live streams and non-unit playback rates omit progress.
+- macOS sleep/power-off notifications suspend the push watcher and immediately send end pushes
+  for known cards with activity tokens; wake resumes polling and can start fresh cards.
+  Delivery before the network sleeps is best effort. Content still goes stale after 15 minutes
+  if the Mac or relay disappears unexpectedly.
 - Settings › Now Playing: on/off, style (album colors, PocketDesk blue, classic), album art,
   skip buttons, end when paused. They travel in the card, so a change redraws it at once.
+
+### Relay availability in Settings
+
+The iPhone's Remote Access settings check the configured relay with an authenticated QUIC
+`ping`/`pong`, bounded to eight seconds. This tests the actual control path and supports
+custom ports; enabling Remote Access alone never means “ready”. `RelayHealthState` ignores
+out-of-order results after a retry/server change. Checks stop when the settings page is
+inactive and repeat every 30 seconds while visible. A failure means this phone couldn't
+reach the relay, which may be a phone/network problem; a successful check doesn't mean its
+Mac is awake. The Mac uses its live `RelayAgent` registration state and can retry manually.
+No marketing-site indicator, email monitor, or public health listener is added.
 
 ## Files (protocol v16)
 
@@ -530,6 +559,10 @@ and pinning, never on obscurity.
 
 - **Identity**: each device generates a P-256 key *inside* the Keychain and a self-signed
   certificate over it (`DeviceIdentity`). Its `Fingerprint` is the SHA-256 of the certificate.
+  On iOS, the TLS key and paired certificate pins are available after the first device
+  unlock so Lock Screen intents can authenticate. The pairing JSON contains no private key;
+  existing pairing files migrate to UntilFirstUserAuthentication protection on a successful
+  read while unlocked. Per-Mac Face ID locks still apply to background commands.
 - **Pairing**: the Mac's "Pair a Phone" window shows a QR code (`PairingInvite`:
   host ID, name, host fingerprint, 128-bit one-time token, 5-minute expiry). The phone pins the
   host fingerprint from the QR, connects, and sends `pairRequest(token)`. The token is

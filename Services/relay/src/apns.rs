@@ -90,6 +90,7 @@ impl Apns {
         token: &str,
         topic: &str,
         payload: String,
+        priority: u8,
     ) -> (u16, Option<String>) {
         let host = if sandbox {
             "api.sandbox.push.apple.com"
@@ -102,7 +103,7 @@ impl Apns {
             .header("authorization", format!("bearer {}", self.bearer()))
             .header("apns-topic", topic)
             .header("apns-push-type", "liveactivity")
-            .header("apns-priority", "10")
+            .header("apns-priority", priority.to_string())
             .body(payload)
             .send()
             .await;
@@ -150,7 +151,11 @@ pub fn check(
     topic: &str,
     payload: &str,
     topics: &HashSet<String>,
+    priority: Option<u8>,
 ) -> Result<(), &'static str> {
+    if priority.is_some_and(|p| p != 5 && p != 10) {
+        return Err("badPriority");
+    }
     if !phone_allowed {
         return Err("notPaired");
     }
@@ -212,19 +217,19 @@ mod tests {
         let token = "ab".repeat(40);
         let payload = r#"{"aps":{"event":"start"}}"#;
         assert_eq!(
-            check(true, &token, "sandbox", topic, payload, &topics),
+            check(true, &token, "sandbox", topic, payload, &topics, None),
             Ok(())
         );
         assert_eq!(
-            check(false, &token, "sandbox", topic, payload, &topics),
+            check(false, &token, "sandbox", topic, payload, &topics, None),
             Err("notPaired")
         );
         assert_eq!(
-            check(true, "xyz", "sandbox", topic, payload, &topics),
+            check(true, "xyz", "sandbox", topic, payload, &topics, None),
             Err("badToken")
         );
         assert_eq!(
-            check(true, &token, "staging", topic, payload, &topics),
+            check(true, &token, "staging", topic, payload, &topics, None),
             Err("badEnvironment")
         );
         assert_eq!(
@@ -234,17 +239,46 @@ mod tests {
                 "sandbox",
                 "com.other.app.push-type.liveactivity",
                 payload,
-                &topics
+                &topics,
+                None
             ),
             Err("badTopic")
         );
         assert_eq!(
-            check(true, &token, "sandbox", topic, "[1]", &topics),
+            check(true, &token, "sandbox", topic, "[1]", &topics, None),
             Err("badPayload")
         );
+        for priority in [0, 1, 9, 11, 255] {
+            assert_eq!(
+                check(
+                    true,
+                    &token,
+                    "sandbox",
+                    topic,
+                    payload,
+                    &topics,
+                    Some(priority)
+                ),
+                Err("badPriority")
+            );
+        }
+        for priority in [5, 10] {
+            assert_eq!(
+                check(
+                    true,
+                    &token,
+                    "production",
+                    topic,
+                    payload,
+                    &topics,
+                    Some(priority)
+                ),
+                Ok(())
+            );
+        }
         let huge = format!(r#"{{"aps":{{"x":"{}"}}}}"#, "a".repeat(MAX_PAYLOAD));
         assert_eq!(
-            check(true, &token, "sandbox", topic, &huge, &topics),
+            check(true, &token, "sandbox", topic, &huge, &topics, None),
             Err("badPayload")
         );
     }

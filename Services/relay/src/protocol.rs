@@ -48,6 +48,8 @@ pub enum Message {
         environment: String,
         topic: String,
         payload: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        priority: Option<u8>,
     },
     /// Relay → Mac: what Apple said (200 is delivered), or why the relay didn't ask it.
     Pushed {

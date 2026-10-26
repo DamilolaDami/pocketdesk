@@ -24,6 +24,58 @@ struct NowPlayingPushesTests {
         return try #require(json["aps"] as? [String: Any])
     }
 
+    @Test func priorityTracksPlaybackStateRatherThanSongDetails() throws {
+        let showing = NowPlayingCard(title: "Old", macName: "Studio", isPlaying: true)
+        let phone = registration(activity: "ccdd", showing: showing)
+        let next = NowPlayingCard(title: "Next", macName: "Studio", isPlaying: true)
+        var paused = next
+        paused.isPlaying = false
+        func push(_ step: NowPlayingActivityStep) throws -> LiveActivityPush {
+            try #require(NowPlayingPushes.push(for: step, shown: showing, to: phone, from: self.phone,
+                                               hostID: mac, macName: "Studio", now: .now))
+        }
+        #expect(try push(.start(hostID: mac, next)).priority == 10)
+        #expect(try push(.update(next)).priority == 5)
+        #expect(try push(.update(paused)).priority == 10)
+        #expect(try push(.end).priority == 10)
+    }
+
+    @Test func privatePushesRedactStartUpdateEndAndAlerts() throws {
+        let card = NowPlayingCard(title: "Secret title", artist: "Secret artist", appName: "Player",
+                                  macName: "Studio", isPlaying: true, artworkID: "secret-cover",
+                                  tint: CardColor(red: 1, green: 0, blue: 0), site: "secret.example", siteIconID: "secret-icon",
+                                  startedAt: .now, duration: 240)
+        var registration = registration(activity: "ccdd", showing: card)
+        registration.preferences.showsDetailsInPushes = false
+        for step in [NowPlayingActivityStep.start(hostID: mac, card), .update(card), .end] {
+            let push = try #require(NowPlayingPushes.push(for: step, shown: card, to: registration, from: phone,
+                                                         hostID: mac, macName: "Studio", now: .now))
+            let content = try #require(try aps(push)["content-state"] as? [String: Any])
+            #expect(content["title"] as? String == "Playing on Studio")
+            for key in ["artist", "appName", "site", "artworkID", "siteIconID", "tint", "startedAt", "duration"] {
+                #expect(content[key] == nil)
+            }
+            #expect(!String(decoding: push.payload, as: UTF8.self).contains("Secret"))
+            #expect(!String(decoding: push.payload, as: UTF8.self).contains("secret"))
+        }
+    }
+
+    @Test func sleepEndsOnlyKnownCardsWithActivityTokensAndWakeCanStart() async throws {
+        let pushes = NowPlayingPushes(url: nil)
+        let showing = NowPlayingCard(title: song.title, macName: "Studio", isPlaying: true)
+        await pushes.register(registration(activity: "ccdd", showing: showing), from: phone, hostID: mac)
+        let noToken = Fingerprint(bytes: Data(repeating: 8, count: 32))
+        await pushes.register(registration(showing: showing), from: noToken, hostID: mac)
+        let noCard = Fingerprint(bytes: Data(repeating: 9, count: 32))
+        await pushes.register(registration(activity: "eeff"), from: noCard, hostID: mac)
+        let ends = await pushes.endAll(hostID: mac, macName: "Studio")
+        #expect(ends.count == 1 && ends.first?.phone == phone && ends.first?.event == .end)
+        #expect(ends.first?.priority == 10)
+        #expect(await pushes.endAll(hostID: mac, macName: "Studio").isEmpty)
+        let wake = await pushes.pushes(for: song, hostID: mac, macName: "Studio", connected: [])
+        #expect(wake.count == 3 && wake.allSatisfy { $0.event == .start })
+    }
+
     @Test func startsWithTheStartTokenAndAContentStateThePhoneCanRead() async throws {
         let pushes = NowPlayingPushes(url: nil)
         await pushes.register(registration(), from: phone, hostID: mac)

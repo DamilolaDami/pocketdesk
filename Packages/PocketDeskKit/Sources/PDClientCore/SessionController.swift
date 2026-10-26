@@ -123,6 +123,7 @@ public final class SessionController {
     private var nowPlaying = NowPlayingActivityModel(preferences: NowPlayingActivityPreferences(defaults: .standard))
     /// Steps reach the presenter in order.
     private var nowPlayingQueue: Task<Void, Never>?
+    var controlDiagnostics = NowPlayingControlDiagnostics.shared
     /// The last cover, decoded once: its file name, bytes and color.
     private var nowPlayingArtwork: (base64: String, id: String, jpeg: Data, tint: CardColor?)?
     /// Site icons for browser playback, by host, once saved: `nil` while fetching, or once a
@@ -185,7 +186,38 @@ public final class SessionController {
         guard UserDefaults.standard.bool(forKey: RelayServer.enabledKey) else { return nil }
         return RelayServer(address: RelayServer.savedAddress())
     }
-    public func relaySettingsChanged() { store.send(.hostsChanged(discoveredHosts())) }
+    public func relaySettingsChanged() {
+        store.send(.hostsChanged(discoveredHosts()))
+        store.update(relayHealth: RelayHealthState())
+    }
+
+    /// Runs only while the Remote Access settings view is active. UI cancellation stops checks.
+    public func watchRelayStatus() async {
+        while !Task.isCancelled {
+            await checkRelayStatus()
+            do { try await Task.sleep(for: .seconds(30)) } catch { break }
+        }
+    }
+
+    public func checkRelayStatus() async {
+        guard let server = relayServer else {
+            store.update(relayHealth: RelayHealthState())
+            return
+        }
+        var health = store.relayHealth
+        let checkID = health.begin(server: server)
+        store.update(relayHealth: health)
+        let reachable: Bool
+        do {
+            let identity = try DeviceIdentity.loadOrCreate(label: identityLabel)
+            try await RelayConnection.check(server: server, identity: identity)
+            reachable = true
+        } catch { reachable = false }
+        guard !Task.isCancelled, relayServer == server else { return }
+        health = store.relayHealth
+        health.finish(checkID: checkID, reachable: reachable)
+        store.update(relayHealth: health)
+    }
 
     // MARK: Discovery
 
@@ -807,22 +839,44 @@ public final class SessionController {
     /// A Lock Screen or Dynamic Island button: play / pause or skip on the Mac the activity is
     /// for, then catch up with what it's playing now (the app may be running in the background
     /// only for this).
-    public func pressNowPlaying(_ key: MediaKey) async {
-        present(nowPlaying.press(key))
-        let hostID = nowPlaying.hostID
-        let shortcut = Shortcut(name: "Now Playing", symbol: "playpause.fill", color: .gray, action: .media(key), showsMac: false)
-        do throws(BackgroundRunError) {
-            _ = try await runInBackground(shortcut, preferredHostID: hostID)
-        } catch .noMac {
-            present(nowPlaying.macWentAway())
-            return
-        } catch {
-            // Locked, or it failed: put the button back as it was.
-            present(nowPlaying.press(key))
-            return
+    @discardableResult
+    public func pressNowPlaying(_ key: MediaKey) async -> Bool {
+        let sent = await performNowPlayingControl(key) { (shortcut: Shortcut, hostID: UUID) async throws(BackgroundRunError) -> Void in
+            _ = try await self.runInBackground(shortcut, preferredHostID: hostID, allowExistingStream: false)
         }
-        // A watch that's up reports the change itself.
-        if statusTask == nil, let hostID { await refreshNowPlaying(hostID) }
+        if sent, statusTask == nil, let hostID = nowPlaying.hostID { await refreshNowPlaying(hostID) }
+        return sent
+    }
+
+    /// Wait for cold-launch adoption, bind the action to that activity's Mac, and roll back
+    /// exactly on failure. The closure is the same acknowledged one-shot path used by Siri.
+    func performNowPlayingControl(_ key: MediaKey,
+        run: @MainActor (Shortcut, UUID) async throws(BackgroundRunError) -> Void) async -> Bool {
+        await nowPlayingQueue?.value
+        let before = nowPlaying
+        guard let hostID = before.hostID, let card = before.card else {
+            await controlDiagnostics.record("noActivity", control: key)
+            return false
+        }
+        let optimistic = nowPlaying.press(key)
+        if optimistic == .end {
+            // End-when-paused must wait for success: an ended activity can't be rolled back.
+            nowPlaying = before
+        } else { present(optimistic) }
+        var shortcut = Shortcut(name: "Now Playing", symbol: "playpause.fill", color: .gray,
+                                action: .media(key), showsMac: false)
+        shortcut.macID = hostID
+        await controlDiagnostics.record("sending", control: key)
+        do throws(BackgroundRunError) {
+            try await run(shortcut, hostID)
+            await controlDiagnostics.record("sent", control: key)
+            return true
+        } catch {
+            nowPlaying = before
+            present(.update(card))
+            await controlDiagnostics.record("failed", control: key, error: error.description)
+            return false
+        }
     }
 
     /// Listens to the Mac's status for a moment, long enough for the player to have moved on.
@@ -1280,25 +1334,27 @@ public final class SessionController {
 
     /// `runInBackground(_:preferredHostID:text:)` for a shortcut that needn't be saved.
     public func runInBackground(_ shortcut: Shortcut, preferredHostID: UUID?,
-                                text: String? = nil) async throws(BackgroundRunError) -> String {
+                                text: String? = nil, allowExistingStream: Bool = true) async throws(BackgroundRunError) -> String {
         let preferredHostID = shortcut.macID ?? preferredHostID
         if shortcut.action.asksForText, text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
             throw .needsText
         }
         let action = (text.map(shortcut.action.filling) ?? shortcut.action).fillingClock()
-        if case .streaming(let host, _, _) = store.state, let connection, shortcut.macID == nil || shortcut.macID == host.hostID {
+        if allowExistingStream, case .streaming(let host, _, _) = store.state, let connection,
+           shortcut.macID == nil || shortcut.macID == host.hostID {
             connection.send(.run(action))
             return host.name
         }
 
         startDiscovery()
-        var host = await waitForTarget(preferredHostID: preferredHostID, for: .seconds(4))
+        var host = await waitForTarget(preferredHostID: preferredHostID, for: .seconds(4), exact: shortcut.macID != nil)
         if host == nil, let sleeper = wakeCandidate(preferredHostID: preferredHostID),
-           let info = wakeBook[sleeper] {
+           shortcut.macID == nil || sleeper == shortcut.macID, let info = wakeBook[sleeper] {
             for _ in 0..<3 { await Task.detached { WakeSender.wake(info) }.value }
-            host = await waitForTarget(preferredHostID: sleeper, for: .seconds(25))
+            host = await waitForTarget(preferredHostID: sleeper, for: .seconds(25), exact: shortcut.macID != nil)
         }
         guard let host, let hostID = host.hostID,
+              shortcut.macID == nil || hostID == shortcut.macID,
               let peer = trustStore.peer(hostID: hostID) else { throw .noMac }
         guard await unlock(host) else { throw .locked(host.name) }
         do {
@@ -1312,10 +1368,11 @@ public final class SessionController {
         return host.name
     }
 
-    private func waitForTarget(preferredHostID: UUID?, for timeout: Duration) async -> DiscoveredHost? {
+    private func waitForTarget(preferredHostID: UUID?, for timeout: Duration, exact: Bool = false) async -> DiscoveredHost? {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
-            if let host = shortcutTarget(preferredHostID: preferredHostID) { return host }
+            if let host = shortcutTarget(preferredHostID: preferredHostID),
+               !exact || host.hostID == preferredHostID { return host }
             try? await Task.sleep(for: .milliseconds(200))
         }
         return nil

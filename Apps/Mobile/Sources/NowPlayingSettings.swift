@@ -9,6 +9,7 @@ struct NowPlayingSettingsPage: View {
     let controller: SessionController
     @AppStorage(SettingsKey.defaultMac) private var defaultMacID = ""
     @AppStorage(SettingsKey.nowPlayingActivity) private var isEnabled = true
+    @AppStorage(SettingsKey.nowPlayingDetailsInPushes) private var showsDetailsInPushes = true
     @AppStorage(SettingsKey.nowPlayingArtwork) private var showsArtwork = true
     @AppStorage(SettingsKey.nowPlayingSkipButtons) private var showsSkipButtons = true
     @AppStorage(SettingsKey.nowPlayingEndsWhenPaused) private var endsWhenPaused = false
@@ -64,8 +65,13 @@ struct NowPlayingSettingsPage: View {
                 Toggle(isOn: $startsByPush) {
                     SettingsLabel("Start When Music Plays", symbol: "bell.badge.fill", color: .orange)
                 }
+                Toggle("Show Details in Pushes", isOn: $showsDetailsInPushes)
+                    .disabled(!startsByPush)
             } footer: {
-                Text("Your Mac puts what's playing on the Lock Screen even when PocketDesk is closed. To do that, titles and site names pass through the PocketDesk relay and Apple's push service, which can read them. Everything else stays end-to-end encrypted. Takes effect the next time PocketDesk connects to your Mac.")
+                Text(showsDetailsInPushes
+                     ? "Your Mac can start the card while PocketDesk is closed. Titles, artists and site names pass through the PocketDesk relay and Apple's push service, which can read them. Turn off Show Details in Pushes to keep them private."
+                     : "Pushes show only Playing on your Mac, with no title, artist, site or artwork. PocketDesk restores the real details when it connects. The relay and Apple still receive the Mac name and playback state.")
+                Text("Changes reach your Mac the next time PocketDesk connects.")
             }
             .disabled(!isEnabled)
 
@@ -97,6 +103,7 @@ struct NowPlayingSettingsPage: View {
         .animation(.smooth, value: previewCard)
         .animation(.smooth, value: isEnabled)
         .onChange(of: isEnabled) { controller.nowPlayingPreferencesChanged() }
+        .onChange(of: showsDetailsInPushes) { controller.nowPlayingPreferencesChanged() }
         .onChange(of: showsArtwork) { controller.nowPlayingPreferencesChanged() }
         .onChange(of: showsSkipButtons) { controller.nowPlayingPreferencesChanged() }
         .onChange(of: endsWhenPaused) { controller.nowPlayingPreferencesChanged() }
@@ -140,7 +147,8 @@ struct NowPlayingSettingsPage: View {
                               tint: hasLiveArtwork ? liveArtwork?.tint
                                   : siteIcon?.tint ?? CardColor(red: 0.55, green: 0.3, blue: 0.85),
                               style: style, showsSkipButtons: showsSkipButtons,
-                              site: playing?.site.map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 })
+                              site: playing?.site.map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 },
+                              startedAt: playing?.startedAt, duration: playing?.duration, pausedElapsed: playing?.pausedElapsed)
     }
 
     private var previewArtwork: UIImage? {

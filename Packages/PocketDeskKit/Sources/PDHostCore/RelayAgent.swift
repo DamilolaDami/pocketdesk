@@ -170,7 +170,7 @@
             let id = UUID()
             let message = RelayMessage.push(id: id, phone: Self.hex(push.phone), token: push.token,
                                             environment: push.environment.rawValue, topic: push.topic,
-                                            payload: String(decoding: push.payload, as: UTF8.self))
+                                            payload: String(decoding: push.payload, as: UTF8.self), priority: push.priority)
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
                 // Waiting before sending, so a quick answer can't arrive first.
                 pushReplies[id] = continuation

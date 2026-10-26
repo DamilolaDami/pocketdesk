@@ -14,6 +14,7 @@ public enum ClientEvent: Sendable, Equatable {
     case awaitingApproval(code: String)
     case paired(PairedPeer)
     case displays([DisplayInfo])
+    case virtualDisplay(VirtualDisplayReport)
     /// How to wake this Mac later (from its `helloAck`).
     case wake(WakeInfo)
     /// Its desktop picture, JPEG (from its `helloAck`).
@@ -194,6 +195,7 @@ public actor ClientConnection {
                         if let wake = ack.wake { onEvent(.wake(wake)) }
                         if let wallpaper = ack.wallpaper.flatMap({ Data(base64Encoded: $0) }) { onEvent(.wallpaper(wallpaper)) }
                     case .displays(let displays): onEvent(.displays(displays))
+                    case .virtualDisplay(let report): onEvent(.virtualDisplay(report))
                     case .streamConfig(let config): onEvent(.streamConfig(config))
                     case .linkQuality(let quality): onEvent(.linkQuality(quality))
                     case .clipboard(let item): onEvent(.clipboard(item))
@@ -207,7 +209,7 @@ public actor ClientConnection {
                         hostReason.value = reason
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
-                    case .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .getClipboard, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
+                    case .watchVirtualDisplay, .createVirtualDisplay, .endVirtualDisplay, .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .getClipboard, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon,
                          .listMacShortcuts, .macShortcuts, .watchStatus, .watchMenus, .pressMenuItem, .setQuality,
                          .sendFile, .getFile, .fileData, .listFiles, .mutateFile:

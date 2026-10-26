@@ -2,6 +2,7 @@
 import CoreGraphics
 import CryptoKit
 import Foundation
+import PDProtocol
 import PDVirtualDisplayRuntime
 
 /// The private API is confined here and in the C bridge. The iPhone dependency graph does

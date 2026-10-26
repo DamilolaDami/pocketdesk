@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 22), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 23), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -150,6 +150,33 @@ ceiling (`QualityCeiling`) that link adaptation steps down from:
 
 Low Power Mode on the phone means Battery Saver whatever the setting
 (`StreamQuality.effective`). A change restarts the stream at the new size.
+
+## Virtual workspace requests (protocol v23)
+
+The Displays picker subscribes with `watchVirtualDisplay`. This is read-only; only an
+explicit `createVirtualDisplay` on an approved streaming connection can allocate a display.
+Catalog/status/shortcut-only connections ignore these requests. The Mac's default-off
+Allow Virtual Displays setting and runtime checks remain authoritative.
+
+Requests carry UUIDs and a bounded desired logical mode. The host negotiates the currently
+qualified 1280×800 1× mode; it reports both requested and accepted mode. Arbitrary sizes,
+Retina and rotation-driven desktop mode changes remain Phase 3. Existing viewport fitting
+and quality adaptation size the encoded stream without resizing the Mac desktop.
+
+`virtualDisplay` snapshots carry capability, permission, lifecycle revision, owner name,
+per-connection ownership, stable logical identity, lease UUID, transient capture ID and
+actual capture geometry in global points/backing pixels. Request acknowledgments are
+correlated separately from state revisions. Delayed acknowledgments cannot replace newer
+state. A request timeout offers physical streaming and refresh; it never reconnects or
+blindly repeats creation. Disconnect/switching Macs clears pending ownership state.
+
+The host automatically selects and streams a created workspace through the existing
+capture/encode/audio/input pipeline. Failures return a typed problem and useful text while
+preserving physical streaming when possible. The existing source-generation and keyframe
+barrier applies, and native connections have separate input injectors. `endVirtualDisplay`
+requires both the current lease and its owning connection, verified together in the
+lifecycle actor. Capture returns to the main display before native release. Mac-local End,
+disabling permission, and lifecycle errors are pushed to subscribed phones.
 
 ## Display selection (protocol v4)
 

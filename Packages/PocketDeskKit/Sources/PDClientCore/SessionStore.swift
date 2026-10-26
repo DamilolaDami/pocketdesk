@@ -14,6 +14,8 @@ public final class SessionStore {
     public func update(path: ConnectionPath) { connectionPath = path }
     /// The Mac's windows, from the last `listWindows`. Not part of the state machine.
     public private(set) var windows: [WindowInfo] = []
+    public private(set) var virtualDisplay = VirtualDisplaySelection()
+    public func update(virtualDisplay event: VirtualDisplaySelection.Event) { virtualDisplay = virtualDisplay.reduce(event) }
     public private(set) var displaySelection = DisplaySelection()
     /// Latest round-trip and decode stats, updated off the hot path at most a few times a second.
     public private(set) var stats = StreamStats()
@@ -38,6 +40,7 @@ public final class SessionStore {
         case .cancel, .disconnected, .select:
             connectionPath = nil
             displaySelection = displaySelection.reduce(.reset)
+            virtualDisplay = virtualDisplay.reduce(.reset)
             link = nil
             menus = .idle
         default: break

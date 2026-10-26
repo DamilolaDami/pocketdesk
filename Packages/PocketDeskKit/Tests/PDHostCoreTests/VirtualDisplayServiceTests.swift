@@ -3,6 +3,7 @@ import Foundation
 import Synchronization
 import Testing
 import PDSecurity
+import PDProtocol
 @testable import PDHostCore
 
 @Suite(.timeLimit(.minutes(1)))

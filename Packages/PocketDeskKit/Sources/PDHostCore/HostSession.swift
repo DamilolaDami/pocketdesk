@@ -116,6 +116,9 @@ public actor HostSession {
     private var clipboardTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var menusTask: Task<Void, Never>?
+    private var virtualStatusTask: Task<Void, Never>?
+    private var virtualRequestTask: Task<Void, Never>?
+    private var requestedVirtualMode: VirtualDisplayMode?
     private var caretTask: Task<Void, Never>?
     private var lastCaret: Caret?
     /// The streamed picture in global display points, to place the caret on it.
@@ -364,6 +367,16 @@ public actor HostSession {
                 clipboardEnabled = enabled
                 // Turning it back on mustn't send whatever was copied while it was off.
                 if enabled { clipboardSeen = await clipboard.changeCount() }
+            case .watchVirtualDisplay:
+                await watchVirtualDisplay()
+            case .createVirtualDisplay(let request):
+                if virtualRequestTask != nil {
+                    await sendVirtualDisplay(requestID: request.id, problem: .busy, message: "A workspace request is already finishing.")
+                } else {
+                    virtualRequestTask = Task { await self.createVirtualDisplay(request) }
+                }
+            case .endVirtualDisplay(let request):
+                await endVirtualDisplay(request)
             case .listDisplays:
                 try await session.send(.displays(try await visibleDisplays()))
             case .selectDisplay(let id):
@@ -418,7 +431,7 @@ public actor HostSession {
                 }
             case .bye:
                 return
-            case .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
+            case .virtualDisplay, .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
                  .actionFailed, .actionDone, .apps, .appIcon, .macShortcuts, .macStatus, .menuBar, .caret,
                  .fileAccepted, .fileOffer, .fileData, .fileSaved, .fileList, .fileMutationResult:
                 continue
@@ -802,6 +815,102 @@ public actor HostSession {
         }
     }
 
+    private func watchVirtualDisplay() async {
+        guard virtualStatusTask == nil else { await sendVirtualDisplay(); return }
+        guard let virtualDisplays else { await sendVirtualDisplay(); return }
+        let updates = await virtualDisplays.updates()
+        virtualStatusTask = Task { [weak self] in
+            for await _ in updates {
+                guard !Task.isCancelled else { return }
+                await self?.sendVirtualDisplay()
+            }
+        }
+    }
+
+    private func sendVirtualDisplay(requestID: UUID? = nil, problem: VirtualDisplayReport.Problem? = nil, message: String? = nil) async {
+        guard isStreaming else { return }
+        guard let state = await virtualDisplays?.snapshot() else {
+            try? await session.send(.virtualDisplay(.init(requestID: requestID, problem: .unsupported,
+                message: "This Mac doesn't support virtual workspaces. Choose a physical display.")))
+            return
+        }
+        var workspace: VirtualDisplayReport.Workspace?
+        if let lease = state.active {
+            var geometry: VirtualDisplayReport.Geometry?
+            if lease.owner.id == viewingSessionID, let resolved = try? await frameSource.resolve(.display(lease.displayID)) {
+                let rect = resolved.screenFrame
+                geometry = .init(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height,
+                    pixelWidth: resolved.pixelWidth, pixelHeight: resolved.pixelHeight)
+            }
+            workspace = .init(leaseID: lease.id, logicalID: lease.logicalID, displayID: lease.displayID,
+                ownerName: lease.owner.name, isOwner: lease.owner.id == viewingSessionID, acceptedMode: lease.mode, geometry: geometry)
+        }
+        let reason = message ?? state.error ?? state.unavailableReason
+            ?? (!state.enabled ? "Enable Allow Virtual Displays in PocketDesk's Mac menu. Physical displays are still available." : nil)
+        let report = VirtualDisplayReport(revision: state.revision, supported: state.available, allowed: state.enabled,
+            suspended: state.suspended, modes: state.available ? [.standard] : [],
+            phase: .init(rawValue: String(describing: state.phase)) ?? .idle, workspace: workspace,
+            requestID: requestID, requestedMode: requestedVirtualMode, problem: problem, message: reason)
+        try? await session.send(.virtualDisplay(report))
+    }
+
+    private func createVirtualDisplay(_ request: VirtualDisplayRequest) async {
+        defer { virtualRequestTask = nil }
+        requestedVirtualMode = request.mode
+        guard request.mode.isBoundedRequest else {
+            await sendVirtualDisplay(requestID: request.id, problem: .invalidMode, message: "That desktop size isn't supported. Choose a physical display or try again.")
+            return
+        }
+        guard let virtualDisplays else { await sendVirtualDisplay(requestID: request.id); return }
+        do {
+            // Negotiate against the host's qualified modes, never trust client dimensions.
+            let lease = try await virtualDisplays.create(for: viewingSessionID, mode: .standard)
+            do {
+                try Task.checkCancellation()
+                try await startStreaming(.display(lease.displayID))
+                let confirmed = await virtualDisplays.snapshot()
+                guard confirmed.phase == .active, confirmed.active?.id == lease.id else { throw VirtualDisplayError.cancelled }
+                try await session.send(.displays(try await visibleDisplays()))
+            } catch {
+                await virtualDisplays.end(lease.id)
+                if isStreaming {
+                    do { try await startStreaming(nil) }
+                    catch {
+                        try? await session.send(.bye(reason: "The workspace couldn't start and the Mac display isn't available. Check Screen Recording permission on the Mac."))
+                        await session.close()
+                    }
+                }
+                throw error
+            }
+            await sendVirtualDisplay(requestID: request.id, message: request.mode == lease.mode ? nil :
+                "Using this Mac's tested 1280×800 workspace. The picture fits your device; other desktop sizes aren't available yet.")
+        } catch {
+            let problem: VirtualDisplayReport.Problem
+            switch error as? VirtualDisplayError {
+            case .disabled: problem = .disabled
+            case .busy: problem = .busy
+            case .invalidMode: problem = .invalidMode
+            case .cancelled: problem = .cancelled
+            case .unavailable: problem = .unsupported
+            default: problem = error is CancellationError ? .cancelled : .failed
+            }
+            await sendVirtualDisplay(requestID: request.id, problem: problem, message: String(describing: error))
+        }
+    }
+
+    private func endVirtualDisplay(_ request: VirtualDisplayEnd) async {
+        guard let virtualDisplays else { await sendVirtualDisplay(requestID: request.id); return }
+        do {
+            // Owner validation and lease validation happen together inside the service actor.
+            try await virtualDisplays.end(request.leaseID, for: viewingSessionID)
+            try await session.send(.displays(try await visibleDisplays()))
+            await sendVirtualDisplay(requestID: request.id)
+        } catch {
+            await sendVirtualDisplay(requestID: request.id, problem: .notOwner,
+                message: "That workspace belongs to another viewing session or has already ended.")
+        }
+    }
+
     private func stopPump() async {
         let tasks = pumpTasks
         pumpTasks = []
@@ -814,6 +923,13 @@ public actor HostSession {
     private func stopStreaming() async {
         await keepAwake?.send(.streaming(keepAwakeID, false))
         isStreaming = false
+        virtualStatusTask?.cancel()
+        virtualStatusTask = nil
+        if let request = virtualRequestTask {
+            request.cancel()
+            await request.value
+            virtualRequestTask = nil
+        }
         if let adaptTask {
             adaptTask.cancel()
             await adaptTask.value

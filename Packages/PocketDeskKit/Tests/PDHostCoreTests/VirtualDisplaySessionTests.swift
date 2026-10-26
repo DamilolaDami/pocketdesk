@@ -27,6 +27,8 @@ struct VirtualDisplaySessionTests {
             try await phone.send(.hello(Hello(deviceName: "Phone", viewport: .init(width: 400, height: 800, scale: 1), mode: mode)))
             if allowed {
                 guard case .helloAck? = try await control.next() else { Issue.record("expected catalog handshake"); return }
+                try await phone.send(.createVirtualDisplay(.init(mode: .standard)))
+                try await phone.send(.watchVirtualDisplay)
                 try await phone.send(.ping(1))
                 #expect(try await control.next() == .pong(1))
                 try await phone.send(.bye(reason: "done"))

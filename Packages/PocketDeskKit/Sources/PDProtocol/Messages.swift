@@ -1,7 +1,7 @@
 import Foundation
 
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 22
+public let protocolVersion: UInt16 = 23
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -18,6 +18,11 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     /// Host's answer once the person at the Mac accepts or rejects the verification code.
     case pairResult(accepted: Bool)
     case listDisplays
+    /// Subscribe to virtual workspace status, without creating anything.
+    case watchVirtualDisplay
+    case createVirtualDisplay(VirtualDisplayRequest)
+    case endVirtualDisplay(VirtualDisplayEnd)
+    case virtualDisplay(VirtualDisplayReport)
     case displays([DisplayInfo])
     case selectDisplay(UInt32)
     case listWindows

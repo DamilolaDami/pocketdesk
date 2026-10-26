@@ -2,20 +2,7 @@
 import CryptoKit
 import Foundation
 import PDSecurity
-
-public struct VirtualDisplayMode: Sendable, Equatable, Hashable {
-    public var width: Int
-    public var height: Int
-    public var scale: Int
-    public var refreshRate: Int
-    public init(width: Int, height: Int, scale: Int = 1, refreshRate: Int = 60) {
-        self.width = width; self.height = height; self.scale = scale; self.refreshRate = refreshRate
-    }
-    public static let standard = Self(width: 1280, height: 800)
-    public var isValid: Bool {
-        self == .standard
-    }
-}
+import PDProtocol
 
 public struct VirtualDisplayResource: Sendable, Equatable {
     public let id: UUID
@@ -96,6 +83,7 @@ public actor VirtualDisplayService {
     private var started = false
     private var stopped = false
     private var revokedPeers: Set<Fingerprint> = []
+    private var observers: [UUID: AsyncStream<VirtualDisplayState>.Continuation] = [:]
     private var finishWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(hostID: UUID, enabled: Bool = false, backend: any VirtualDisplayBackend = RuntimeVirtualDisplayBackend(),
@@ -245,6 +233,24 @@ public actor VirtualDisplayService {
 
     public func snapshot() -> VirtualDisplayState { state }
 
+    func updates() -> AsyncStream<VirtualDisplayState> {
+        let id = UUID()
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            observers[id] = continuation
+            continuation.yield(state)
+            continuation.onTermination = { [weak self] _ in Task { await self?.removeObserver(id) } }
+        }
+    }
+
+    private func removeObserver(_ id: UUID) { observers[id] = nil }
+
+    func end(_ leaseID: UUID, for sessionID: UUID) async throws {
+        guard let owned, owned.lease.id == leaseID, owned.lease.owner.id == sessionID else {
+            throw VirtualDisplayError.notViewing
+        }
+        await end(leaseID)
+    }
+
     func reportRequestError(_ message: String) {
         guard state.enabled, state.phase == .idle || state.phase == .active else { return }
         state.error = message
@@ -259,6 +265,7 @@ public actor VirtualDisplayService {
     private func publish() {
         state.revision &+= 1
         onChange(state)
+        for observer in observers.values { observer.yield(state) }
         if operation == nil {
             let waiters = finishWaiters
             finishWaiters = []

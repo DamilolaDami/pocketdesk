@@ -442,6 +442,8 @@ public final class SessionController {
             trustStore.pin(peer)
             try? trustStore.save(to: trustStoreURL)
             store.send(.pairingConfirmed)
+        case .virtualDisplay(let report):
+            store.update(virtualDisplay: .received(report))
         case .displays(let displays):
             store.update(displays: displays)
         case .wallpaper(let jpeg):
@@ -460,7 +462,8 @@ public final class SessionController {
                 try? lastUsed.save(to: lastUsedURL)
             }
             if let displayID = config.displayID, let hostID = connectionHostID,
-               let selected = store.displaySelection.displays.first(where: { $0.id == displayID }) {
+               let selected = store.displaySelection.displays.first(where: { $0.id == displayID }),
+               displayID != store.virtualDisplay.report?.workspace?.displayID {
                 displayPreferences.remember(selected.persistentID, for: hostID)
                 try? displayPreferences.save(to: displayPreferencesURL)
             }
@@ -609,7 +612,37 @@ public final class SessionController {
         connection?.send(.insertText(text))
     }
 
-    public func refreshDisplays() { connection?.send(.listDisplays) }
+    public func refreshDisplays() {
+        connection?.send(.listDisplays)
+        connection?.send(.watchVirtualDisplay)
+    }
+
+    public func createVirtualDisplay() {
+        guard case .streaming = store.state, store.virtualDisplay.report?.canCreate == true,
+              !store.virtualDisplay.isBusy, let connection else { return }
+        let request = VirtualDisplayRequest(mode: .preferred(for: viewport))
+        store.update(virtualDisplay: .requested(request.id))
+        connection.send(.createVirtualDisplay(request))
+        expireVirtualDisplayRequest(request.id)
+    }
+
+    public func endVirtualDisplay() {
+        guard case .streaming = store.state, !store.virtualDisplay.isBusy,
+              let workspace = store.virtualDisplay.report?.workspace, workspace.isOwner, let connection else { return }
+        let request = VirtualDisplayEnd(leaseID: workspace.leaseID)
+        store.update(virtualDisplay: .requested(request.id))
+        connection.send(.endVirtualDisplay(request))
+        expireVirtualDisplayRequest(request.id)
+    }
+
+    private func expireVirtualDisplayRequest(_ id: UUID) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(12))
+            guard let self, self.store.virtualDisplay.pendingID == id else { return }
+            self.store.update(virtualDisplay: .timedOut(id))
+            self.refreshDisplays()
+        }
+    }
 
     public func selectDisplay(_ display: DisplayInfo) {
         guard store.displaySelection.displays.contains(where: { $0.id == display.id }) else { return }

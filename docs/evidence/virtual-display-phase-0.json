@@ -1,0 +1,527 @@
+{
+  "date": "2026-10-26",
+  "hardware": {
+    "model": "MacBookPro17,1",
+    "chip": "Apple M1"
+  },
+  "summary": {
+    "hardware": "MacBookPro17,1",
+    "cycles": true,
+    "fallback": true,
+    "ownerExit": {
+      "terminate": true,
+      "kill": true
+    },
+    "baselineRestored": true
+  },
+  "cycles": {
+    "accessibility": true,
+    "available": true,
+    "backend": "Undocumented CoreGraphics runtime \u2014 developer probe only",
+    "baseline": [
+      {
+        "bounds": [
+          0,
+          0,
+          1440,
+          900
+        ],
+        "builtIn": true,
+        "id": 1,
+        "main": true,
+        "mirrorOf": 0,
+        "pixels": [
+          2880,
+          1800
+        ]
+      },
+      {
+        "bounds": [
+          1440,
+          0,
+          2048,
+          858
+        ],
+        "builtIn": false,
+        "id": 2,
+        "main": false,
+        "mirrorOf": 0,
+        "pixels": [
+          2048,
+          858
+        ]
+      }
+    ],
+    "cycles": [
+      {
+        "appeared": true,
+        "captureActiveDuringHold": false,
+        "capturedPixels": [
+          1280,
+          800
+        ],
+        "displayID": 19,
+        "extended": true,
+        "mappedClickReceived": true,
+        "removed": true,
+        "windowOnVirtualDisplay": true,
+        "windowRehomed": true
+      },
+      {
+        "appeared": true,
+        "captureActiveDuringHold": false,
+        "capturedPixels": [
+          1280,
+          800
+        ],
+        "displayID": 20,
+        "extended": true,
+        "mappedClickReceived": true,
+        "removed": true,
+        "windowOnVirtualDisplay": true,
+        "windowRehomed": true
+      },
+      {
+        "appeared": true,
+        "captureActiveDuringHold": false,
+        "capturedPixels": [
+          1280,
+          800
+        ],
+        "displayID": 21,
+        "extended": true,
+        "mappedClickReceived": true,
+        "removed": true,
+        "windowOnVirtualDisplay": true,
+        "windowRehomed": true
+      }
+    ],
+    "final": [
+      {
+        "bounds": [
+          0,
+          0,
+          1440,
+          900
+        ],
+        "builtIn": true,
+        "id": 1,
+        "main": true,
+        "mirrorOf": 0,
+        "pixels": [
+          2880,
+          1800
+        ]
+      },
+      {
+        "bounds": [
+          1440,
+          0,
+          2048,
+          858
+        ],
+        "builtIn": false,
+        "id": 2,
+        "main": false,
+        "mirrorOf": 0,
+        "pixels": [
+          2048,
+          858
+        ]
+      }
+    ],
+    "os": "Version 26.3 (Build 25D125)",
+    "physicalFallbackCaptured": false,
+    "screenRecording": true
+  },
+  "unavailable": {
+    "accessibility": true,
+    "available": false,
+    "backend": "Undocumented CoreGraphics runtime \u2014 developer probe only",
+    "baseline": [
+      {
+        "bounds": [
+          0,
+          0,
+          1440,
+          900
+        ],
+        "builtIn": true,
+        "id": 1,
+        "main": true,
+        "mirrorOf": 0,
+        "pixels": [
+          2880,
+          1800
+        ]
+      },
+      {
+        "bounds": [
+          1440,
+          0,
+          2048,
+          858
+        ],
+        "builtIn": false,
+        "id": 2,
+        "main": false,
+        "mirrorOf": 0,
+        "pixels": [
+          2048,
+          858
+        ]
+      }
+    ],
+    "cycles": [],
+    "error": "Simulated unavailable backend",
+    "final": [
+      {
+        "bounds": [
+          0,
+          0,
+          1440,
+          900
+        ],
+        "builtIn": true,
+        "id": 1,
+        "main": true,
+        "mirrorOf": 0,
+        "pixels": [
+          2880,
+          1800
+        ]
+      },
+      {
+        "bounds": [
+          1440,
+          0,
+          2048,
+          858
+        ],
+        "builtIn": false,
+        "id": 2,
+        "main": false,
+        "mirrorOf": 0,
+        "pixels": [
+          2048,
+          858
+        ]
+      }
+    ],
+    "os": "Version 26.3 (Build 25D125)",
+    "physicalFallbackCaptured": true,
+    "screenRecording": true
+  },
+  "termination": {
+    "terminate": {
+      "owner": {
+        "accessibility": true,
+        "available": true,
+        "backend": "Undocumented CoreGraphics runtime \u2014 developer probe only",
+        "baseline": [
+          {
+            "bounds": [
+              0,
+              0,
+              1440,
+              900
+            ],
+            "builtIn": true,
+            "id": 1,
+            "main": true,
+            "mirrorOf": 0,
+            "pixels": [
+              2880,
+              1800
+            ]
+          },
+          {
+            "bounds": [
+              1440,
+              0,
+              2048,
+              858
+            ],
+            "builtIn": false,
+            "id": 2,
+            "main": false,
+            "mirrorOf": 0,
+            "pixels": [
+              2048,
+              858
+            ]
+          }
+        ],
+        "cycles": [
+          {
+            "appeared": true,
+            "captureActiveDuringHold": true,
+            "capturedPixels": [
+              1280,
+              800
+            ],
+            "displayID": 22,
+            "extended": true,
+            "mappedClickReceived": true,
+            "removed": false,
+            "windowOnVirtualDisplay": true,
+            "windowRehomed": false
+          }
+        ],
+        "final": [],
+        "os": "Version 26.3 (Build 25D125)",
+        "physicalFallbackCaptured": false,
+        "screenRecording": true
+      },
+      "survivingWindow": {
+        "visibleOnOtherDisplays": true,
+        "onVirtualDisplay": false
+      },
+      "after": {
+        "accessibility": true,
+        "available": false,
+        "backend": "Undocumented CoreGraphics runtime \u2014 developer probe only",
+        "baseline": [
+          {
+            "bounds": [
+              0,
+              0,
+              1440,
+              900
+            ],
+            "builtIn": true,
+            "id": 1,
+            "main": true,
+            "mirrorOf": 0,
+            "pixels": [
+              2880,
+              1800
+            ]
+          },
+          {
+            "bounds": [
+              1440,
+              0,
+              2048,
+              858
+            ],
+            "builtIn": false,
+            "id": 2,
+            "main": false,
+            "mirrorOf": 0,
+            "pixels": [
+              2048,
+              858
+            ]
+          }
+        ],
+        "cycles": [],
+        "final": [
+          {
+            "bounds": [
+              0,
+              0,
+              1440,
+              900
+            ],
+            "builtIn": true,
+            "id": 1,
+            "main": true,
+            "mirrorOf": 0,
+            "pixels": [
+              2880,
+              1800
+            ]
+          },
+          {
+            "bounds": [
+              1440,
+              0,
+              2048,
+              858
+            ],
+            "builtIn": false,
+            "id": 2,
+            "main": false,
+            "mirrorOf": 0,
+            "pixels": [
+              2048,
+              858
+            ]
+          }
+        ],
+        "os": "Version 26.3 (Build 25D125)",
+        "physicalFallbackCaptured": false,
+        "screenRecording": true
+      }
+    },
+    "kill": {
+      "owner": {
+        "accessibility": true,
+        "available": true,
+        "backend": "Undocumented CoreGraphics runtime \u2014 developer probe only",
+        "baseline": [
+          {
+            "bounds": [
+              0,
+              0,
+              1440,
+              900
+            ],
+            "builtIn": true,
+            "id": 1,
+            "main": true,
+            "mirrorOf": 0,
+            "pixels": [
+              2880,
+              1800
+            ]
+          },
+          {
+            "bounds": [
+              1440,
+              0,
+              2048,
+              858
+            ],
+            "builtIn": false,
+            "id": 2,
+            "main": false,
+            "mirrorOf": 0,
+            "pixels": [
+              2048,
+              858
+            ]
+          }
+        ],
+        "cycles": [
+          {
+            "appeared": true,
+            "captureActiveDuringHold": true,
+            "capturedPixels": [
+              1280,
+              800
+            ],
+            "displayID": 23,
+            "extended": true,
+            "mappedClickReceived": true,
+            "removed": false,
+            "windowOnVirtualDisplay": true,
+            "windowRehomed": false
+          }
+        ],
+        "final": [],
+        "os": "Version 26.3 (Build 25D125)",
+        "physicalFallbackCaptured": false,
+        "screenRecording": true
+      },
+      "survivingWindow": {
+        "onVirtualDisplay": false,
+        "visibleOnOtherDisplays": true
+      },
+      "after": {
+        "accessibility": true,
+        "available": false,
+        "backend": "Undocumented CoreGraphics runtime \u2014 developer probe only",
+        "baseline": [
+          {
+            "bounds": [
+              0,
+              0,
+              1440,
+              900
+            ],
+            "builtIn": true,
+            "id": 1,
+            "main": true,
+            "mirrorOf": 0,
+            "pixels": [
+              2880,
+              1800
+            ]
+          },
+          {
+            "bounds": [
+              1440,
+              0,
+              2048,
+              858
+            ],
+            "builtIn": false,
+            "id": 2,
+            "main": false,
+            "mirrorOf": 0,
+            "pixels": [
+              2048,
+              858
+            ]
+          }
+        ],
+        "cycles": [],
+        "final": [
+          {
+            "bounds": [
+              0,
+              0,
+              1440,
+              900
+            ],
+            "builtIn": true,
+            "id": 1,
+            "main": true,
+            "mirrorOf": 0,
+            "pixels": [
+              2880,
+              1800
+            ]
+          },
+          {
+            "bounds": [
+              1440,
+              0,
+              2048,
+              858
+            ],
+            "builtIn": false,
+            "id": 2,
+            "main": false,
+            "mirrorOf": 0,
+            "pixels": [
+              2048,
+              858
+            ]
+          }
+        ],
+        "os": "Version 26.3 (Build 25D125)",
+        "physicalFallbackCaptured": false,
+        "screenRecording": true
+      }
+    }
+  },
+  "normalApps": {
+    "mac": {
+      "containsPrivateBridge": false
+    },
+    "iphone": {
+      "containsPrivateBridge": false
+    }
+  },
+  "notarization": {
+    "id": "09e8ca65-388a-42b6-ab7f-ba1345df77e3",
+    "message": "Processing complete",
+    "status": "Accepted"
+  },
+  "probeBinarySHA256": "2f68a0e4c0b6d109c790cbefe3c466e08d9b23a7d459ddad749a922712be4e55",
+  "initialABIRejection": {
+    "error": "Unexpected virtual-display runtime ABI.",
+    "physicalFallbackCaptured": true,
+    "baselineRestored": true,
+    "runtimeDiagnostic": "ABI mismatch CGVirtualDisplayMode.initWithWidth:height:refreshRate:: @32@0:8I16I20d24; argument 0 expected Q, found I"
+  },
+  "distributionChecks": {
+    "staplerStaple": true,
+    "staplerValidate": true,
+    "gatekeeperAssessment": "accepted",
+    "gatekeeperSource": "Notarized Developer ID"
+  }
+}

@@ -38,13 +38,14 @@ final class HostServiceTests {
 
     /// Starts the service. `approve` answers the verification-code prompt.
     func startService(askBeforeConnecting: Bool = false,
+                      keepAwake: KeepAwake? = nil,
                       approve: @escaping @Sendable (PairingApproval) -> Bool = { _ in true }) async throws -> UInt16 {
         let events = events
         let box = ServiceBox()
         let service = try HostService(
             configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
                                  trustStoreURL: trustStoreURL, advertise: false, askBeforeConnecting: askBeforeConnecting),
-            makeFrameSource: { [frames] in frames }, clipboard: FakeClipboard(), input: input
+            makeFrameSource: { [frames] in frames }, clipboard: FakeClipboard(), input: input, keepAwake: keepAwake
         ) { event in
             events.append(event)
             if case .approvalRequested(let approval) = event {
@@ -68,7 +69,10 @@ final class HostServiceTests {
     }
 
     @Test func pairsThenStreamsAndAcceptsInput() async throws {
-        let port = try await startService()
+        let assertion = RecordingSleepAssertion()
+        let keepAwake = KeepAwake(settings: .init(whileStreaming: true, allowOnBattery: true),
+                                  assertion: assertion, readPower: { .external })
+        let port = try await startService(keepAwake: keepAwake)
         let invite = await service.openInvite()
         let hostFingerprint = service.identity.fingerprint
         let phoneFingerprint = phone.fingerprint
@@ -87,6 +91,7 @@ final class HostServiceTests {
             guard case .streamConfig(let config)? = try await control.next() else { Issue.record("expected streamConfig"); return }
             #expect(config.codec == .hevc)
             #expect(config.width == 1920 && config.height == 1080) // 1080p display fits a 2622 px long edge
+            #expect(assertion.calls.withLock { $0.acquired } == 1)
 
             var video = session.videoFrames.makeAsyncIterator()
             let (header, payload) = try #require(try await video.next())
@@ -142,6 +147,34 @@ final class HostServiceTests {
         #expect(await frames.startedSources == [.display(1), .window(42)])
         #expect(events.all.contains(.inviteChanged(nil))) // single use
         #expect(try TrustStore.load(from: trustStoreURL).trusts(phoneFingerprint))
+        for _ in 0..<100 where assertion.calls.withLock({ $0.released.isEmpty }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(assertion.calls.withLock { $0.released } == [1])
+    }
+
+    @Test func droppedStreamReleasesKeepAwake() async throws {
+        try pinPhone()
+        let assertion = RecordingSleepAssertion()
+        let keepAwake = KeepAwake(settings: .init(whileStreaming: true, allowOnBattery: true),
+                                  assertion: assertion, readPower: { .external })
+        let port = try await startService(keepAwake: keepAwake)
+        try await connect(port: port) { session in
+            var control = PhoneControl(session)
+            try await session.send(Self.hello)
+            guard case .helloAck? = try await control.next(),
+                  case .streamConfig? = try await control.next() else {
+                Issue.record("expected a streaming session")
+                return
+            }
+            #expect(assertion.calls.withLock { $0.acquired } == 1)
+            // No goodbye: exercise transport-loss cleanup rather than an orderly disconnect.
+            await session.close()
+        }
+        for _ in 0..<100 where assertion.calls.withLock({ $0.released.isEmpty }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(assertion.calls.withLock { $0.released } == [1])
     }
 
     @Test func audioPreferenceChangesRestartCurrentSourceWithNewGeneration() async throws {
@@ -325,7 +358,10 @@ final class HostServiceTests {
 
     @Test func runsStepsAndRefusesOnesPastTheLimits() async throws {
         try pinPhone()
-        let port = try await startService()
+        let assertion = RecordingSleepAssertion()
+        let keepAwake = KeepAwake(settings: .init(whileStreaming: true, allowOnBattery: true),
+                                  assertion: assertion, readPower: { .external })
+        let port = try await startService(keepAwake: keepAwake)
         let input = input
         let steps = MacAction.steps([.media(.playPause), .wait(milliseconds: 10), .setVolume(40)])
         try await connect(port: port) { session in
@@ -340,6 +376,7 @@ final class HostServiceTests {
             while (try? await control.next()) != nil {}
         }
         #expect(input.actions == [steps])
+        #expect(assertion.calls.withLock { $0.acquired } == 0)
     }
 
     /// Siri and widgets run shortcuts without streaming; asking first still applies.

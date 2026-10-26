@@ -94,6 +94,8 @@ public actor HostSession {
     private let menus: any MenuBarSource
     private let caret: any CaretSource
     private let onEvent: @Sendable (Event) -> Void
+    private let keepAwake: KeepAwake?
+    private let keepAwakeID = UUID()
 
     /// When the phone last sent anything. A suspended app's connection can linger for a while
     /// without a word: Now Playing pushes treat a phone this quiet as gone.
@@ -164,7 +166,9 @@ public actor HostSession {
                 frameSource: any FrameSource, input: any InputSink, pairing: any PairingAuthority,
                 catalog: any AppCatalogSource = InstalledApps(), clipboard: any ClipboardSink = MacPasteboard(),
                 menus: any MenuBarSource = AccessibilityMenus(), caret: any CaretSource = AccessibilityCaret(),
+                keepAwake: KeepAwake? = nil,
                 onEvent: @escaping @Sendable (Event) -> Void = { _ in }) {
+        self.keepAwake = keepAwake
         self.catalog = catalog
         self.menus = menus
         self.caret = caret
@@ -292,6 +296,7 @@ public actor HostSession {
             return
         }
         isStreaming = true
+        await keepAwake?.send(.streaming(keepAwakeID, true))
         onEvent(.connected(peer: peer, deviceName: hello.deviceName))
         do {
             // Listing displays already needs Screen Recording, so it's inside the goodbye path.
@@ -785,6 +790,8 @@ public actor HostSession {
 
     /// Ends everything this session started and waits for it, before the connection closes.
     private func stopStreaming() async {
+        await keepAwake?.send(.streaming(keepAwakeID, false))
+        isStreaming = false
         if let adaptTask {
             adaptTask.cancel()
             await adaptTask.value

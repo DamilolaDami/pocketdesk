@@ -26,6 +26,7 @@ public struct PairingApproval: Sendable, Equatable, Identifiable {
 
 /// Everything the Mac UI needs to know, as events into `HostState.reduce`.
 public enum HostEvent: Sendable, Equatable {
+    case keepAwakeChanged(KeepAwakeState)
     case relayStatus(HostRelayStatus)
     case listening(port: UInt16?)
     case stopped(error: String?)
@@ -90,6 +91,7 @@ public actor HostService: PairingAuthority {
     private let clipboard: any ClipboardSink
     private let input: any InputSink
     private let onEvent: @Sendable (HostEvent) -> Void
+    private let keepAwake: KeepAwake?
 
     private var trustStore: TrustStore
     private var invite: (value: PairingInvite, expires: ContinuousClock.Instant)?
@@ -111,7 +113,9 @@ public actor HostService: PairingAuthority {
                 makeFrameSource: @escaping @Sendable () -> any FrameSource = { ScreenCaptureSource() },
                 clipboard: any ClipboardSink = MacPasteboard(),
                 input: any InputSink,
+                keepAwake: KeepAwake? = nil,
                 onEvent: @escaping @Sendable (HostEvent) -> Void) throws {
+        self.keepAwake = keepAwake
         self.configuration = configuration
         self.identity = try DeviceIdentity.loadOrCreate(label: configuration.identityLabel)
         self.trustStore = try TrustStore.load(from: configuration.trustStoreURL)
@@ -424,7 +428,7 @@ public actor HostService: PairingAuthority {
             session: ThrottledSession.fromEnvironment(session), peer: peer,
             configuration: .init(hostName: configuration.hostName, wake: WakeAddresses.current(),
                                  wallpaper: await DesktopWallpaper.current()),
-            frameSource: makeFrameSource(), input: input, pairing: self, clipboard: clipboard
+            frameSource: makeFrameSource(), input: input, pairing: self, clipboard: clipboard, keepAwake: keepAwake
         ) { [onEvent, started] event in
             switch event {
             case .connected(let peer, let deviceName):

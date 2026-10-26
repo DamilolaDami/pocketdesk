@@ -19,6 +19,7 @@ public struct HostState: Sendable, Equatable {
     }
 
     public var relayStatus: HostRelayStatus = .disabled
+    public var keepAwake = KeepAwakeState()
     public var listening: Listening = .starting
     public var invite: PairingInvite?
     /// Oldest first; the UI shows the first.
@@ -31,6 +32,7 @@ public struct HostState: Sendable, Equatable {
     public func reduce(_ event: HostEvent) -> HostState {
         var next = self
         switch event {
+        case .keepAwakeChanged(let state): next.keepAwake = state
         case .relayStatus(let status): next.relayStatus = status
         case .listening(let port):
             next.listening = .listening(port: port)

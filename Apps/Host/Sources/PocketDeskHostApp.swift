@@ -11,7 +11,13 @@ struct PocketDeskHostApp: App {
         MenuBarExtra {
             MenuContent(controller: controller)
         } label: {
-            Image(systemName: controller.store.state.connected.isEmpty ? "iphone" : "iphone.radiowaves.left.and.right")
+            HStack(spacing: 4) {
+                Image(systemName: controller.store.state.connected.isEmpty ? "iphone" : "iphone.radiowaves.left.and.right")
+                if controller.store.state.keepAwake.isActive {
+                    Image(systemName: "cup.and.saucer.fill")
+                }
+            }
+            .accessibilityLabel(controller.store.state.keepAwake.isActive ? "PocketDesk, keeping Mac awake" : "PocketDesk")
         }
         .menuBarExtraStyle(.window)
 

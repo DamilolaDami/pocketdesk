@@ -40,6 +40,8 @@ struct MenuContent: View {
                 }
             }
 
+            keepAwakePanel
+
             if !state.pairedPeers.isEmpty {
                 Panel(title: "Paired phones") {
                     ForEach(state.pairedPeers) { peer in
@@ -148,7 +150,12 @@ struct MenuContent: View {
                     openWindow(id: OnboardingWindow.id)
                     NSApplication.shared.activate()
                 }
-                Button("Quit PocketDesk") { NSApplication.shared.terminate(nil) }
+                Button("Quit PocketDesk") {
+                    Task {
+                        await controller.stop()
+                        NSApplication.shared.terminate(nil)
+                    }
+                }
                     .keyboardShortcut("q")
             } label: {
                 Image(systemName: "gearshape")
@@ -158,6 +165,68 @@ struct MenuContent: View {
             .controlSize(.large)
             .fixedSize()
         }
+    }
+
+    private var keepAwakePanel: some View {
+        Panel(title: "Keep this Mac available", tint: state.keepAwake.isActive ? HostBrand.accent : nil) {
+            Toggle("While streaming", isOn: Binding(
+                get: { state.keepAwake.settings.whileStreaming },
+                set: { enabled in
+                    var settings = state.keepAwake.settings
+                    settings.whileStreaming = enabled
+                    Task { await controller.setKeepAwakeSettings(settings) }
+                }))
+                .font(.callout)
+            Toggle("Allow on battery", isOn: Binding(
+                get: { state.keepAwake.settings.allowOnBattery },
+                set: { enabled in
+                    var settings = state.keepAwake.settings
+                    settings.allowOnBattery = enabled
+                    Task { await controller.setKeepAwakeSettings(settings) }
+                }))
+                .font(.callout)
+
+            HStack {
+                Menu("Keep Available for…") {
+                    Button("15 Minutes") { keepAvailable(15 * 60) }
+                    Button("1 Hour") { keepAvailable(3600) }
+                    Button("2 Hours") { keepAvailable(2 * 3600) }
+                    Button("4 Hours") { keepAvailable(4 * 3600) }
+                    Button("8 Hours") { keepAvailable(8 * 3600) }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                Spacer(minLength: 0)
+                if state.keepAwake.hasRequest {
+                    Button("End Now") { Task { await controller.endKeepAwake() } }
+                        .buttonStyle(.borderless)
+                }
+            }
+            .font(.callout)
+
+            if let error = state.keepAwake.error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            } else if state.keepAwake.hasRequest {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label(state.keepAwake.waitingForPower ? "Waiting for external power" : "Keeping Mac awake",
+                          systemImage: state.keepAwake.isActive ? "cup.and.saucer.fill" : "battery.25percent")
+                        .font(.caption.weight(.medium))
+                    if state.keepAwake.remainingSeconds > 0 {
+                        Text("\(Duration.seconds(state.keepAwake.remainingSeconds).formatted(.time(pattern: .hourMinuteSecond))) remaining")
+                            .font(.caption).monospacedDigit()
+                    }
+                }
+            }
+
+            Text("Prevents idle sleep; your display can turn off. Battery use may increase. Sleep from the Apple menu and closing the lid still work.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func keepAvailable(_ seconds: Int) {
+        Task { await controller.keepAvailable(for: seconds) }
     }
 }
 

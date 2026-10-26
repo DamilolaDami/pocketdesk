@@ -12,20 +12,47 @@ public final class HostController {
     private var service: HostService?
     private var runTask: Task<Void, Never>?
     private var powerObservers: [any NSObjectProtocol] = []
+    private lazy var keepAwake = KeepAwake(settings: .load()) { [store] state in
+        Task { @MainActor in store.send(.keepAwakeChanged(state)) }
+    }
 
     /// For the app's notifications; called after the store has the event.
     public var onEvent: ((HostEvent) -> Void)?
 
     public init() {
+        store.send(.keepAwakeChanged(KeepAwakeState(settings: .load())))
         let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.willPowerOffNotification] {
             powerObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in await self?.service?.prepareForSleep() }
+                Task { @MainActor in
+                    await self?.keepAwake.send(.sleep)
+                    await self?.service?.prepareForSleep()
+                }
             })
         }
         powerObservers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in await self?.service?.resumeAfterSleep() }
+            Task { @MainActor in
+                await self?.keepAwake.send(.wake)
+                await self?.service?.resumeAfterSleep()
+            }
         })
+    }
+
+    public func setKeepAwakeSettings(_ settings: KeepAwakeSettings) async {
+        settings.save()
+        await keepAwake.send(.settings(settings))
+    }
+
+    public func keepAvailable(for seconds: Int) async {
+        await keepAwake.send(.keepAvailable(seconds: seconds))
+    }
+
+    public func endKeepAwake() async { await keepAwake.send(.endNow) }
+
+    public func stop() async {
+        await keepAwake.stop()
+        runTask?.cancel()
+        runTask = nil
     }
 
     /// Ends every session of `peer` (the menu's Disconnect, or a notification action).
@@ -56,6 +83,8 @@ public final class HostController {
 
     public func start() {
         guard runTask == nil else { return }
+        let keepAwake = keepAwake
+        Task { await keepAwake.start() }
         do {
             let store = store
             let service = try HostService(configuration: .init(
@@ -64,7 +93,7 @@ public final class HostController {
                 trustStoreURL: Self.supportDirectory.appending(path: "trusted-phones.json"),
                 askBeforeConnecting: askBeforeConnecting, relayServer: relayServer,
                 nowPlayingPushesURL: Self.supportDirectory.appending(path: "now-playing-pushes.json")
-            ), input: InputInjector()) { [weak self] event in
+            ), input: InputInjector(), keepAwake: keepAwake) { [weak self] event in
                 Task { @MainActor in
                     store.send(event)
                     self?.onEvent?(event)

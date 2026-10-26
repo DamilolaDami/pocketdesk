@@ -109,3 +109,43 @@ or assert that an uploaded artifact is ready by itself.
 
 The Mac app is not sandboxed: it posts input events and reads the screen, which needs
 Accessibility and Screen Recording. That's why it ships outside the Mac App Store.
+
+## Now Playing production push acceptance (#39)
+
+Deploy the updated relay before distributing a Mac that sends push priority. Protocol 21
+requires updating both native apps. Release builds use `.production`; only `DEBUG` sets
+`.sandbox` in `AppModel`. The relay routes production pushes to `api.push.apple.com`.
+
+After `scripts/release-ios.sh --no-upload`, verify the exported IPA (the archive may still
+have development entitlements before export):
+
+```sh
+scripts/verify-ios-push.sh .build/release/iOS-<build>/PocketDesk.ipa
+```
+
+The normal release script uploads to TestFlight. On a real phone using that processed build,
+register with the updated Mac, close PocketDesk, then verify start, next-track update, end,
+and swipe-away/pause-for-20-seconds/resume. Verify progress moves with no track-time pushes,
+pause freezes it, a seek moves it, and sleeping the Mac ends it. Repeat with Show Details in
+Pushes off and confirm only the generic title appears until the phone reconnects. Inspect
+host `push` logs for delivery status without logging tokens or media details.
+
+Record the build, device/iOS version, APNs environment and any sandbox differences here.
+These device checks cannot be established by package tests, simulator builds, or entitlement
+inspection. Item 3 (terminated-app media buttons) is excluded from this work per the owner's
+completed test; do not repeat it as a prerequisite.
+
+Local verification on 2026-10-26: build 1.0 (79) archived and exported with
+`--no-upload`; the exported app reports `aps-environment=production` using
+`scripts/verify-ios-push.sh`. It has not been uploaded or tested through TestFlight in this
+work. Start, update, end and swipe-away/resume on a real TestFlight device remain pending;
+no sandbox/production behavior difference has been established. Relay deployment was explicitly approved and completed on 2026-10-26; the existing
+single Fly Machine reports passing readiness after the update.
+
+Live Activity control follow-up, 2026-10-26: development build 80 was installed in place on
+the owner's iPhone 14 Pro. The owner confirmed play/pause and next work from the Live
+Activity with the iPhone locked. This followed fixes for paired-pin file protection,
+cold-start activity adoption, and acknowledged one-shot command delivery. The 24 focused
+control/activity/security tests and the signed iPhone build passed. This verifies the
+locked-phone development build, not TestFlight or an independently repeated terminated-app
+acceptance run.

@@ -46,7 +46,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 18), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 21), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -324,6 +324,99 @@ parameter (`needsValueError`). Quick picks include Search YouTube, Netflix, Goog
 - Tiles: Play / Pause shows the title and artist and swaps between play and pause; volume tiles
   show the level or "Muted".
 
+## More shortcut actions (protocol v19)
+
+- New `MacAction`s: `typeText` (Unicode key events, so any keyboard layout; new lines press
+  Return), `copyText` (the Mac's clipboard), `quitApp` (`terminate()`, as ⌘Q, so apps can ask
+  to save; already closed counts as done) and `system(MacCommand)`: lock (⌃⌘Q), sleep display
+  and sleep (`pmset`; sleep waits 2 s so the phone hears it worked), dark mode (System Events,
+  which macOS asks about once) and a silent screenshot to the Desktop. Text is capped at
+  `MacAction.maxTextLength`. None of this grants anything new: a paired phone can already
+  type, press ⌘Q and click the Apple menu.
+- Placeholders: `{text}` asks (links percent-encode it, text actions don't), and `{date}` and
+  `{time}` are filled on the phone when it runs (`fillingClock`).
+- Per shortcut (phone only, optional fields so older libraries load): `asksFirst` puts up a
+  "Run …?" dialog (Siri uses `requestConfirmation`), `macID` always runs it on one Mac, even
+  while streaming another.
+- Sharing: `Shortcut.sharingURL` is `pocketdesk://add?shortcut=<base64url JSON>` without its ID
+  or Mac. Opening one never saves it: it opens in the editor to look over first, and links
+  the Mac would refuse (`isValid`) or over `maxSharedLength` are ignored.
+- Siri and the Shortcuts app also get Type on Computer, Control Computer (lock, sleep,
+  display, dark mode, screenshot) and Set Computer Volume.
+
+## Now Playing Live Activity (protocol v21)
+
+What the watched Mac plays, on the Lock Screen and in the Dynamic Island, from the same
+`MacStatus` live tiles use.
+
+- `NowPlayingActivityModel` (pure, tested) turns each status into a step: start (only for
+  something playing, not a paused song), update (only on change), replace (another Mac) or
+  end (playback stopped, the Mac missing for two status checks, or switched off in Settings).
+  `SessionController` sends the steps, in order, to a `NowPlayingPresenter`; on iOS that's
+  `LiveActivityPresenter`, which adopts an activity left by an earlier launch.
+- Content stays under ActivityKit's 4 KB: the cover is saved in the App Group
+  (`NowPlayingArtwork`, one file named by its hash) and the card carries its name and average
+  color. The widget extension (`NowPlayingLiveActivity`) reads the file.
+- Buttons are `NowPlayingControlIntent`, a `LiveActivityIntent` compiled into both targets but
+  run in the app's process (`WIDGET_EXTENSION` leaves out the app-only part). Play / Pause
+  flips the card at once, sends the media key over a short catalog connection, then listens
+  to the Mac's status for 3 s to catch the new song. A cold-started button first waits for
+  activity adoption, binds the request to that activity's Mac, and uses an acknowledged
+  one-shot connection rather than a streaming socket that may have been suspended. Failure
+  restores the previous card exactly; end-when-paused waits for confirmed delivery.
+  The latest attempt's phase/error is kept locally in `now-playing-control.json`, without
+  titles, tokens or fingerprints, for device diagnosis.
+- From a browser, the card shows the site ("netflix.com on Studio") and its icon: on a white
+  tile without a cover, as a badge on one with a cover, and its color when there's no cover.
+  macOS only says the browser, so the host (`PlayingSite`) asks Safari, Chrome, Arc, Brave,
+  Edge or Vivaldi for their tabs (JXA through `osascript`, once per song; macOS asks the person
+  at the Mac once) and picks the tab whose title holds what's playing. `NowPlaying.site` is
+  optional, sent from v19. The phone fetches the icon from the site itself (`FaviconLoader`),
+  shrinks it to 96 px and saves it next to the cover.
+- **Push-to-start (protocol v20).** `Hello.nowPlayingPush` gives the Mac
+  the activity's APNs push-to-start token, the running activity's own token, what it shows,
+  the look (`NowPlayingActivityPreferences`) and site icon colors; it travels only inside the
+  encrypted session, on stream and status connections (left out means no change, a `nil`
+  start token withdraws). On by default (Settings › Now Playing › Start When Music Plays).
+  The Mac (`NowPlayingPushes`) keeps tokens per phone (0600 file, dropped when the phone is
+  forgotten), runs the same `NowPlayingActivityModel`, and builds Apple's Live Activity
+  payloads; phones that are connected draw their own card and get none. Covers keep the
+  phone's names (SHA-256 of the JPEG) so a pushed card shows one the phone already saved;
+  site icons are named by site and kept. The APNs key can't ship in the Mac app, so the relay
+  sends: the Mac's `RelayAgent` asks with `push` and the relay signs and posts to Apple
+  (`Services/relay/README.md`, "Live Activity pushes"). With Remote Access off nothing is
+  sent and nothing watches while phones are away. A dead token (410, `BadDeviceToken`) drops
+  the start token, or just the closed card's, so the next song starts a new one. Push content isn't end-to-end
+  encrypted: the relay and Apple see titles and sites when Show Details in Pushes is on.
+  With it off, every push (including the alert and end state) has only “Playing on <Mac>”,
+  playback state and appearance preferences; no artist, app, site, artwork identifiers,
+  artwork/site color, or timeline. The phone restores details through its encrypted session.
+  Missing `showsDetailsInPushes` decodes as true for older saved registrations.
+- Priority is 10 for start/end and playback-state changes, 5 for other updates. The relay
+  accepts optional `priority` (5 or 10, default 10). Deploy it before Macs that send priority.
+- Progress (v21): MediaRemote elapsed/duration/timestamp become a rounded stable `startedAt`,
+  `duration` and, while paused, `pausedElapsed`. Status and activity models coalesce at most
+  one second of sampling drift against the last sent timeline; seeks and playback changes
+  still update. System timer views animate Lock Screen and expanded Island progress without
+  periodic pushes. Unknown durations, live streams and non-unit playback rates omit progress.
+- macOS sleep/power-off notifications suspend the push watcher and immediately send end pushes
+  for known cards with activity tokens; wake resumes polling and can start fresh cards.
+  Delivery before the network sleeps is best effort. Content still goes stale after 15 minutes
+  if the Mac or relay disappears unexpectedly.
+- Settings › Now Playing: on/off, style (album colors, PocketDesk blue, classic), album art,
+  skip buttons, end when paused. They travel in the card, so a change redraws it at once.
+
+### Relay availability in Settings
+
+The iPhone's Remote Access settings check the configured relay with an authenticated QUIC
+`ping`/`pong`, bounded to eight seconds. This tests the actual control path and supports
+custom ports; enabling Remote Access alone never means “ready”. `RelayHealthState` ignores
+out-of-order results after a retry/server change. Checks stop when the settings page is
+inactive and repeat every 30 seconds while visible. A failure means this phone couldn't
+reach the relay, which may be a phone/network problem; a successful check doesn't mean its
+Mac is awake. The Mac uses its live `RelayAgent` registration state and can retry manually.
+No marketing-site indicator, email monitor, or public health listener is added.
+
 ## Files (protocol v16)
 
 Photos and files go to the Mac's Downloads folder; the phone browses and fetches files from the
@@ -466,6 +559,10 @@ and pinning, never on obscurity.
 
 - **Identity**: each device generates a P-256 key *inside* the Keychain and a self-signed
   certificate over it (`DeviceIdentity`). Its `Fingerprint` is the SHA-256 of the certificate.
+  On iOS, the TLS key and paired certificate pins are available after the first device
+  unlock so Lock Screen intents can authenticate. The pairing JSON contains no private key;
+  existing pairing files migrate to UntilFirstUserAuthentication protection on a successful
+  read while unlocked. Per-Mac Face ID locks still apply to background commands.
 - **Pairing**: the Mac's "Pair a Phone" window shows a QR code (`PairingInvite`:
   host ID, name, host fingerprint, 128-bit one-time token, 5-minute expiry). The phone pins the
   host fingerprint from the QR, connects, and sends `pairRequest(token)`. The token is

@@ -87,6 +87,35 @@ extension InputInjector {
         case .wait(let milliseconds):
             try? await Task.sleep(for: .milliseconds(milliseconds))
 
+        case .typeText(let text):
+            // Unicode events carry characters, not keys, so Return goes as the key itself.
+            for (index, line) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+                if index > 0 {
+                    inject(.key(code: 0x24, isDown: true, modifiers: 0))
+                    inject(.key(code: 0x24, isDown: false, modifiers: 0))
+                }
+                if !line.isEmpty { insertText(String(line)) }
+                // Let the app keep up with a long paragraph.
+                try? await Task.sleep(for: .milliseconds(15))
+            }
+
+        case .copyText(let text):
+            await MainActor.run {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+
+        case .quitApp(let bundleID, let name):
+            let running = await MainActor.run {
+                NSWorkspace.shared.runningApplications.filter { app in
+                    if let bundleID { app.bundleIdentifier == bundleID } else { app.localizedName == name }
+                }
+            }
+            for app in running { _ = await MainActor.run { app.terminate() } }
+
+        case .system(let command):
+            try await Self.run(command, injector: self)
+
         case .steps(let steps):
             for (index, step) in steps.enumerated() {
                 do {
@@ -94,6 +123,38 @@ extension InputInjector {
                 } catch let error as MacActionError {
                     throw MacActionError.step(index + 1, error)
                 }
+            }
+        }
+    }
+
+    static func run(_ command: MacCommand, injector: InputInjector) async throws {
+        switch command {
+        case .lockScreen:
+            // ⌃⌘Q, as the Apple menu's Lock Screen.
+            injector.inject(.key(code: 0x0C, isDown: true, modifiers: 0x14_0000))
+            injector.inject(.key(code: 0x0C, isDown: false, modifiers: 0x14_0000))
+        case .sleepDisplay:
+            guard (try? await Subprocess.run("/usr/bin/pmset", ["displaysleepnow"], timeout: .seconds(5)))??.status == 0 else {
+                throw MacActionError.couldNotOpen("the display settings")
+            }
+        case .sleep:
+            // After a moment, so the phone hears it worked before the network goes.
+            Task.detached {
+                try? await Task.sleep(for: .seconds(2))
+                _ = try? await Subprocess.run("/usr/bin/pmset", ["sleepnow"], timeout: .seconds(5))
+            }
+        case .toggleDarkMode:
+            let script = "tell application \"System Events\" to tell appearance preferences to set dark mode to not dark mode"
+            guard let result = try? await Subprocess.run("/usr/bin/osascript", ["-e", script], timeout: .seconds(30)) else { return }
+            if result.error.contains("-1743") { throw MacActionError.notAllowedToControl("System Events") }
+            guard result.status == 0 else { throw MacActionError.couldNotOpen("the appearance settings") }
+        case .screenshot:
+            // Named the way macOS names its own, on the Desktop.
+            let stamp = Date.now.formatted(.verbatim("\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) at \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)).\(minute: .twoDigits).\(second: .twoDigits)",
+                                                     timeZone: .current, calendar: .current))
+            let file = URL.desktopDirectory.appending(path: "Screenshot \(stamp).png").path(percentEncoded: false)
+            guard (try? await Subprocess.run("/usr/sbin/screencapture", ["-x", file], timeout: .seconds(10)))??.status == 0 else {
+                throw MacActionError.couldNotOpen("Screenshot")
             }
         }
     }

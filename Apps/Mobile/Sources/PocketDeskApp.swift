@@ -32,6 +32,14 @@ struct PocketDeskApp: App {
     /// Pairing links, and `pocketdesk://run?id=…` from widgets and Control Center: run the
     /// shortcut, connecting (and showing the stream) first if needed.
     private func open(_ url: URL) {
+        if url.scheme == "pocketdesk", url.host() == "add" {
+            guard let shortcut = Shortcut(sharingURL: url) else {
+                controller.store.post(notice: "That link isn't a shortcut PocketDesk can add.")
+                return
+            }
+            controller.store.offer(imported: shortcut)
+            return
+        }
         if let id = Shortcut.id(fromRunURL: url) {
             guard let shortcut = controller.store.shortcuts.first(where: { $0.id == id }) else {
                 controller.store.post(notice: "That shortcut isn't in PocketDesk any more.")
@@ -128,6 +136,20 @@ struct RootView: View {
             }
             .presentationDetents([.medium, .large])
         }
+        // A shortcut set to ask first (Quit, Sleep…): a tap that wasn't meant does nothing.
+        .confirmationDialog(controller.store.confirmRequest.map { "Run “\($0.shortcut.name)”?" } ?? "",
+                            isPresented: Binding(
+                                get: { controller.store.confirmRequest != nil },
+                                set: { if !$0 { controller.store.clearConfirmRequest() } }),
+                            titleVisibility: .visible, presenting: controller.store.confirmRequest) { request in
+            Button("Run") {
+                controller.store.clearConfirmRequest()
+                controller.run(request.shortcut, preferredHostID: request.preferredHostID, confirmed: true)
+            }
+            Button("Cancel", role: .cancel) { controller.store.clearConfirmRequest() }
+        } message: { request in
+            Text(request.shortcut.action.summary)
+        }
         // A search shortcut, from a tile, widget or the stream: ask, then run it.
         .alert(controller.store.textRequest?.shortcut.name ?? "", isPresented: Binding(
             get: { controller.store.textRequest != nil },
@@ -219,6 +241,11 @@ struct MainTabs: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
+        // A shared shortcut opens where shortcuts live.
+        .onChange(of: controller.store.importedShortcut) { _, imported in
+            if imported != nil { tab = .shortcuts }
+        }
+        .onAppear { if controller.store.importedShortcut != nil { tab = .shortcuts } }
     }
 }
 

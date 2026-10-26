@@ -44,6 +44,43 @@ The readiness check stays unhealthy until Caddy obtains a trusted certificate an
 starts. DNS must be pointed at the IPv4 before the first deploy can become healthy.
 If the app name is taken, change `app` in `fly.toml` and all commands consistently.
 
+## Live Activity pushes
+
+Set the APNs key as Fly secrets (see the README's "Live Activity pushes"). Feed the key on
+standard input so it never appears in shell history or process arguments:
+
+```sh
+{ printf 'APNS_KEY="""\n'; cat AuthKey_XXXXXXXXXX.p8; printf '"""\n'; } | fly secrets import --stage -a pocketdesk-relay-dami
+fly secrets set --stage APNS_KEY_ID=XXXXXXXXXX APNS_TEAM_ID=XXXXXXXXXX \
+  APNS_TOPICS=<bundle ID>.push-type.liveactivity -a pocketdesk-relay-dami
+fly deploy --ha=false
+```
+
+The relay prints "Live Activity pushes on" at startup when the key loaded. Deploy the relay
+before Macs that push: an older relay closes a connection that sends `push`.
+
+## In-app relay status (#39)
+
+The iPhone's Settings › Remote Access checks the configured relay through the same
+mutual-TLS QUIC connection as remote sessions: `ping` must receive `pong` within eight
+seconds. This works with custom relay hosts and ports without a public HTTP endpoint.
+Checks run only while this settings page is active, every 30 seconds or on manual retry.
+A failed check says the relay cannot be reached from this phone; it does not claim a global
+outage. Success establishes relay reachability, not that a particular Mac is awake.
+
+The Mac's Remote Access window shows its actual relay registration state, including
+connecting, ready, and unavailable/retrying, with a retry button when unavailable.
+There is no marketing-site status page, public HTTP health exposure, or email monitor.
+Fly's readiness listener on port 8081 stays internal.
+
+Deploy the updated relay **before distributing a protocol-21 Mac**, which may send
+`priority: 5`. Keep the existing one Machine, region and volume:
+
+```sh
+fly deploy --ha=false
+fly checks list
+```
+
 ## Native public relay probe
 
 From the repository root on macOS, run the same pinned inner-session exercise used

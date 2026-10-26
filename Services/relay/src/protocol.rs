@@ -39,6 +39,25 @@ pub enum Message {
     Error {
         reason: String,
     },
+    /// Mac → relay: send this Live Activity push to Apple for one of the phones it allows.
+    /// `payload` is the `aps` JSON as text; `token` the device token, hex.
+    Push {
+        id: Uuid,
+        phone: String,
+        token: String,
+        environment: String,
+        topic: String,
+        payload: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        priority: Option<u8>,
+    },
+    /// Relay → Mac: what Apple said (200 is delivered), or why the relay didn't ask it.
+    Pushed {
+        id: Uuid,
+        status: u16,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
     Ping,
     Pong,
 }

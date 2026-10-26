@@ -135,6 +135,11 @@ struct HostListView: View {
                     afterUnlocking(host) { browsingFiles = true }
                 }
             }
+            Menu("Mac Controls", systemImage: "command") {
+                ForEach(MacCommand.allCases, id: \.self) { command in
+                    Button(command.menuTitle, systemImage: command.symbol) { run(command, on: host) }
+                }
+            }
         }
         if host.isPaired {
             Button(host.isLocked ? "Remove \(DeviceOwner.method) Lock" : "Lock with \(DeviceOwner.method)",
@@ -160,6 +165,14 @@ struct HostListView: View {
     private func open(_ app: PlayerApp, on host: DiscoveredHost) {
         let shortcut = Shortcut(name: app.name, symbol: "play.square.stack", color: .gray,
                                 action: .openApp(bundleID: app.bundleID, name: app.name), showsMac: false)
+        controller.run(shortcut, preferredHostID: host.hostID)
+    }
+
+    /// Lock, sleep and the rest, without opening the stream. Sleep asks first, as its
+    /// quick pick does: it takes the Mac away.
+    private func run(_ command: MacCommand, on host: DiscoveredHost) {
+        let shortcut = Shortcut(name: command.menuTitle, symbol: command.symbol, color: .gray, action: .system(command),
+                                showsMac: false, asksFirst: command == .sleep)
         controller.run(shortcut, preferredHostID: host.hostID)
     }
 
@@ -375,13 +388,26 @@ private struct LiveStatusRow: View {
     let control: (MediaKey) -> Void
     @Environment(\.openURL) private var openURL
     @State private var choosingWhere = false
+    /// The playing site's icon, when a browser is the player.
+    @State private var siteIcon: UIImage?
+
+    /// "netflix.com", when a browser is playing it.
+    private var site: String? {
+        status.nowPlaying?.site.map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 }
+    }
+
+    /// Carrying on here: the site (which opens its app, if it has one), else the player's app.
+    private var phoneURL: URL? {
+        if let host = status.nowPlaying?.site { return URL(string: "https://\(host)") }
+        return status.nowPlaying?.app?.phoneURL.flatMap(URL.init(string:))
+    }
 
     var body: some View {
         VStack(spacing: 12) {
             if let app = status.nowPlaying?.app {
-                PlayerSource(app: app) { choosingWhere = true }
-                    .confirmationDialog("Open \(app.name)", isPresented: $choosingWhere, titleVisibility: .visible) {
-                        if let url = app.phoneURL.flatMap(URL.init(string:)) {
+                PlayerSource(app: app, site: site, siteIcon: siteIcon) { choosingWhere = true }
+                    .confirmationDialog("Open \(site ?? app.name)", isPresented: $choosingWhere, titleVisibility: .visible) {
+                        if let url = phoneURL {
                             Button("On This iPhone") {
                                 openURL(url) { opened in
                                     if !opened { openOnMac(app) }
@@ -391,12 +417,12 @@ private struct LiveStatusRow: View {
                         Button("On Your Mac") { openOnMac(app) }
                         Button("Cancel", role: .cancel) {}
                     } message: {
-                        Text(app.phoneURL == nil ? "Bring \(app.name) to the front on your Mac."
-                                                 : "Carry on in \(app.name) here, or bring it to the front on your Mac.")
+                        Text(phoneURL == nil ? "Bring \(app.name) to the front on your Mac."
+                                             : "Carry on in \(site ?? app.name) here, or bring \(app.name) to the front on your Mac.")
                     }
             }
             HStack(spacing: 12) {
-                Artwork(nowPlaying: status.nowPlaying)
+                Artwork(nowPlaying: status.nowPlaying, siteIcon: siteIcon)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(status.nowPlaying?.title ?? "Nothing playing")
                         .font(.subheadline.weight(.semibold))
@@ -442,6 +468,14 @@ private struct LiveStatusRow: View {
         .padding(10)
         .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 16))
         .clipShape(.rect(cornerRadius: 16))
+        .task(id: status.nowPlaying?.site) {
+            guard let host = status.nowPlaying?.site,
+                  let data = await FaviconLoader.shared.icon(for: "https://\(host)") else {
+                siteIcon = nil
+                return
+            }
+            withAnimation(.smooth) { siteIcon = UIImage(data: data) }
+        }
     }
 
     private var detail: String {
@@ -463,20 +497,38 @@ private struct LiveStatusRow: View {
     }
 }
 
-/// "Playing in Spotify", with the app's icon: tap to open it.
+/// "Playing in Spotify", with the app's icon, or "Playing netflix.com in Safari" with the
+/// site's: tap to open it.
 private struct PlayerSource: View {
     let app: PlayerApp
+    var site: String?
+    var siteIcon: UIImage?
     let open: () -> Void
 
     var body: some View {
         Button(action: open) {
             HStack(spacing: 8) {
-                if let icon = app.icon.flatMap({ Data(base64Encoded: $0) }).flatMap(UIImage.init(data:)) {
+                if let siteIcon {
+                    Image(uiImage: siteIcon)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 14, height: 14)
+                        .frame(width: 20, height: 20)
+                        .background(.white, in: .rect(cornerRadius: 5, style: .continuous))
+                } else if let icon = app.icon.flatMap({ Data(base64Encoded: $0) }).flatMap(UIImage.init(data:)) {
                     Image(uiImage: icon).resizable().scaledToFit().frame(width: 20, height: 20)
                 } else {
                     Image(systemName: "app.fill").foregroundStyle(.secondary).frame(width: 20, height: 20)
                 }
-                (Text("Playing in ").foregroundStyle(.secondary) + Text(app.name).fontWeight(.semibold))
+                Group {
+                    if let site {
+                        Text("Playing ").foregroundStyle(.secondary) + Text(site).fontWeight(.semibold)
+                            + Text(" in \(app.name)").foregroundStyle(.secondary)
+                    } else {
+                        Text("Playing in ").foregroundStyle(.secondary) + Text(app.name).fontWeight(.semibold)
+                    }
+                }
                     .font(.footnote)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -487,19 +539,28 @@ private struct PlayerSource: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Playing in \(app.name)")
-        .accessibilityHint("Opens \(app.name) on this iPhone or on your Mac.")
+        .accessibilityLabel(site.map { "Playing \($0) in \(app.name)" } ?? "Playing in \(app.name)")
+        .accessibilityHint("Opens \(site ?? app.name) on this iPhone or on your Mac.")
     }
 }
 
-/// The cover the Mac sent, else a quiet note tile.
+/// The cover the Mac sent, else the site's icon on white, else a quiet note tile.
 private struct Artwork: View {
     let nowPlaying: NowPlaying?
+    var siteIcon: UIImage?
 
     var body: some View {
         Group {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
+            } else if let siteIcon {
+                Image(uiImage: siteIcon)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 28, height: 28)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.white)
             } else {
                 Image(systemName: nowPlaying == nil ? "speaker.wave.2.fill" : "music.note")
                     .font(.title3)
@@ -608,5 +669,27 @@ private struct SetupHint: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 4)
+    }
+}
+
+private extension MacCommand {
+    var menuTitle: String {
+        switch self {
+        case .lockScreen: "Lock Screen"
+        case .sleepDisplay: "Sleep Display"
+        case .sleep: "Sleep Mac"
+        case .toggleDarkMode: "Switch Dark Mode"
+        case .screenshot: "Take Screenshot"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .lockScreen: "lock.fill"
+        case .sleepDisplay: "display"
+        case .sleep: "moon.zzz.fill"
+        case .toggleDarkMode: "circle.lefthalf.filled"
+        case .screenshot: "camera.viewfinder"
+        }
     }
 }

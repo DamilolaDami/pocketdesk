@@ -1,0 +1,44 @@
+{
+  "id": "1-1-81",
+  "version": "1.1",
+  "build": "81",
+  "date": "2026-10-26",
+  "status": "draft",
+  "title": "Your Mac’s music, on your Lock Screen.",
+  "summary": "Playback controls and progress at a glance, more useful shortcuts, and a more dependable connection from away. Update both the Mac and iPhone apps together.",
+  "iphoneStatus": "awaiting-review",
+  "macURL": "https://github.com/DamilolaDami/pocketdesk/releases/download/v1.1.0/PocketDesk.dmg",
+  "source": "https://github.com/DamilolaDami/pocketdesk/releases/tag/v1.1.0",
+  "changes": [
+    {
+      "platform": "iphone",
+      "title": "Now Playing on the Lock Screen",
+      "text": "See your Mac’s music or video on the Lock Screen and Dynamic Island, with artwork, playback progress, and play, pause and skip controls that work while the iPhone is locked."
+    },
+    {
+      "platform": "iphone",
+      "title": "A card that starts when music does",
+      "text": "Your Mac can start and update Now Playing while PocketDesk is closed. Choose a card style, hide artwork or skip buttons, end the card when paused, or keep song details out of push notifications."
+    },
+    {
+      "platform": "iphone",
+      "title": "More useful shortcuts",
+      "text": "Type text, copy it to your Mac, quit apps, lock the Mac, sleep its display, change dark mode or take a screenshot. Add date and time placeholders, ask before running, bind a shortcut to one Mac, or share it for someone to review and save."
+    },
+    {
+      "platform": "iphone",
+      "title": "Check the relay from Settings",
+      "text": "Remote Access now checks whether your iPhone can reach its configured relay, with a retry button and support for custom servers."
+    },
+    {
+      "platform": "mac",
+      "title": "Keep Now Playing up to date",
+      "text": "The Mac sends playback progress and privacy-aware Live Activity updates, prioritizes play and pause changes, and attempts to end the card before sleeping or shutting down."
+    },
+    {
+      "platform": "mac",
+      "title": "Reconnect to the relay sooner",
+      "text": "A restarted Mac replaces its old relay connection immediately. Remote Access settings also offer a retry when the relay is unavailable."
+    }
+  ]
+}

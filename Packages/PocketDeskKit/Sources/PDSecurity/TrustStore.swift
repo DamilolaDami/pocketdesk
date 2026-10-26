@@ -36,11 +36,22 @@ public struct TrustStore: Codable, Sendable, Equatable {
 
     public static func load(from url: URL) throws -> TrustStore {
         guard FileManager.default.fileExists(atPath: url.path) else { return TrustStore() }
-        return try JSONDecoder().decode(TrustStore.self, from: Data(contentsOf: url))
+        let store = try JSONDecoder().decode(TrustStore.self, from: Data(contentsOf: url))
+        #if os(iOS)
+        // Migrate existing pairings while unlocked. Lock Screen intents need the pins just
+        // like DeviceIdentity needs its AfterFirstUnlock key; no private keys live here.
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                                              ofItemAtPath: url.path)
+        #endif
+        return store
     }
 
     public func save(to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        #if os(iOS)
+        try JSONEncoder().encode(self).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        #else
         try JSONEncoder().encode(self).write(to: url, options: [.atomic, .completeFileProtection])
+        #endif
     }
 }

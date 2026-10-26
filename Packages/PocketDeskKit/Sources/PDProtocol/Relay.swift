@@ -16,9 +16,16 @@ public enum RelayMessage: Sendable, Equatable, Codable {
     case close(session: UUID)
     case notFound
     case error(reason: String)
+    /// Mac → relay: send a Live Activity push to Apple for a phone the Mac allows. `payload`
+    /// is the `aps` JSON as text, `token` the phone's device token in hex.
+    case push(id: UUID, phone: String, token: String, environment: String, topic: String, payload: String, priority: Int = 10)
+    /// Relay → Mac: Apple's HTTP status (200 is delivered), or why the relay didn't ask.
+    case pushed(id: UUID, status: Int, reason: String?)
     case ping
     case pong
-    private enum Keys: String, CodingKey { case type, hostID, fingerprints, host, phone, session, reason }
+    private enum Keys: String, CodingKey {
+        case type, hostID, fingerprints, host, phone, session, reason, id, token, environment, topic, payload, status, priority
+    }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         switch try c.decode(String.self, forKey: .type) {
@@ -34,6 +41,15 @@ public enum RelayMessage: Sendable, Equatable, Codable {
         case "close": self = .close(session: try c.decode(UUID.self, forKey: .session))
         case "notFound": self = .notFound
         case "error": self = .error(reason: try c.decode(String.self, forKey: .reason))
+        case "push":
+            self = .push(id: try c.decode(UUID.self, forKey: .id), phone: try c.decode(String.self, forKey: .phone),
+                         token: try c.decode(String.self, forKey: .token),
+                         environment: try c.decode(String.self, forKey: .environment),
+                         topic: try c.decode(String.self, forKey: .topic), payload: try c.decode(String.self, forKey: .payload),
+                         priority: try c.decodeIfPresent(Int.self, forKey: .priority) ?? 10)
+        case "pushed":
+            self = .pushed(id: try c.decode(UUID.self, forKey: .id), status: try c.decode(Int.self, forKey: .status),
+                           reason: try c.decodeIfPresent(String.self, forKey: .reason))
         case "ping": self = .ping
         case "pong": self = .pong
         default: throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown relay message")
@@ -72,6 +88,20 @@ public enum RelayMessage: Sendable, Equatable, Codable {
         case .error(let reason):
             try c.encode("error", forKey: .type)
             try c.encode(reason, forKey: .reason)
+        case .push(let id, let phone, let token, let environment, let topic, let payload, let priority):
+            try c.encode("push", forKey: .type)
+            try c.encode(id, forKey: .id)
+            try c.encode(phone, forKey: .phone)
+            try c.encode(token, forKey: .token)
+            try c.encode(environment, forKey: .environment)
+            try c.encode(topic, forKey: .topic)
+            try c.encode(payload, forKey: .payload)
+            if priority != 10 { try c.encode(priority, forKey: .priority) }
+        case .pushed(let id, let status, let reason):
+            try c.encode("pushed", forKey: .type)
+            try c.encode(id, forKey: .id)
+            try c.encode(status, forKey: .status)
+            try c.encodeIfPresent(reason, forKey: .reason)
         case .ping:
             try c.encode("ping", forKey: .type)
         case .pong:

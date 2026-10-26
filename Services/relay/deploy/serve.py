@@ -1,7 +1,8 @@
 """One Machine: supervise Caddy certificate automation and the Quinn UDP relay.
 
-Certificates/ACME account live on the persistent /data volume. No key material is
-passed through stdout, process arguments, image layers or Fly environment variables.
+Certificates/ACME account live on the persistent /data volume. No TLS key material is
+passed through stdout, process arguments, image layers or Fly environment variables. The
+APNs key (APNS_* Fly secrets) reaches the relay only through its inherited environment.
 """
 import http.server
 import os

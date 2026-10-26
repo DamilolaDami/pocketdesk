@@ -72,6 +72,9 @@ struct ShortcutsView: View {
                 controller.stopWatchingStatus()
                 isEditing = false
             }
+            // A shared link opened: show it in the editor to look over before saving.
+            .onAppear(perform: showImported)
+            .onChange(of: controller.store.importedShortcut) { showImported() }
             .sheet(item: $sheet) { sheet in
                 switch sheet {
                 case .picks:
@@ -84,6 +87,12 @@ struct ShortcutsView: View {
                 }
             }
         }
+    }
+
+    private func showImported() {
+        guard let imported = controller.store.importedShortcut else { return }
+        controller.store.offer(imported: nil)
+        sheet = .editor(ShortcutDraft(shortcut: imported, isNew: true))
     }
 
     private var targetMac: DiscoveredHost? {
@@ -181,6 +190,11 @@ struct ShortcutGrid: View {
                         Button("Edit", systemImage: "slider.horizontal.3") { edit(shortcut) }
                     }
                     Button("Duplicate", systemImage: "plus.square.on.square") { controller.duplicate(shortcut) }
+                    // A link that opens it in PocketDesk on another iPhone, to look over and save.
+                    ShareLink(item: shortcut.sharingURL, subject: Text(shortcut.name),
+                              message: Text("“\(shortcut.name)”, a PocketDesk shortcut. Open the link on an iPhone with PocketDesk to add it.")) {
+                        Label("Share…", systemImage: "square.and.arrow.up")
+                    }
                     if let startEditing {
                         Button("Edit Shortcuts", systemImage: "square.grid.2x2", action: startEditing)
                     }

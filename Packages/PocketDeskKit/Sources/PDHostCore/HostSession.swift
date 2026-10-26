@@ -73,6 +73,8 @@ public actor HostSession {
         case streaming(peer: Fingerprint, config: StreamConfig, window: WindowInfo?)
         /// The phone sent a file; it's in Downloads at `url`.
         case fileReceived(peer: Fingerprint, deviceName: String, url: URL)
+        /// How to push to the phone's Now Playing Live Activity, or that it no longer wants it.
+        case nowPlayingPush(peer: Fingerprint, NowPlayingPush)
     }
 
     public struct Stats: Sendable, Equatable {
@@ -92,6 +94,17 @@ public actor HostSession {
     private let menus: any MenuBarSource
     private let caret: any CaretSource
     private let onEvent: @Sendable (Event) -> Void
+
+    /// When the phone last sent anything. A suspended app's connection can linger for a while
+    /// without a word: Now Playing pushes treat a phone this quiet as gone.
+    private var lastHeard = ContinuousClock.now
+    private var isStreaming = false
+    private var watchesStatus = false
+
+    /// The phone is on screen with PocketDesk: streaming, or watching status and still pinging.
+    public func phoneIsPresent(within quiet: Duration = .seconds(6)) -> Bool {
+        isStreaming || (watchesStatus && ContinuousClock.now - lastHeard < quiet)
+    }
 
     private var audioEnabled = true
     private var quality = StreamQuality.best
@@ -213,6 +226,7 @@ public actor HostSession {
         }
         audioEnabled = hello.audioEnabled
         quality = hello.quality
+        if let push = hello.nowPlayingPush { onEvent(.nowPlayingPush(peer: peer, push)) }
         let files = HostFileTransfers(session: session, peer: peer, folders: configuration.files) { [onEvent, peer] url in
             onEvent(.fileReceived(peer: peer, deviceName: hello.deviceName, url: url))
         }
@@ -228,10 +242,13 @@ public actor HostSession {
                                                       wake: configuration.wake, wallpaper: configuration.wallpaper)))
             defer { statusTask?.cancel() }
             while let message = try await messages.next() {
+                lastHeard = .now
                 func allow() async throws -> Bool { try await allowCatalogAction(deviceName: hello.deviceName) }
                 switch message {
                 case .listApps, .requestAppIcons, .listMacShortcuts: try await answer(message)
-                case .watchStatus: startWatchingStatus()
+                case .watchStatus:
+                    watchesStatus = true
+                    startWatchingStatus()
                 // The Mac cards show the round trip.
                 case .ping(let value): try await session.send(.pong(value))
                 case .run(let action):
@@ -274,6 +291,7 @@ public actor HostSession {
             await finish(with: .bye(reason: "The Mac didn't allow this connection."))
             return
         }
+        isStreaming = true
         onEvent(.connected(peer: peer, deviceName: hello.deviceName))
         do {
             // Listing displays already needs Screen Recording, so it's inside the goodbye path.
@@ -304,6 +322,7 @@ public actor HostSession {
         }
 
         while let message = try await messages.next() {
+            lastHeard = .now
             switch message {
             case .setAudioEnabled(let enabled):
                 if enabled != audioEnabled {
@@ -418,7 +437,8 @@ public actor HostSession {
     private func watchStatus() async {
         var last: MacStatus?
         while !Task.isCancelled {
-            let status = await catalog.status()
+            var status = await catalog.status()
+            status.nowPlaying = status.nowPlaying?.coalescingTimeline(with: last?.nowPlaying)
             if status != last {
                 guard (try? await session.send(.macStatus(status))) != nil else { return }
                 last = status

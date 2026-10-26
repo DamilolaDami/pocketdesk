@@ -12,3 +12,5 @@ NOTARY_PROFILE = pocketdesk-notary
 // Its .p8 goes in ~/.appstoreconnect/private_keys/AuthKey_<id>.p8, never in the repo.
 ASC_KEY_ID = ABCDE12345
 ASC_ISSUER_ID = 00000000-0000-0000-0000-000000000000
+// A paid team: the phone app gets Push Notifications, for Now Playing push-to-start.
+PD_APP_ENTITLEMENTS = Apps/Mobile/PocketDesk-Push.entitlements

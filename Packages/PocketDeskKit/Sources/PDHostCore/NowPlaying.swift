@@ -34,10 +34,23 @@ enum NowPlayingReader {
         guard let line = output.split(whereSeparator: \.isNewline).last,
               let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
               let title = json["title"] as? String, !title.isEmpty else { return nil }
+        let timing = timeline(elapsed: json["elapsed"] as? Double, duration: json["duration"] as? Double,
+                              timestamp: (json["timestamp"] as? Double).map(Date.init(timeIntervalSince1970:)),
+                              rate: json["rate"] as? Double ?? ((json["isPlaying"] as? Bool) == true ? 1 : 0))
         return NowPlaying(title: title, artist: json["artist"] as? String,
                           isPlaying: (json["isPlaying"] as? Bool) ?? ((json["isPlaying"] as? Int) ?? 0 > 0),
                           artwork: (json["artwork"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-                          app: (json["app"] as? String).flatMap(app(at:)))
+                          app: (json["app"] as? String).flatMap(app(at:)),
+                          startedAt: timing.start, duration: timing.duration, pausedElapsed: timing.paused)
+    }
+
+    private static func timeline(elapsed: Double?, duration: Double?, timestamp: Date?, rate: Double)
+        -> (start: Date?, duration: Double?, paused: Double?) {
+        guard let elapsed, elapsed.isFinite, elapsed >= 0, let duration, duration.isFinite, duration >= 1,
+              let timestamp, timestamp.timeIntervalSince1970.isFinite, rate == 0 || rate == 1 else { return (nil, nil, nil) }
+        let position = min(elapsed, duration)
+        return (rate == 1 ? Date(timeIntervalSince1970: (timestamp.timeIntervalSince1970 - elapsed).rounded()) : nil,
+                duration.rounded(), rate == 0 ? position.rounded() : nil)
     }
 
     /// The app at a bundle path, by its ID and the name Finder shows.
@@ -82,7 +95,11 @@ enum NowPlayingReader {
         let artist = (info["kMRMediaRemoteNowPlayingInfoArtist"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let rate = info["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? Double ?? 0
         let artwork = (info["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data).flatMap(Self.artwork)
-        return NowPlaying(title: title, artist: artist, isPlaying: rate > 0, artwork: artwork)
+        let timing = timeline(elapsed: info["kMRMediaRemoteNowPlayingInfoElapsedTime"] as? Double,
+                              duration: info["kMRMediaRemoteNowPlayingInfoDuration"] as? Double,
+                              timestamp: info["kMRMediaRemoteNowPlayingInfoTimestamp"] as? Date, rate: rate)
+        return NowPlaying(title: title, artist: artist, isPlaying: rate > 0, artwork: artwork,
+                          startedAt: timing.start, duration: timing.duration, pausedElapsed: timing.paused)
     }
 }
 

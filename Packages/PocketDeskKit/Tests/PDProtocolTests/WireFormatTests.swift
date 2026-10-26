@@ -38,6 +38,17 @@ import Testing
 }
 
 @Suite struct ControlMessageTests {
+    @Test func helloCarriesNowPlayingPushesAndOlderOnesLeaveThemOut() throws {
+        let push = NowPlayingPush(startToken: "ab12", activityToken: nil, environment: .production, bundleID: "app.pocketdesk.app",
+                                  preferences: NowPlayingActivityPreferences(), siteTints: ["www.netflix.com": CardColor(red: 1, green: 0, blue: 0)])
+        let hello = ControlMessage.hello(Hello(deviceName: "iPhone", viewport: Viewport(width: 402, height: 874, scale: 3),
+                                               mode: .catalog, nowPlayingPush: push))
+        #expect(try JSONDecoder().decode(ControlMessage.self, from: JSONEncoder().encode(hello)) == hello)
+        let plain = Hello(deviceName: "iPhone", viewport: Viewport(width: 402, height: 874, scale: 3))
+        #expect(plain.nowPlayingPush == nil)
+        #expect(NowPlayingCard.siteIconID(for: "www.Netflix.com") == "site-www-netflix-com")
+    }
+
     @Test func codableRoundTrip() throws {
         let message = ControlMessage.hello(Hello(deviceName: "iPhone",
                                                  viewport: Viewport(width: 402, height: 874, scale: 3)))
@@ -56,6 +67,10 @@ import Testing
         .setVolume(60),
         .mediaIn(.playPause, player: .spotify),
         .steps([.openURL("https://www.netflix.com"), .wait(milliseconds: 1500), .keystroke(code: 0x03, modifiers: 0x14_0000)]),
+        .typeText("Hello\nWorld ✨"),
+        .copyText("hello@example.com"),
+        .quitApp(bundleID: "com.apple.Music", name: "Music"),
+        .system(.toggleDarkMode),
     ])
     func actionsRoundTrip(_ action: MacAction) throws {
         let data = try JSONEncoder().encode(ControlMessage.run(action))
@@ -71,6 +86,9 @@ import Testing
         #expect(!MacAction.setVolume(101).isValid)
         #expect(MacAction.mediaIn(.next, player: .music).isValid)
         #expect(!MacAction.mediaIn(.volumeUp, player: .music).isValid) // volume is the Mac's
+        #expect(!MacAction.typeText("").isValid)
+        #expect(!MacAction.copyText(String(repeating: "a", count: MacAction.maxTextLength + 1)).isValid)
+        #expect(MacAction.steps([.system(.screenshot), .typeText("done")]).isValid)
         #expect(alpn == "pocketdesk/\(protocolVersion)")
     }
 

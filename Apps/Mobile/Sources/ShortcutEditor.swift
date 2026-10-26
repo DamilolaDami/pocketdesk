@@ -111,10 +111,19 @@ struct ShortcutEditor: View {
                     Toggle("Show the Mac", isOn: Binding(
                         get: { preview.opensStream },
                         set: { shortcut.showsMac = $0 }))
+                    Toggle("Ask Before Running", isOn: Binding(
+                        get: { shortcut.confirms },
+                        set: { shortcut.asksFirst = $0 }))
+                    Picker("Run On", selection: $shortcut.macID) {
+                        Text("Usual Mac").tag(UUID?.none)
+                        ForEach(macs) { mac in
+                            Text(mac.name).tag(mac.hostID)
+                        }
+                    }
+                } header: {
+                    Text("When It Runs")
                 } footer: {
-                    Text(preview.opensStream
-                         ? "Opens the stream so you can see it happen."
-                         : "Runs in the background. You stay where you are.")
+                    Text(whenItRunsFooter)
                 }
 
                 Section("Color") { colorPicker }
@@ -196,6 +205,20 @@ struct ShortcutEditor: View {
     }
 
     // MARK: Building the shortcut
+
+    /// Paired Macs, asleep or not.
+    private var macs: [DiscoveredHost] {
+        controller.pairedMacs
+    }
+
+    private var whenItRunsFooter: String {
+        var lines = [preview.opensStream ? "Opens the stream so you can see it happen."
+                                         : "Runs in the background. You stay where you are."]
+        if shortcut.confirms { lines.append("Asks before it runs, so a stray tap can't quit or sleep anything.") }
+        lines.append(shortcut.macID == nil ? "Runs on the Mac chosen in Settings › Shortcuts & Siri."
+                                           : "Always runs on this Mac, even while you're using another.")
+        return lines.joined(separator: " ")
+    }
 
     /// The shortcut as it would be saved right now.
     private var preview: Shortcut {

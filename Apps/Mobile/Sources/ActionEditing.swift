@@ -5,10 +5,10 @@ import SwiftUI
 /// One action as the editor's fields hold it, before it's a valid `MacAction`.
 struct ActionDraft: Equatable {
     enum Kind: String, CaseIterable {
-        case website = "Website", app = "App", macShortcut = "Shortcuts", control = "Control", wait = "Wait"
+        case website = "Website", app = "App", macShortcut = "Shortcuts", control = "Control", text = "Text", wait = "Wait"
 
         /// What a shortcut's first step can be; a wait only makes sense between steps.
-        static let actions: [Kind] = [.website, .app, .macShortcut, .control]
+        static let actions: [Kind] = [.website, .app, .macShortcut, .control, .text]
 
         var stepTitle: String {
             switch self {
@@ -16,6 +16,7 @@ struct ActionDraft: Equatable {
             case .app: "Open App"
             case .macShortcut: "Run Mac Shortcut"
             case .control: "Mac Control"
+            case .text: "Type or Copy Text"
             case .wait: "Wait"
             }
         }
@@ -26,6 +27,7 @@ struct ActionDraft: Equatable {
             case .app: "app.fill"
             case .macShortcut: "square.stack.3d.up.fill"
             case .control: "command"
+            case .text: "character.cursor.ibeam"
             case .wait: "hourglass"
             }
         }
@@ -43,6 +45,11 @@ struct ActionDraft: Equatable {
     /// For Play / Pause, Next and Previous: one player, or `nil` for whatever's playing.
     var player: MediaPlayer?
     var seconds: Double = 1
+    /// Quit the app rather than open it.
+    var quitsApp = false
+    var text = ""
+    /// Put the text on the clipboard rather than type it.
+    var copiesText = false
 
     static let volumeID = "Set Volume"
     static var controls: [ShortcutPreset] { ShortcutPreset.all.filter { $0.category == .controls } }
@@ -62,11 +69,23 @@ struct ActionDraft: Equatable {
             kind = .app
             appName = name
             appBundleID = bundleID
+        case .quitApp(let bundleID, let name):
+            kind = .app
+            appName = name
+            appBundleID = bundleID
+            quitsApp = true
+        case .typeText(let text):
+            kind = .text
+            self.text = text
+        case .copyText(let text):
+            kind = .text
+            self.text = text
+            copiesText = true
         case .runShortcut(let id, let name):
             kind = .macShortcut
             shortcutName = name
             shortcutID = id
-        case .keystroke, .media:
+        case .keystroke, .media, .system:
             kind = .control
             controlID = Self.controls.first { $0.shortcut.action == action }?.id ?? Self.controls[0].id
         case .mediaIn(let key, let player):
@@ -91,10 +110,14 @@ struct ActionDraft: Equatable {
         case .website:
             ShortcutEditor.url(from: website).map(MacAction.openURL)
         case .app:
-            appName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : .openApp(
+            appName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : {
                 // A picked app keeps its bundle ID (robust to renamed apps); typed ones go by name.
-                bundleID: appBundleID ?? Self.appPresets.first { $0.shortcut.name == appName }?.shortcut.appBundleID,
-                name: appName.trimmingCharacters(in: .whitespaces))
+                let bundleID = appBundleID ?? Self.appPresets.first { $0.shortcut.name == appName }?.shortcut.appBundleID
+                let name = appName.trimmingCharacters(in: .whitespaces)
+                return quitsApp ? .quitApp(bundleID: bundleID, name: name) : .openApp(bundleID: bundleID, name: name)
+            }()
+        case .text:
+            text.isEmpty ? nil : copiesText ? .copyText(text) : .typeText(text)
         case .macShortcut:
             shortcutName.trimmingCharacters(in: .whitespaces).isEmpty ? nil
                 : .runShortcut(id: shortcutID, name: shortcutName.trimmingCharacters(in: .whitespaces))
@@ -119,12 +142,19 @@ struct ActionDraft: Equatable {
         case .website: website.contains(MacAction.textPlaceholder)
             ? "Asks what to type each time and puts it where {text} is."
             : "Opens in the Mac's default browser. To be asked for words each time, put {text} in the link, like youtube.com/results?search_query={text}."
-        case .app: "Opens the app, or brings it to the front if it's already running."
+        case .app: quitsApp ? "Quits the app as ⌘Q does, so it can ask to save your work. Nothing happens if it isn't open."
+                            : "Opens the app, or brings it to the front if it's already running."
+        case .text: copiesText
+            ? "Puts the text on the Mac's clipboard, ready to paste. {text} asks what to copy each time."
+            : "Types into whatever's in front on the Mac, a new line presses Return. {text} asks what to type each time (dictation works), {date} and {time} fill in when it runs."
         case .macShortcut: "Runs a shortcut from the Shortcuts app on your Mac: HomeKit scenes, Focus, scripts and more."
         case .control:
             if let player, transportKey != nil {
                 "Goes straight to \(player.name), even if something else is playing. \(player.name) needs to be open; the Mac asks once to allow it."
-            } else if controlID == Self.volumeID { "Sets the Mac's sound output volume." } else {
+            } else if controlID == Self.volumeID { "Sets the Mac's sound output volume." }
+            else if case .system(let command)? = Self.controls.first(where: { $0.id == controlID })?.shortcut.action {
+                command.footer
+            } else {
                 "Presses the keys on the Mac. Play / Pause works on whatever is playing, like Netflix in Safari."
             }
         case .wait: "Gives the Mac a moment, like letting a page load before going full screen."
@@ -157,6 +187,10 @@ struct ActionFields: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         case .app:
+            Picker("App", selection: $draft.quitsApp) {
+                Text("Open").tag(false)
+                Text("Quit").tag(true)
+            }
             NavigationLink {
                 MacAppPicker(controller: controller, selected: draft.appBundleID) { app in
                     picked?(app.name, draft.appName, "app.fill")
@@ -219,11 +253,51 @@ struct ActionFields: View {
                     Text("\(Int(draft.volume))%").monospacedDigit().frame(width: 46, alignment: .trailing)
                 }
             }
+        case .text:
+            Picker("Text", selection: $draft.copiesText) {
+                Text("Type It").tag(false)
+                Text("Copy It").tag(true)
+            }
+            TextField("Text, or {text} to be asked", text: $draft.text, axis: .vertical)
+                .lineLimit(3...8)
+                .textInputAutocapitalization(.sentences)
+            PlaceholderButtons(text: $draft.text)
         case .wait:
             Stepper(value: $draft.seconds, in: 0.5...Double(MacAction.maxWaitMilliseconds / 1000), step: 0.5) {
                 Text("Wait \(draft.seconds.formatted(.number.precision(.fractionLength(0...1)))) s")
             }
         }
+    }
+}
+
+/// Adds a placeholder at the end of the text: what to ask for, the date, the time.
+private struct PlaceholderButtons: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            chip("Ask Each Time", symbol: "text.bubble.fill", MacAction.textPlaceholder)
+            chip("Date", symbol: "calendar", MacAction.datePlaceholder)
+            chip("Time", symbol: "clock.fill", MacAction.timePlaceholder)
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+    }
+
+    private func chip(_ title: String, symbol: String, _ placeholder: String) -> some View {
+        Button {
+            text += placeholder
+        } label: {
+            Label(title, systemImage: symbol)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Brand.accent.opacity(0.12), in: .capsule)
+                .foregroundStyle(Brand.accent)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Adds \(placeholder) to the text")
     }
 }
 
@@ -341,6 +415,18 @@ struct MacShortcutPicker: View {
             }
         } else if shortcuts.isEmpty {
             ContentUnavailableView.search(text: query)
+        }
+    }
+}
+
+private extension MacCommand {
+    var footer: String {
+        switch self {
+        case .lockScreen: "Locks the Mac, as Lock Screen in the Apple menu does."
+        case .sleepDisplay: "Turns the Mac's display off. Anything playing keeps playing."
+        case .sleep: "Puts the Mac to sleep a moment after it runs. Wake & Use brings it back."
+        case .toggleDarkMode: "Switches the Mac between light and dark. The Mac asks once to let PocketDesk change it."
+        case .screenshot: "Saves a picture of the Mac's screen to its Desktop, without a sound."
         }
     }
 }

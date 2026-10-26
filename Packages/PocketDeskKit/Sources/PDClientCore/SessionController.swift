@@ -115,6 +115,34 @@ public final class SessionController {
     private var powerStateTask: Task<Void, Never>?
     /// Screens showing live status (the Macs tab, the Shortcuts tab): it stops when none are.
     private var statusWatchers: Set<String> = []
+    /// Puts the watched Mac's now playing on the Lock Screen and in the Dynamic Island. The
+    /// app sets it (iOS only); setting it picks up an activity left from an earlier launch.
+    public var nowPlayingPresenter: (any NowPlayingPresenter)? {
+        didSet { adoptNowPlayingActivity() }
+    }
+    private var nowPlaying = NowPlayingActivityModel(preferences: NowPlayingActivityPreferences(defaults: .standard))
+    /// Steps reach the presenter in order.
+    private var nowPlayingQueue: Task<Void, Never>?
+    var controlDiagnostics = NowPlayingControlDiagnostics.shared
+    /// The last cover, decoded once: its file name, bytes and color.
+    private var nowPlayingArtwork: (base64: String, id: String, jpeg: Data, tint: CardColor?)?
+    /// Site icons for browser playback, by host, once saved: `nil` while fetching, or once a
+    /// site turned out to have none.
+    private var siteIcons: [String: (id: String, tint: CardColor?)?] = [:]
+    /// What Apple gave for pushing to the activity, for the Mac to use while the app is closed.
+    private var nowPlayingPushTokens = NowPlayingPushTokens()
+    /// `.sandbox` for builds from Xcode; the app says (its push entitlement decides).
+    public var pushEnvironment = NowPlayingPush.Environment.production
+    /// Settings › Now Playing › Start When Music Plays.
+    public var startsNowPlayingByPush: Bool {
+        UserDefaults.standard.object(forKey: NowPlayingActivityPreferences.Key.startsByPush) as? Bool ?? true
+    }
+    /// What the Mac last said, to redraw with when a site icon arrives.
+    private var lastNowPlaying: (playing: NowPlaying?, host: DiscoveredHost)?
+    /// The Mac the status watch is for, to reconnect to it.
+    private var statusPreferredHostID: UUID?
+    /// Status checks in a row that found no Mac to watch; the activity ends after a couple.
+    private var checksWithoutMac = 0
 
     public init(identityLabel: String = "com.pocketdesk.phone.identity",
                 trustStoreURL: URL = SharedStorage.url("paired-macs.json"),
@@ -158,7 +186,38 @@ public final class SessionController {
         guard UserDefaults.standard.bool(forKey: RelayServer.enabledKey) else { return nil }
         return RelayServer(address: RelayServer.savedAddress())
     }
-    public func relaySettingsChanged() { store.send(.hostsChanged(discoveredHosts())) }
+    public func relaySettingsChanged() {
+        store.send(.hostsChanged(discoveredHosts()))
+        store.update(relayHealth: RelayHealthState())
+    }
+
+    /// Runs only while the Remote Access settings view is active. UI cancellation stops checks.
+    public func watchRelayStatus() async {
+        while !Task.isCancelled {
+            await checkRelayStatus()
+            do { try await Task.sleep(for: .seconds(30)) } catch { break }
+        }
+    }
+
+    public func checkRelayStatus() async {
+        guard let server = relayServer else {
+            store.update(relayHealth: RelayHealthState())
+            return
+        }
+        var health = store.relayHealth
+        let checkID = health.begin(server: server)
+        store.update(relayHealth: health)
+        let reachable: Bool
+        do {
+            let identity = try DeviceIdentity.loadOrCreate(label: identityLabel)
+            try await RelayConnection.check(server: server, identity: identity)
+            reachable = true
+        } catch { reachable = false }
+        guard !Task.isCancelled, relayServer == server else { return }
+        health = store.relayHealth
+        health.finish(checkID: checkID, reachable: reachable)
+        store.update(relayHealth: health)
+    }
 
     // MARK: Discovery
 
@@ -350,7 +409,9 @@ public final class SessionController {
                            deviceName: deviceName, viewport: viewport, audioEnabled: audioEnabled,
                            preferredDisplayID: displayPreferences.displayID(for: connectionHostID),
                            clipboardEnabled: clipboardEnabled, quality: quality, relay: invite == nil ? relayServer : nil,
-                           findLocal: { [weak self] in await self?.findNearby(hostID: hostID) }),
+                           findLocal: { [weak self] in await self?.findNearby(hostID: hostID) },
+                           // Not while pairing: the Mac doesn't trust this phone yet.
+                           nowPlayingPush: invite == nil ? nowPlayingPush(for: connectionHostID) : nil),
             display: display
         ) { [weak self] event in
             Task { @MainActor in
@@ -421,6 +482,7 @@ public final class SessionController {
             onCaret(caret)
         case .macStatus(let status):
             store.update(macStatus: status)
+            if case .streaming(let host, _, _) = store.state { showNowPlaying(status.nowPlaying, from: host) }
         case .notice(let text):
             store.post(notice: text)
         case .files(let files):
@@ -642,6 +704,11 @@ public final class SessionController {
 
     // MARK: Shortcuts
 
+    /// Every paired Mac, asleep or not: what a shortcut can be set to run on.
+    public var pairedMacs: [DiscoveredHost] {
+        discoveredHosts().filter { $0.isPaired && $0.hostID != nil }
+    }
+
     /// Paired Macs that are online now, which shortcuts can run on.
     public var reachableMacs: [DiscoveredHost] {
         discoveredHosts().filter { $0.isPaired && ($0.isOnline || $0.canRelay) }
@@ -650,14 +717,21 @@ public final class SessionController {
     /// Runs a shortcut on the Mac being streamed, or connects first (to `preferredHostID`, else
     /// the last Mac used, else any paired Mac that's online) and runs it once the picture is up.
     /// Returns `false`, with a notice posted, when there's no Mac to run it on.
+    /// A shortcut that asks first asks unless `confirmed` (typing its words counts as saying yes).
     @discardableResult
-    public func run(_ shortcut: Shortcut, preferredHostID: UUID? = nil, text: String? = nil) -> Bool {
+    public func run(_ shortcut: Shortcut, preferredHostID: UUID? = nil, text: String? = nil, confirmed: Bool = false) -> Bool {
+        let preferredHostID = shortcut.macID ?? preferredHostID
         if shortcut.action.asksForText, text == nil {
             store.ask(forTextFor: shortcut, preferredHostID: preferredHostID)
             return true
         }
-        let action = text.map(shortcut.action.filling) ?? shortcut.action
-        if case .streaming = store.state, let connection {
+        if shortcut.confirms, !confirmed, text == nil {
+            store.ask(toConfirm: shortcut, preferredHostID: preferredHostID)
+            return true
+        }
+        let action = (text.map(shortcut.action.filling) ?? shortcut.action).fillingClock()
+        // One set to run on another Mac goes there, not to the Mac on screen.
+        if case .streaming = store.state, let connection, shortcut.macID == nil || shortcut.macID == connectionHostID {
             connection.send(.run(action))
             return true
         }
@@ -666,7 +740,7 @@ public final class SessionController {
             return false
         }
         if locks.needsUnlock(host.hostID) {
-            Task { if await unlock(host) { run(shortcut, preferredHostID: host.hostID, text: text) } }
+            Task { if await unlock(host) { run(shortcut, preferredHostID: host.hostID, text: text, confirmed: true) } }
             return true
         }
         if !shortcut.opensStream {
@@ -706,6 +780,7 @@ public final class SessionController {
     /// one is up, else over a quiet connection of its own. Retries while it's wanted.
     public func watchStatus(preferredHostID: UUID?, watcher: String = "shortcuts") {
         statusWatchers.insert(watcher)
+        statusPreferredHostID = preferredHostID
         if case .streaming = store.state, let connection {
             connection.send(.watchStatus)
             return
@@ -714,15 +789,22 @@ public final class SessionController {
         statusTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                if let host = shortcutTarget(preferredHostID: preferredHostID), let hostID = host.hostID,
+                let target = shortcutTarget(preferredHostID: preferredHostID)
+                checksWithoutMac = target == nil ? checksWithoutMac + 1 : 0
+                // Gone for a couple of checks, not just slow to show up after launch.
+                if checksWithoutMac == 2 { present(nowPlaying.macWentAway()) }
+                if let host = target, let hostID = host.hostID,
                    let browsedHost = browsed[host.id], let peer = trustStore.peer(hostID: hostID),
                    let identity = try? DeviceIdentity.loadOrCreate(label: identityLabel) {
                     let updates = ClientConnection.watchStatus(endpoint: browsedHost.endpoint, hostFingerprint: peer.fingerprint,
-                                                               identity: identity, deviceName: deviceName)
+                                                               identity: identity, deviceName: deviceName,
+                                                               nowPlayingPush: nowPlayingPush(for: hostID))
                     do {
                         for try await update in updates {
                             switch update {
-                            case .status(let status): store.update(macStatus: status)
+                            case .status(let status):
+                                store.update(macStatus: status)
+                                showNowPlaying(status.nowPlaying, from: host)
                             case .latency(let latency): store.update(macLatency: latency)
                             case .wallpaper(let jpeg): save(wallpaper: jpeg, for: hostID)
                             }
@@ -741,8 +823,188 @@ public final class SessionController {
         guard statusWatchers.isEmpty else { return }
         statusTask?.cancel()
         statusTask = nil
+        checksWithoutMac = 0
+        // The Live Activity stays: it's for when the app has left the screen.
         store.update(macStatus: nil)
         store.update(macLatency: nil)
+    }
+
+    // MARK: Now Playing Live Activity
+
+    /// Settings › Now Playing changed: the activity starts, ends or redraws to match.
+    public func nowPlayingPreferencesChanged() {
+        present(nowPlaying.setPreferences(NowPlayingActivityPreferences(defaults: .standard)))
+    }
+
+    /// A Lock Screen or Dynamic Island button: play / pause or skip on the Mac the activity is
+    /// for, then catch up with what it's playing now (the app may be running in the background
+    /// only for this).
+    @discardableResult
+    public func pressNowPlaying(_ key: MediaKey) async -> Bool {
+        let sent = await performNowPlayingControl(key) { (shortcut: Shortcut, hostID: UUID) async throws(BackgroundRunError) -> Void in
+            _ = try await self.runInBackground(shortcut, preferredHostID: hostID, allowExistingStream: false)
+        }
+        if sent, statusTask == nil, let hostID = nowPlaying.hostID { await refreshNowPlaying(hostID) }
+        return sent
+    }
+
+    /// Wait for cold-launch adoption, bind the action to that activity's Mac, and roll back
+    /// exactly on failure. The closure is the same acknowledged one-shot path used by Siri.
+    func performNowPlayingControl(_ key: MediaKey,
+        run: @MainActor (Shortcut, UUID) async throws(BackgroundRunError) -> Void) async -> Bool {
+        await nowPlayingQueue?.value
+        let before = nowPlaying
+        guard let hostID = before.hostID, let card = before.card else {
+            await controlDiagnostics.record("noActivity", control: key)
+            return false
+        }
+        let optimistic = nowPlaying.press(key)
+        if optimistic == .end {
+            // End-when-paused must wait for success: an ended activity can't be rolled back.
+            nowPlaying = before
+        } else { present(optimistic) }
+        var shortcut = Shortcut(name: "Now Playing", symbol: "playpause.fill", color: .gray,
+                                action: .media(key), showsMac: false)
+        shortcut.macID = hostID
+        await controlDiagnostics.record("sending", control: key)
+        do throws(BackgroundRunError) {
+            try await run(shortcut, hostID)
+            await controlDiagnostics.record("sent", control: key)
+            return true
+        } catch {
+            nowPlaying = before
+            present(.update(card))
+            await controlDiagnostics.record("failed", control: key, error: error.description)
+            return false
+        }
+    }
+
+    /// Listens to the Mac's status for a moment, long enough for the player to have moved on.
+    private func refreshNowPlaying(_ hostID: UUID, for duration: Duration = .seconds(3)) async {
+        guard let host = shortcutTarget(preferredHostID: hostID), host.hostID == hostID,
+              let peer = trustStore.peer(hostID: hostID),
+              let identity = try? DeviceIdentity.loadOrCreate(label: identityLabel) else { return }
+        let updates = ClientConnection.watchStatus(endpoint: browsed[host.id]?.endpoint, hostFingerprint: peer.fingerprint,
+                                                   identity: identity, deviceName: deviceName, relay: relayServer)
+        let reader = Task {
+            do {
+                for try await case .status(let status) in updates { showNowPlaying(status.nowPlaying, from: host) }
+            } catch {}
+        }
+        try? await Task.sleep(for: duration)
+        reader.cancel()
+    }
+
+    private func showNowPlaying(_ playing: NowPlaying?, from host: DiscoveredHost) {
+        guard nowPlayingPresenter != nil, let hostID = host.hostID else { return }
+        lastNowPlaying = (playing, host)
+        if let base64 = playing?.artwork, nowPlayingArtwork?.base64 != base64, let jpeg = Data(base64Encoded: base64) {
+            nowPlayingArtwork = (base64, NowPlayingArtwork.id(for: jpeg), jpeg, NowPlayingArtwork.averageColor(of: jpeg))
+        }
+        let artwork = playing?.artwork != nil && nowPlayingArtwork?.base64 == playing?.artwork ? nowPlayingArtwork : nil
+        let siteIcon = playing?.site.flatMap { siteIcons[$0] ?? nil }
+        if let site = playing?.site, siteIcons.index(forKey: site) == nil {
+            if let tint = NowPlayingArtwork.siteTints()[site] { siteIcons[site] = (NowPlayingCard.siteIconID(for: site), tint) }
+            else { fetchSiteIcon(site) }
+        }
+        present(nowPlaying.receive(playing, from: hostID, macName: host.name, artworkID: artwork?.id, tint: artwork?.tint,
+                                   siteIconID: siteIcon?.id, siteTint: siteIcon?.tint))
+    }
+
+    /// The site's own icon (the same loader website tiles use), then a redraw.
+    private func fetchSiteIcon(_ site: String) {
+        siteIcons[site] = .some(nil)
+        Task {
+            guard let data = await FaviconLoader.shared.icon(for: "https://\(site)"),
+                  let png = NowPlayingArtwork.icon(from: data) else { return }
+            let tint = NowPlayingArtwork.averageColor(of: png)
+            guard (try? NowPlayingArtwork.saveSiteIcon(png, tint: tint, for: site)) != nil else { return }
+            siteIcons[site] = (NowPlayingCard.siteIconID(for: site), tint)
+            if let last = lastNowPlaying, last.playing?.site == site { showNowPlaying(last.playing, from: last.host) }
+        }
+    }
+
+    private func present(_ step: NowPlayingActivityStep) {
+        guard step != .none, let presenter = nowPlayingPresenter else { return }
+        let card: NowPlayingCard? = switch step {
+        case .start(_, let card), .update(let card), .replace(_, let card): card
+        case .none, .end: nil
+        }
+        var images: [String: Data] = [:]
+        if let id = card?.artworkID, id == nowPlayingArtwork?.id { images[id] = nowPlayingArtwork?.jpeg }
+        let previous = nowPlayingQueue
+        nowPlayingQueue = Task {
+            await previous?.value
+            await presenter.apply(step, images: images)
+        }
+    }
+
+    private func adoptNowPlayingActivity() {
+        guard let presenter = nowPlayingPresenter else { return }
+        let previous = nowPlayingQueue
+        nowPlayingQueue = Task {
+            await previous?.value
+            if let running = await presenter.adopt() { nowPlaying.adopt(hostID: running.hostID, card: running.card) }
+            await presenter.watchPushTokens { [weak self] tokens in
+                Task { @MainActor in self?.pushTokensChanged(tokens) }
+            }
+        }
+    }
+
+    /// The Mac learns new tokens from a connection's `Hello`: a status watch that's already up
+    /// reconnects so it hears them now rather than next time.
+    private func pushTokensChanged(_ tokens: NowPlayingPushTokens) {
+        guard tokens != nowPlayingPushTokens else { return }
+        nowPlayingPushTokens = tokens
+        // A card a Mac started by push: follow it, so the app updates it rather than starting another.
+        if nowPlaying.card == nil, let showing = tokens.showing { nowPlaying.adopt(hostID: showing.hostID, card: showing.card) }
+        guard statusTask != nil else {
+            // Woken in the background for a card a Mac started: tell that Mac how to update it.
+            if tokens.activity != nil { sendNowPlayingPush(to: tokens.showing?.hostID) }
+            return
+        }
+        statusTask?.cancel()
+        statusTask = nil
+        if let watcher = statusWatchers.first { watchStatus(preferredHostID: statusPreferredHostID, watcher: watcher) }
+    }
+
+    private var pushRegistration: Task<Void, Never>?
+
+    /// A short connection that only says hello, carrying the push tokens, then hangs up.
+    private func sendNowPlayingPush(to preferredHostID: UUID?) {
+        pushRegistration?.cancel()
+        pushRegistration = Task {
+            startDiscovery()
+            guard let host = await waitForTarget(preferredHostID: preferredHostID ?? lastHost?.hostID, for: .seconds(6)),
+                  let hostID = host.hostID, let peer = trustStore.peer(hostID: hostID),
+                  let identity = try? DeviceIdentity.loadOrCreate(label: identityLabel), !Task.isCancelled else { return }
+            let updates = ClientConnection.watchStatus(endpoint: browsed[host.id]?.endpoint, hostFingerprint: peer.fingerprint,
+                                                       identity: identity, deviceName: deviceName, relay: relayServer,
+                                                       nowPlayingPush: nowPlayingPush(for: hostID))
+            // The Mac has the hello once it answers.
+            let reader = Task {
+                do { for try await _ in updates { break } } catch {}
+            }
+            try? await Task.sleep(for: .seconds(4))
+            reader.cancel()
+        }
+    }
+
+    /// What a Mac needs to start and update the activity by push, for its `Hello`. `nil`
+    /// (nothing to change) until Apple has issued a token; a withdrawal when it's switched off.
+    func nowPlayingPush(for hostID: UUID?) -> NowPlayingPush? {
+        guard nowPlayingPresenter != nil, let bundleID = Bundle.main.bundleIdentifier else { return nil }
+        let preferences = NowPlayingActivityPreferences(defaults: .standard)
+        guard preferences.isEnabled, startsNowPlayingByPush else {
+            return NowPlayingPush(startToken: nil, environment: pushEnvironment, bundleID: bundleID, preferences: preferences)
+        }
+        guard let start = nowPlayingPushTokens.start else { return nil }
+        let mine = hostID != nil && nowPlaying.hostID == hostID
+        return NowPlayingPush(startToken: start, activityToken: mine ? nowPlayingPushTokens.activity : nil,
+                              showing: mine ? nowPlaying.card : nil, environment: pushEnvironment, bundleID: bundleID,
+                              preferences: preferences,
+                              siteTints: Dictionary(uniqueKeysWithValues: NowPlayingArtwork.siteTints()
+                                  .sorted { $0.key < $1.key }.prefix(NowPlayingPush.maxSiteTints).map { ($0.key, $0.value) }))
     }
 
     // MARK: Locks
@@ -1072,24 +1334,27 @@ public final class SessionController {
 
     /// `runInBackground(_:preferredHostID:text:)` for a shortcut that needn't be saved.
     public func runInBackground(_ shortcut: Shortcut, preferredHostID: UUID?,
-                                text: String? = nil) async throws(BackgroundRunError) -> String {
+                                text: String? = nil, allowExistingStream: Bool = true) async throws(BackgroundRunError) -> String {
+        let preferredHostID = shortcut.macID ?? preferredHostID
         if shortcut.action.asksForText, text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
             throw .needsText
         }
-        let action = text.map(shortcut.action.filling) ?? shortcut.action
-        if case .streaming(let host, _, _) = store.state, let connection {
+        let action = (text.map(shortcut.action.filling) ?? shortcut.action).fillingClock()
+        if allowExistingStream, case .streaming(let host, _, _) = store.state, let connection,
+           shortcut.macID == nil || shortcut.macID == host.hostID {
             connection.send(.run(action))
             return host.name
         }
 
         startDiscovery()
-        var host = await waitForTarget(preferredHostID: preferredHostID, for: .seconds(4))
+        var host = await waitForTarget(preferredHostID: preferredHostID, for: .seconds(4), exact: shortcut.macID != nil)
         if host == nil, let sleeper = wakeCandidate(preferredHostID: preferredHostID),
-           let info = wakeBook[sleeper] {
+           shortcut.macID == nil || sleeper == shortcut.macID, let info = wakeBook[sleeper] {
             for _ in 0..<3 { await Task.detached { WakeSender.wake(info) }.value }
-            host = await waitForTarget(preferredHostID: sleeper, for: .seconds(25))
+            host = await waitForTarget(preferredHostID: sleeper, for: .seconds(25), exact: shortcut.macID != nil)
         }
         guard let host, let hostID = host.hostID,
+              shortcut.macID == nil || hostID == shortcut.macID,
               let peer = trustStore.peer(hostID: hostID) else { throw .noMac }
         guard await unlock(host) else { throw .locked(host.name) }
         do {
@@ -1103,10 +1368,11 @@ public final class SessionController {
         return host.name
     }
 
-    private func waitForTarget(preferredHostID: UUID?, for timeout: Duration) async -> DiscoveredHost? {
+    private func waitForTarget(preferredHostID: UUID?, for timeout: Duration, exact: Bool = false) async -> DiscoveredHost? {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
-            if let host = shortcutTarget(preferredHostID: preferredHostID) { return host }
+            if let host = shortcutTarget(preferredHostID: preferredHostID),
+               !exact || host.hostID == preferredHostID { return host }
             try? await Task.sleep(for: .milliseconds(200))
         }
         return nil

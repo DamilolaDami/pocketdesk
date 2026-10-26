@@ -1,3 +1,4 @@
+use crate::apns::{self, Apns};
 use crate::protocol::{self, Message};
 use quinn::Connection;
 use sha2::{Digest, Sha256};
@@ -20,7 +21,12 @@ struct Host {
     connection: Connection,
     outbox: Outbox,
     allowed: HashSet<String>,
+    /// Pushes this minute, at most `MAX_PUSHES`.
+    pushes: (Instant, usize),
 }
+
+/// Live Activity pushes per Mac per minute: a song change every few seconds, with room to spare.
+const MAX_PUSHES: usize = 60;
 struct Session {
     host: String,
     phone: String,
@@ -80,11 +86,13 @@ impl State {
 }
 pub struct Relay {
     state: Mutex<State>,
+    apns: Option<Arc<Apns>>,
 }
 impl Relay {
-    pub fn new() -> Self {
+    pub fn new(apns: Option<Arc<Apns>>) -> Self {
         Self {
             state: Mutex::new(State::default()),
+            apns,
         }
     }
     pub async fn serve(self: Arc<Self>, connection: Connection) {
@@ -196,13 +204,29 @@ impl Relay {
         state.prune();
         match message {
             Message::Register { .. } => {
-                anyhow::ensure!(!state.hosts.contains_key(fp), "already registered");
+                if let Some(old) = state.hosts.get(fp) {
+                    anyhow::ensure!(
+                        old.connection.stable_id() != conn.stable_id(),
+                        "already registered"
+                    );
+                    old.connection.close(0u32.into(), b"replaced");
+                    let ids: Vec<_> = state
+                        .sessions
+                        .iter()
+                        .filter(|(_, s)| s.host == fp)
+                        .map(|(id, _)| *id)
+                        .collect();
+                    for id in ids {
+                        state.remove(id);
+                    }
+                }
                 state.hosts.insert(
                     fp.into(),
                     Host {
                         connection: conn.clone(),
                         outbox: out.clone(),
                         allowed: HashSet::new(),
+                        pushes: (Instant::now(), 0),
                     },
                 );
                 out.try_send(Message::Pong)?;
@@ -293,6 +317,66 @@ impl Relay {
             Message::Ping => {
                 out.try_send(Message::Pong)?;
             }
+            Message::Push {
+                id,
+                phone,
+                token,
+                environment,
+                topic,
+                payload,
+                priority,
+            } => {
+                let host = state
+                    .hosts
+                    .get_mut(fp)
+                    .filter(|h| h.connection.stable_id() == conn.stable_id())
+                    .ok_or_else(|| anyhow::anyhow!("register first"))?;
+                let refuse = |status: u16, reason: &str| {
+                    out.try_send(Message::Pushed {
+                        id,
+                        status,
+                        reason: Some(reason.into()),
+                    })
+                    .map_err(|_| anyhow::anyhow!("control output full"))
+                };
+                let Some(apns) = self.apns.clone() else {
+                    refuse(503, "pushUnavailable")?;
+                    return Ok(());
+                };
+                if let Err(reason) = apns::check(
+                    host.allowed.contains(&phone),
+                    &token,
+                    &environment,
+                    &topic,
+                    &payload,
+                    &apns.topics,
+                    priority,
+                ) {
+                    refuse(400, reason)?;
+                    return Ok(());
+                }
+                if host.pushes.0.elapsed() >= Duration::from_secs(60) {
+                    host.pushes = (Instant::now(), 0);
+                }
+                if host.pushes.1 >= MAX_PUSHES {
+                    refuse(429, "pushLimit")?;
+                    return Ok(());
+                }
+                host.pushes.1 += 1;
+                let out = out.clone();
+                tokio::spawn(async move {
+                    let (status, reason) = apns
+                        .send(
+                            environment == "sandbox",
+                            &token,
+                            &topic,
+                            payload,
+                            priority.unwrap_or(10),
+                        )
+                        .await;
+                    let _ = out.try_send(Message::Pushed { id, status, reason });
+                });
+            }
             _ => anyhow::bail!("unexpected control message"),
         }
         Ok(())
@@ -354,7 +438,16 @@ mod tests {
     }
     impl Peer {
         async fn new(addr: SocketAddr, root: CertificateDer<'static>) -> Self {
-            let (cert, key) = identity();
+            Self::with_identity(addr, root, identity()).await
+        }
+        async fn with_identity(
+            addr: SocketAddr,
+            root: CertificateDer<'static>,
+            (cert, key): (
+                CertificateDer<'static>,
+                rustls::pki_types::PrivateKeyDer<'static>,
+            ),
+        ) -> Self {
             let fp = hex::encode(Sha256::digest(cert.as_ref()));
             let mut roots = rustls::RootCertStore::empty();
             roots.add(root).unwrap();
@@ -405,6 +498,162 @@ mod tests {
         }
     }
 
+    async fn listen(relay: Arc<Relay>) -> (SocketAddr, CertificateDer<'static>) {
+        let (cert, key) = identity();
+        let endpoint = quinn::Endpoint::server(
+            crate::tls::server(vec![cert.clone()], key).unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .unwrap();
+        let addr = endpoint.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Some(incoming) = endpoint.accept().await {
+                let relay = relay.clone();
+                tokio::spawn(async move {
+                    if let Ok(c) = incoming.await {
+                        relay.serve(c).await;
+                    }
+                });
+            }
+        });
+        (addr, cert)
+    }
+
+    fn push(phone: &str, topic: &str) -> Message {
+        Message::Push {
+            id: Uuid::new_v4(),
+            phone: phone.into(),
+            token: "ab".repeat(40),
+            environment: "sandbox".into(),
+            topic: topic.into(),
+            payload: r#"{"aps":{"event":"start"}}"#.into(),
+            priority: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn pushes_only_for_allowed_phones_and_the_operators_apps() {
+        use p256::pkcs8::EncodePrivateKey;
+        let key = p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let pem = key.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).unwrap();
+        let topic = "app.pocketdesk.app.push-type.liveactivity";
+        let apns = Apns::new(&pem, "KEYID", "TEAMID", [topic.to_owned()].into()).unwrap();
+        let (addr, cert) = listen(Arc::new(Relay::new(Some(Arc::new(apns))))).await;
+        let mut host = Peer::new(addr, cert.clone()).await;
+        host.send(Message::Register {
+            host_id: Uuid::new_v4(),
+        })
+        .await;
+        assert!(matches!(host.next().await, Message::Pong));
+        let paired = "cd".repeat(32);
+        host.send(Message::Allow {
+            fingerprints: vec![paired.clone()],
+        })
+        .await;
+        assert!(matches!(host.next().await, Message::Pong));
+        // A phone this Mac doesn't allow: nothing goes to Apple.
+        host.send(push(&"ef".repeat(32), topic)).await;
+        assert!(
+            matches!(host.next().await, Message::Pushed { status: 400, reason: Some(r), .. } if r == "notPaired")
+        );
+        // Someone else's app.
+        host.send(push(&paired, "com.other.app.push-type.liveactivity"))
+            .await;
+        assert!(
+            matches!(host.next().await, Message::Pushed { status: 400, reason: Some(r), .. } if r == "badTopic")
+        );
+        // A connection that never registered as a Mac can't push at all.
+        let mut stranger = Peer::new(addr, cert).await;
+        stranger.send(push(&paired, topic)).await;
+        assert!(
+            tokio::time::timeout(Duration::from_secs(3), protocol::read(&mut stranger.recv))
+                .await
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn without_a_key_pushes_are_refused() {
+        let (addr, cert) = listen(Arc::new(Relay::new(None))).await;
+        let mut host = Peer::new(addr, cert).await;
+        host.send(Message::Register {
+            host_id: Uuid::new_v4(),
+        })
+        .await;
+        assert!(matches!(host.next().await, Message::Pong));
+        host.send(push(
+            &"cd".repeat(32),
+            "app.pocketdesk.app.push-type.liveactivity",
+        ))
+        .await;
+        assert!(
+            matches!(host.next().await, Message::Pushed { status: 503, reason: Some(r), .. } if r == "pushUnavailable")
+        );
+    }
+
+    #[tokio::test]
+    async fn replacement_registration_closes_old_sessions_and_keeps_new_host() {
+        let relay = Arc::new(Relay::new(None));
+        let (addr, root) = listen(relay.clone()).await;
+        let (cert, key) = identity();
+        let mut old =
+            Peer::with_identity(addr, root.clone(), (cert.clone(), key.clone_key())).await;
+        let mut phone = Peer::new(addr, root.clone()).await;
+        old.send(Message::Register {
+            host_id: Uuid::new_v4(),
+        })
+        .await;
+        assert!(matches!(old.next().await, Message::Pong));
+        old.send(Message::Allow {
+            fingerprints: vec![phone.fp.clone()],
+        })
+        .await;
+        assert!(matches!(old.next().await, Message::Pong));
+        phone
+            .send(Message::Connect {
+                host: old.fp.clone(),
+            })
+            .await;
+        let Message::Ready { session } = phone.next().await else {
+            panic!("expected ready")
+        };
+        assert!(matches!(old.next().await, Message::Incoming { .. }));
+        let mut new = Peer::with_identity(addr, root, (cert, key)).await;
+        new.send(Message::Register {
+            host_id: Uuid::new_v4(),
+        })
+        .await;
+        assert!(matches!(new.next().await, Message::Pong));
+        assert!(matches!(phone.next().await, Message::Close { session: s } if s == session));
+        tokio::time::timeout(Duration::from_secs(3), old.conn.closed())
+            .await
+            .unwrap();
+        // Wait for the old serve's cleanup; it must not erase the new registration.
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        new.send(Message::Allow {
+            fingerprints: vec![phone.fp.clone()],
+        })
+        .await;
+        assert!(matches!(new.next().await, Message::Pong));
+        phone
+            .send(Message::Connect {
+                host: new.fp.clone(),
+            })
+            .await;
+        assert!(matches!(phone.next().await, Message::Ready { .. }));
+        assert!(matches!(new.next().await, Message::Incoming { .. }));
+        new.send(Message::Register {
+            host_id: Uuid::new_v4(),
+        })
+        .await;
+        tokio::time::timeout(Duration::from_secs(3), new.conn.closed())
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn quic_forwarding_authorization_revocation_and_disconnect() {
         let (cert, key) = identity();
@@ -414,7 +663,7 @@ mod tests {
         )
         .unwrap();
         let addr = endpoint.local_addr().unwrap();
-        let relay = Arc::new(Relay::new());
+        let relay = Arc::new(Relay::new(None));
         let r = relay.clone();
         let accept = tokio::spawn(async move {
             while let Some(incoming) = endpoint.accept().await {

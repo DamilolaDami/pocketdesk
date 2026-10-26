@@ -187,7 +187,7 @@ public actor ClientConnection {
             group.addTask {
                 for try await message in session.controlMessages {
                     switch message {
-                    case .fileAccepted, .fileOffer, .fileProgress, .fileSaved, .fileFailed, .fileList:
+                    case .fileAccepted, .fileOffer, .fileProgress, .fileSaved, .fileFailed, .fileList, .fileMutationResult:
                         await files.receive(message)
                     case .helloAck(let ack):
                         onEvent(.displays(ack.displays))
@@ -210,7 +210,7 @@ public actor ClientConnection {
                     case .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .getClipboard, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon,
                          .listMacShortcuts, .macShortcuts, .watchStatus, .watchMenus, .pressMenuItem, .setQuality,
-                         .sendFile, .getFile, .fileData, .listFiles:
+                         .sendFile, .getFile, .fileData, .listFiles, .mutateFile:
                         continue
                     }
                 }

@@ -15,6 +15,7 @@ actor HostFileTransfers {
         /// Where unfinished ones wait to be resumed.
         var incoming: URL
         var shared: @Sendable () -> SharedFolders
+        var mutations: FileMutations = .shared
 
         static var standard: Folders {
             let files = FileManager.default
@@ -42,13 +43,16 @@ actor HostFileTransfers {
     /// The file messages; anything else is the caller's.
     static func handles(_ message: ControlMessage) -> Bool {
         switch message {
-        case .sendFile, .getFile, .fileProgress, .fileFailed, .listFiles: true
+        case .sendFile, .getFile, .fileProgress, .fileFailed, .listFiles, .mutateFile: true
         default: false
         }
     }
 
     func handle(_ message: ControlMessage) async {
         switch message {
+        case .mutateFile(let request):
+            let result = await folders.mutations.apply(request, folders: folders.shared)
+            try? await session.send(.fileMutationResult(result))
         case .listFiles(let path):
             let list = folders.shared().list(path)
             try? await session.send(.fileList(list))

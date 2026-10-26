@@ -16,13 +16,14 @@ struct FileTransferEndToEndTests {
     var phoneFolder: URL { root.appending(path: "Phone") }
 
     /// A streaming-less session with `MacFiles` wired to it, as `ClientConnection.openFiles` does.
-    func withMac(shared: Set<SharedFolder> = [.desktop], _ body: (MacFiles) async throws -> Void) async throws {
+    func withMac(shared: Set<SharedFolder> = [.desktop], writable: Set<SharedFolder> = [],
+                 mutations: FileMutations = .shared, _ body: (MacFiles) async throws -> Void) async throws {
         try FileManager.default.createDirectory(at: desktop, withIntermediateDirectories: true)
         let (hostEnd, phone) = LoopbackSession.pair()
         var configuration = HostSession.Configuration(hostName: "Test")
         let locations: [SharedFolder: URL] = [.desktop: desktop]
         configuration.files = .init(downloads: downloads, incoming: root.appending(path: "Incoming"),
-                                    shared: { SharedFolders(enabled: shared, locations: locations) })
+                                    shared: { SharedFolders(enabled: shared, writable: writable, locations: locations) }, mutations: mutations)
         let session = HostSession(session: hostEnd, peer: Fingerprint(bytes: Data(repeating: 6, count: 32)),
                                   configuration: configuration, frameSource: SyntheticFrameSource(),
                                   input: RecordingInputSink(), pairing: TrustEveryone(), clipboard: FakeClipboard())

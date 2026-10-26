@@ -153,6 +153,10 @@ private struct FolderView: View {
     /// Fetches under way, by file name: how far along.
     @State private var fetching: [String: Double] = [:]
     @State private var preview: URL?
+    @State private var naming: FileNameEdit?
+    @State private var moving: FileEntry?
+    @State private var trashing: FileEntry?
+    @State private var changing = false
 
     var body: some View {
         let entries = options.applying(to: list?.entries ?? [])
@@ -160,16 +164,25 @@ private struct FolderView: View {
             if let list, !list.entries.isEmpty {
                 Section {
                     ForEach(entries) { entry in
-                        if entry.isFolder {
-                            NavigationLink(value: entry.isFolder && path.root == nil
-                                           ? FolderPath(root: SharedFolder.allCases.first { $0.name == entry.name })
-                                           : path.appending(entry.name)) {
-                                FileRow(entry: entry, progress: nil)
+                        Group {
+                            if entry.isFolder {
+                                NavigationLink(value: entry.isFolder && path.root == nil
+                                               ? FolderPath(root: SharedFolder.allCases.first { $0.name == entry.name })
+                                               : path.appending(entry.name)) {
+                                    FileRow(entry: entry, progress: nil)
+                                }
+                            } else {
+                                Button { fetch(entry) } label: { FileRow(entry: entry, progress: fetching[entry.name]) }
+                                    .foregroundStyle(.primary)
+                                    .disabled(fetching[entry.name] != nil)
                             }
-                        } else {
-                            Button { fetch(entry) } label: { FileRow(entry: entry, progress: fetching[entry.name]) }
-                                .foregroundStyle(.primary)
-                                .disabled(fetching[entry.name] != nil)
+                        }
+                        .contextMenu {
+                            if list.canWrite, entry.revision != nil {
+                                Button("Rename", systemImage: "pencil") { naming = .rename(entry, in: path) }
+                                Button("Move…", systemImage: "folder") { moving = entry }
+                                Button("Move to Trash…", systemImage: "trash", role: .destructive) { trashing = entry }
+                            }
                         }
                     }
                 } header: {
@@ -182,10 +195,12 @@ private struct FolderView: View {
                 } footer: {
                     if path.root != nil {
                         Text("Search and filters apply to this folder only.")
+                        if !list.canWrite { Text("Read-only. Allow file changes from PocketDesk's Mac menu to organize these files.") }
                     }
                 }
             }
         }
+        .disabled(changing)
         .overlay {
             if let problem = list?.problem ?? problem {
                 ContentUnavailableView(path.root == nil ? "Nothing Shared" : "Can't Open", systemImage: "folder.badge.questionmark",
@@ -214,17 +229,59 @@ private struct FolderView: View {
         .toolbar {
             if path.root != nil {
                 ToolbarItem(placement: .topBarTrailing) { filterMenu }
+                if list?.canWrite == true {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("New Folder", systemImage: "folder.badge.plus") { naming = .create(in: path) }
+                    }
+                }
             }
         }
         .refreshable { await load() }
         .task { await load() }
         // Quick Look, with Share › Save to Files to keep it.
         .quickLookPreview($preview)
-        .alert("Couldn’t Download", isPresented: Binding(get: { downloadProblem != nil }, set: { if !$0 { downloadProblem = nil } })) {
+        .sheet(item: $naming) { edit in
+            FileNameSheet(edit: edit) { action in await change(action) }
+        }
+        .sheet(item: $moving) { entry in
+            if let revision = entry.revision {
+                FileMoveSheet(files: files, item: .init(path: path.appending(entry.name), revision: revision)) { action in
+                    await change(action)
+                }
+            }
+        }
+        .confirmationDialog("Move “\(trashing?.name ?? "")” to the Mac's Trash?",
+                            isPresented: Binding(get: { trashing != nil }, set: { if !$0 { trashing = nil } }),
+                            titleVisibility: .visible) {
+            if let entry = trashing, let revision = entry.revision {
+                Button("Move to Trash", role: .destructive) {
+                    Task {
+                        let result = await change(.trash(.init(path: path.appending(entry.name), revision: revision)))
+                        if let result { downloadProblem = result.message ?? "The Mac couldn't move “\(entry.name)” to Trash." }
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { trashing = nil }
+        } message: {
+            Text("You can recover it from Trash on the Mac. Folders include everything inside them.")
+        }
+        .alert("Couldn’t Complete Action", isPresented: Binding(get: { downloadProblem != nil }, set: { if !$0 { downloadProblem = nil } })) {
             Button("OK", role: .cancel) { downloadProblem = nil }
         } message: {
             Text(downloadProblem ?? "")
         }
+    }
+
+    /// Always refresh after an attempt, including a rejected or unconfirmed change.
+    /// A nil result means confirmed success; errors leave the editor open for correction.
+    private func change(_ action: FileMutation.Action) async -> FileMutationResult? {
+        changing = true
+        defer { changing = false }
+        let result: FileMutationResult
+        do { result = try await files.mutate(action) }
+        catch { result = .init(id: 0, problem: .failed, message: String(describing: error)) }
+        await load()
+        return result.problem == nil ? nil : result
     }
 
     private var filterMenu: some View {

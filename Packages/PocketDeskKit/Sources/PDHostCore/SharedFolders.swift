@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import Darwin
 import PDProtocol
 
 /// The folders the person at the Mac shares with their phones, chosen in the menu bar panel.
@@ -7,26 +8,38 @@ import PDProtocol
 /// only, and nothing that leads out of it (`..`, or a link to somewhere else).
 public struct SharedFolders: Sendable, Equatable {
     public var enabled: Set<SharedFolder>
+    public var writable: Set<SharedFolder>
     /// Where each shared folder is (the user's own, outside tests).
     public var locations: [SharedFolder: URL]
 
-    public init(enabled: Set<SharedFolder>, locations: [SharedFolder: URL] = SharedFolders.userLocations) {
+    public init(enabled: Set<SharedFolder>, writable: Set<SharedFolder> = [], locations: [SharedFolder: URL] = SharedFolders.userLocations) {
         self.enabled = enabled
+        self.writable = writable.intersection(enabled)
         self.locations = locations
     }
 
     public static let defaultsKey = "sharedFolders"
+    public static let writableKey = "writableSharedFolders"
 
     /// As chosen in the menu bar panel.
     public static var current: SharedFolders {
         let names = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
-        return SharedFolders(enabled: Set(names.compactMap(SharedFolder.init(rawValue:))))
+        let writable = UserDefaults.standard.stringArray(forKey: writableKey) ?? []
+        return SharedFolders(enabled: Set(names.compactMap(SharedFolder.init(rawValue:))),
+                             writable: Set(writable.compactMap(SharedFolder.init(rawValue:))))
     }
 
     public static func setShared(_ folder: SharedFolder, _ shared: Bool) {
         var enabled = current.enabled
         if shared { enabled.insert(folder) } else { enabled.remove(folder) }
         UserDefaults.standard.set(enabled.map(\.rawValue).sorted(), forKey: defaultsKey)
+        if !shared { setWritable(folder, false) }
+    }
+
+    public static func setWritable(_ folder: SharedFolder, _ writable: Bool) {
+        var folders = current.writable
+        if writable, current.enabled.contains(folder) { folders.insert(folder) } else { folders.remove(folder) }
+        UserDefaults.standard.set(folders.map(\.rawValue).sorted(), forKey: writableKey)
     }
 
     public static var userLocations: [SharedFolder: URL] {
@@ -90,13 +103,15 @@ public struct SharedFolders: Sendable, Equatable {
             // Packages (an app, some Keynote files) are folders on disk, so they show as folders.
             return FileEntry(name: url.lastPathComponent, isFolder: values.isDirectory == true,
                              size: UInt64(values.fileSize ?? 0),
-                             modified: Int64(values.contentModificationDate?.timeIntervalSince1970 ?? 0))
+                             modified: Int64(values.contentModificationDate?.timeIntervalSince1970 ?? 0),
+                             revision: FileMutationAccess.revision(at: url))
         }
         .sorted { a, b in
             if a.isFolder != b.isFolder { return a.isFolder }
             return a.name.localizedStandardCompare(b.name) == .orderedAscending
         }
-        return FileList(path: path, entries: Array(entries.prefix(FileList.maxEntries)))
+        return FileList(path: path, entries: Array(entries.prefix(FileList.maxEntries)),
+                        canWrite: (try? FileMutationAccess.directory(path, in: self)).map { fd in close(fd); return true } ?? false)
     }
 }
 #endif

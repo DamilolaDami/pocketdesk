@@ -37,11 +37,16 @@ public actor MacFiles: Equatable {
     private var uploads: [UInt64: Upload] = [:]
     private var downloads: [UInt64: Download] = [:]
     private var ended: (any Error)?
+    private var mutations: [UInt64: CheckedContinuation<FileMutationResult, any Error>] = [:]
+    private var listGenerations: [FolderPath: UUID] = [:]
+    private let requestTimeout: Duration
 
     public init(folder: URL = URL.cachesDirectory.appending(path: "PocketDesk/Files"),
+                requestTimeout: Duration = .seconds(30),
                 send: @escaping @Sendable (ControlMessage) async throws -> Void,
                 sendChunk: @escaping @Sendable (FileChunk) async throws -> Void) {
         self.folder = folder
+        self.requestTimeout = requestTimeout
         self.send = send
         self.sendChunk = sendChunk
     }
@@ -53,12 +58,49 @@ public actor MacFiles: Equatable {
         return try await withCheckedThrowingContinuation { continuation in
             lists[path, default: []].append(continuation)
             if lists[path]?.count == 1 {
-                Task { try? await self.send(.listFiles(path)) }
+                let generation = UUID()
+                listGenerations[path] = generation
+                Task {
+                    do { try await self.send(.listFiles(path)) }
+                    catch { self.finishList(path, generation: generation, error: error) }
+                }
+                Task {
+                    try? await Task.sleep(for: requestTimeout)
+                    self.finishList(path, generation: generation, error: FileTransferError.stopped("The Mac didn't answer. Reconnect and refresh the folder."))
+                }
             }
         }
     }
 
+    private func finishList(_ path: FolderPath, generation: UUID, error: any Error) {
+        guard listGenerations[path] == generation else { return }
+        listGenerations[path] = nil
+        for waiter in lists.removeValue(forKey: path) ?? [] { waiter.resume(throwing: error) }
+    }
+
     // MARK: Sending
+
+    /// Each request runs once. A lost response is an unknown outcome; refresh instead of
+    /// retrying a destructive action automatically.
+    public func mutate(_ action: FileMutation.Action) async throws -> FileMutationResult {
+        if let ended { throw ended }
+        let id = UInt64.random(in: 1...UInt64.max)
+        return try await withCheckedThrowingContinuation { continuation in
+            mutations[id] = continuation
+            Task {
+                do { try await self.send(.mutateFile(.init(id: id, action: action))) }
+                catch { self.finishMutation(id, error: error) }
+            }
+            Task {
+                try? await Task.sleep(for: requestTimeout)
+                self.finishMutation(id, error: FileTransferError.stopped("The Mac didn't confirm this change. Refresh the folder to check what happened before trying again."))
+            }
+        }
+    }
+
+    private func finishMutation(_ id: UInt64, error: any Error) {
+        mutations.removeValue(forKey: id)?.resume(throwing: error)
+    }
 
     /// Sends the file at `url` to the Mac's Downloads folder as `name`. Using the same `id`
     /// again resumes a transfer that was cut off.
@@ -125,14 +167,17 @@ public actor MacFiles: Equatable {
     /// The file messages; anything else is the caller's.
     public static func handles(_ message: ControlMessage) -> Bool {
         switch message {
-        case .fileAccepted, .fileOffer, .fileProgress, .fileSaved, .fileFailed, .fileList: true
+        case .fileAccepted, .fileOffer, .fileProgress, .fileSaved, .fileFailed, .fileList, .fileMutationResult: true
         default: false
         }
     }
 
     public func receive(_ message: ControlMessage) async {
         switch message {
+        case .fileMutationResult(let result):
+            mutations.removeValue(forKey: result.id)?.resume(returning: result)
         case .fileList(let list):
+            listGenerations[list.path] = nil
             for waiter in lists.removeValue(forKey: list.path) ?? [] { waiter.resume(returning: list) }
         case .fileAccepted(let id, let offset):
             guard var upload = uploads[id] else { return }
@@ -194,8 +239,11 @@ public actor MacFiles: Equatable {
     /// The connection is gone: everything in flight stops (fetches keep what they have).
     public func end(_ error: any Error = TransportError.closed) async {
         ended = error
+        for (_, waiter) in mutations { waiter.resume(throwing: error) }
+        mutations = [:]
         for (_, waiters) in lists { for waiter in waiters { waiter.resume(throwing: error) } }
         lists = [:]
+        listGenerations = [:]
         for (_, upload) in uploads {
             await upload.sender.stop(.cancelled)
             upload.progress.finish(throwing: error)

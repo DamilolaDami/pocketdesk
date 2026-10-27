@@ -93,6 +93,7 @@ public actor HostService: PairingAuthority {
     private let makeSessionInput: @Sendable () -> any InputSink
     private let onEvent: @Sendable (HostEvent) -> Void
     private let keepAwake: KeepAwake?
+    private let hostUpdater: (any HostUpdating)?
     private let virtualDisplays: VirtualDisplayService?
 
     private var trustStore: TrustStore
@@ -117,8 +118,9 @@ public actor HostService: PairingAuthority {
                 input: any InputSink,
                 makeSessionInput: (@Sendable () -> any InputSink)? = nil,
                 keepAwake: KeepAwake? = nil,
-                virtualDisplays: VirtualDisplayService? = nil,
+                virtualDisplays: VirtualDisplayService? = nil, hostUpdater: (any HostUpdating)? = nil,
                 onEvent: @escaping @Sendable (HostEvent) -> Void) throws {
+        self.hostUpdater = hostUpdater
         self.keepAwake = keepAwake
         self.virtualDisplays = virtualDisplays
         self.configuration = configuration
@@ -446,7 +448,7 @@ public actor HostService: PairingAuthority {
             configuration: .init(hostName: configuration.hostName, wake: WakeAddresses.current(),
                                  wallpaper: await DesktopWallpaper.current()),
             frameSource: makeFrameSource(), input: makeSessionInput(), pairing: self, clipboard: clipboard, keepAwake: keepAwake,
-            virtualDisplays: virtualDisplays, viewingSessionID: id
+            virtualDisplays: virtualDisplays, hostUpdater: hostUpdater, viewingSessionID: id
         ) { [onEvent, started] event in
             switch event {
             case .connected(let peer, let deviceName):

@@ -20,6 +20,10 @@ public final class SessionStore {
     public func update(virtualDisplay event: VirtualDisplaySelection.Event) { virtualDisplay = virtualDisplay.reduce(event) }
     public private(set) var displaySelection = DisplaySelection()
     /// Latest round-trip and decode stats, updated off the hot path at most a few times a second.
+    public private(set) var hostUpdateTarget: DiscoveredHost?
+    public private(set) var hostUpdateStatus: HostUpdateStatus?
+    public func showHostUpdate(_ host: DiscoveredHost?) { hostUpdateTarget = host; hostUpdateStatus = nil }
+    public func update(hostUpdate: HostUpdateStatus) { hostUpdateStatus = hostUpdate }
     public private(set) var stats = StreamStats()
     /// How the Mac has fitted the stream to the network; nil until it first adapts.
     public private(set) var link: LinkQuality?

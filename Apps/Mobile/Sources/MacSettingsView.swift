@@ -72,6 +72,10 @@ struct MacSettingsView: View {
                 Text("A locked Mac asks for \(DeviceOwner.method) before it can be used from this iPhone. The security key is the Mac's, pinned when you paired: PocketDesk only connects to a Mac that presents it.")
             }
 
+            Section {
+                Button("Update PocketDesk on Mac…", systemImage: "arrow.down.circle") { controller.showHostUpdate(host) }
+                    .disabled(!host.isOnline && !host.canRelay)
+            }
             Section("This iPhone") {
                 LabeledContent("Last Used") {
                     Text(host.lastUsed.map { $0.formatted(.relative(presentation: .named)) } ?? "Never")

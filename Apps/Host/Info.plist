@@ -30,5 +30,17 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PocketDesk uses your local network so your phone can connect to this Mac.</string>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://pocketdesk.runmira.dev/updates/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>sfNSc6mOuW5l/CKLqLyoxWlu4hLva2+uQTfp344Rkn0=</string>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>

@@ -51,4 +51,9 @@ fi
 xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 spctl --assess --type open --context context:primary-signature -v "$DMG"
+# Sparkle updates preserve the shipped app name and framework symlinks.
+UPDATE_ZIP=$OUT/PocketDesk-$VERSION-$BUILD-update.zip
+ditto -c -k --sequesterRsrc --keepParent "$STAGE/PocketDesk.app" "$UPDATE_ZIP"
 echo "Notarized: $DMG"
+echo "Sparkle archive: $UPDATE_ZIP"
+echo "Upload the ZIP to the versioned release before adding it to the signed appcast (docs/RELEASING.md)."

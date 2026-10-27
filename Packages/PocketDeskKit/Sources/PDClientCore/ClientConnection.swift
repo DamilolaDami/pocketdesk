@@ -251,7 +251,7 @@ public actor ClientConnection {
                         hostReason.value = reason
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
-                    case .setViewport, .configureVirtualDisplay, .sourceReady, .sourceKey, .sourceText, .watchVirtualDisplay, .createVirtualDisplay, .endVirtualDisplay, .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .getClipboard, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
+                    case .hostUpdate, .hostUpdateStatus, .setViewport, .configureVirtualDisplay, .sourceReady, .sourceKey, .sourceText, .watchVirtualDisplay, .createVirtualDisplay, .endVirtualDisplay, .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .getClipboard, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon,
                          .listMacShortcuts, .macShortcuts, .watchStatus, .watchMenus, .pressMenuItem, .setQuality,
                          .sendFile, .getFile, .fileData, .listFiles, .mutateFile:

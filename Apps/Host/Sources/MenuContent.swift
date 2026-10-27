@@ -20,6 +20,13 @@ struct MenuContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            if controller.updater.state.isBusy {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(controller.updater.state.phase == .installing ? "Installing PocketDesk update…" : "Checking or downloading update…")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
 
             if !permissions.allGranted {
                 PermissionsPanel(permissions: permissions)
@@ -155,6 +162,12 @@ struct MenuContent: View {
                         }
                     }
                 }
+                Divider()
+                Button("Check for Updates…") { controller.updater.checkForUpdates() }
+                    .disabled(!controller.updater.canCheck)
+                Toggle("Check for Updates Automatically", isOn: Binding(
+                    get: { controller.updater.automaticallyChecks },
+                    set: { controller.updater.automaticallyChecks = $0 }))
                 Divider()
                 Button("Remote Access…") {
                     openWindow(id: RelaySettingsWindow.id)

@@ -172,13 +172,16 @@ public actor HostSession {
     static let lostAfter: Duration = .seconds(15)
     static let log = Logger(subsystem: "com.pocketdesk.host", category: "session")
 
+    private let hostUpdater: (any HostUpdating)?
+
     public init(session: any PeerSession, peer: Fingerprint, configuration: Configuration,
                 frameSource: any FrameSource, input: any InputSink, pairing: any PairingAuthority,
                 catalog: any AppCatalogSource = InstalledApps(), clipboard: any ClipboardSink = MacPasteboard(),
                 menus: any MenuBarSource = AccessibilityMenus(), caret: any CaretSource = AccessibilityCaret(),
                 keepAwake: KeepAwake? = nil,
-                virtualDisplays: VirtualDisplayService? = nil, viewingSessionID: UUID = UUID(),
+                virtualDisplays: VirtualDisplayService? = nil, hostUpdater: (any HostUpdating)? = nil, viewingSessionID: UUID = UUID(),
                 onEvent: @escaping @Sendable (Event) -> Void = { _ in }) {
+        self.hostUpdater = hostUpdater
         self.keepAwake = keepAwake
         self.virtualDisplays = virtualDisplays
         self.viewingSessionID = viewingSessionID
@@ -210,6 +213,31 @@ public actor HostSession {
         var messages = session.controlMessages.makeAsyncIterator()
 
         var first = try await messages.next()
+        if case .hostUpdate(let request)? = first {
+            guard await pairing.isTrusted(peer) else {
+                await finish(with: .bye(reason: "Pair with this Mac before requesting updates.")); return
+            }
+            var command = request
+            var allowedInstall = false
+            while true {
+                guard await pairing.isTrusted(peer) else { return }
+                if command.action == .install, !allowedInstall {
+                    guard await pairing.allowSession(peer: peer, deviceName: String(command.deviceName.prefix(100))),
+                          await pairing.isTrusted(peer) else {
+                        await finish(with: .hostUpdateStatus(.init(phase: .failed, message: "The Mac didn't approve this update request.")))
+                        return
+                    }
+                    allowedInstall = true
+                }
+                let status: HostUpdateStatus
+                if let hostUpdater {
+                    status = command.action == .install ? await hostUpdater.install() : await hostUpdater.status()
+                } else { status = .init(phase: .unavailable, message: "Install the latest PocketDesk on the Mac manually to enable updates.") }
+                try await session.send(.hostUpdateStatus(status))
+                guard let next = try await messages.next(), case .hostUpdate(let value) = next else { return }
+                command = value
+            }
+        }
         var justPaired = false
         if await pairing.isTrusted(peer) {
             // The phone gave up waiting just before the person at the Mac accepted, and asked
@@ -454,7 +482,7 @@ public actor HostSession {
                 }
             case .bye:
                 return
-            case .virtualDisplay, .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
+            case .hostUpdate, .hostUpdateStatus, .virtualDisplay, .hello, .helloAck, .pairRequest, .pairResult, .windows, .displays, .streamConfig, .linkQuality,
                  .actionFailed, .actionDone, .apps, .appIcon, .macShortcuts, .macStatus, .menuBar, .caret,
                  .fileAccepted, .fileOffer, .fileData, .fileSaved, .fileList, .fileMutationResult:
                 continue

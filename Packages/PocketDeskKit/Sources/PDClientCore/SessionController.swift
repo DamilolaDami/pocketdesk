@@ -18,6 +18,7 @@ public final class SessionController {
     /// Set by the app before connecting (screen size in points + scale, device name).
     public var viewport = Viewport(width: 402, height: 874, scale: 3)
     public var deviceName = "iPhone"
+    private var hostUpdateWatchID = UUID()
     private var performanceTrace: Task<Void, Never>?
     private var sizingTask: Task<Void, Never>?
     private var desiredWorkspaceMode: VirtualDisplayMode?
@@ -311,6 +312,7 @@ public final class SessionController {
     public func select(_ host: DiscoveredHost) {
         guard host.isOnline || host.canRelay else { return }
         if let side = host.needsUpdate {
+            if side == .mac, host.isPaired { showHostUpdate(host); return }
             store.post(notice: side == .mac ? "Update PocketDesk on \(host.name) to use it from this iPhone."
                                             : "Update PocketDesk on this iPhone to use \(host.name).")
             return
@@ -647,6 +649,26 @@ public final class SessionController {
 
     public func insertText(_ text: String) {
         connection?.send(.insertText(text))
+    }
+
+    public func showHostUpdate(_ host: DiscoveredHost) {
+        guard host.isPaired else { return }
+        Task { if await unlock(host) { store.showHostUpdate(host) } }
+    }
+    public func dismissHostUpdate() { hostUpdateWatchID = UUID(); store.showHostUpdate(nil) }
+    public func watchHostUpdate(_ host: DiscoveredHost, install: Bool) async {
+        let watchID = UUID(); hostUpdateWatchID = watchID
+        guard let id = host.hostID, let peer = trustStore.peer(hostID: id), await unlock(host) else { return }
+        do {
+            let identity = try DeviceIdentity.loadOrCreate(label: identityLabel)
+            await HostUpdateClient.watch(local: browsed[host.id]?.endpoint, relay: relayServer, identity: identity,
+                host: peer.fingerprint, deviceName: deviceName, install: install) { [weak self] status in
+                    Task { @MainActor in
+                        guard self?.hostUpdateWatchID == watchID, self?.store.hostUpdateTarget?.hostID == id else { return }
+                        self?.store.update(hostUpdate: status)
+                    }
+                }
+        } catch { store.update(hostUpdate: .init(phase: .failed, message: error.localizedDescription)) }
     }
 
     public func refreshDisplays() {

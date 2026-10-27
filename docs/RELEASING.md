@@ -220,3 +220,7 @@ for its existing ZIP. Reuse the actual archive build; never rebuild just to upda
 release metadata. A staged, verified feed can be copied into the site unchanged;
 editing any signed XML requires re-signing it. Then verify the live page, feed
 signature and download checksums.
+
+The owner may explicitly request independent Mac publication. In that case publish the
+existing notarized Mac and signed feed, keep Apple's actual beta status in metadata,
+and use generic TestFlight links without claiming the pending iPhone version is available.

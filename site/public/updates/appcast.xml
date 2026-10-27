@@ -6,8 +6,8 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <link>https://pocketdesk.runmira.dev/</link>
     <description>Signed stable updates for PocketDesk.</description>
     <language>en</language>
-  </channel>
+  <item><title>PocketDesk 1.2</title><pubDate>Tue, 27 Oct 2026 09:26:44 +0000</pubDate><sparkle:version>101</sparkle:version><sparkle:shortVersionString>1.2</sparkle:shortVersionString><sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion><enclosure url="https://github.com/DamilolaDami/pocketdesk/releases/download/v1.2.0/PocketDesk-1.2-101-update.zip" length="9023564" type="application/octet-stream" sparkle:edSignature="gL/Xo+4aT5uJFaXDMhpbYLlw1bFWI8cGWqR5GW+OvzuDcBeis30VZhtP4ymCK/lk47W/lQnaUf2wzLyJuYhPCw=="></enclosure></item></channel>
 </rss><!-- sparkle-signatures:
-edSignature: ZnQaJ23hsbsMH+AwW44ge356My3WHahISHU0D8bkN5ffI4iDoD07WI+tykp8n0aRaEe2i2i1HRZ3NQVCmecoBA==
-length: 594
+edSignature: IXQYVdemb6oVkFtTIcQL5xwLV2xepGBNR3Jc8LR6+hRxpQuItBLB9sCsxcU1izSRFuvu+JfUBZG8kQB1wrVICQ==
+length: 1136
 -->

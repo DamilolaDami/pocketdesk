@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { releaseHistory, releaseNotes } from "../releases/model.mjs";
+import { releaseHistory, releaseNotes, latestAvailableMac } from "../releases/model.mjs";
 
 const entry = (overrides = {}) => ({ id: "1-0-74", version: "1.0", build: "74", date: "2026-10-25",
   status: "published", title: "Better setup", summary: "Connect more easily.", iphoneStatus: "available",
@@ -29,4 +29,13 @@ test("GitHub notes use the same platform changes as the website", () => {
   const notes = releaseNotes(entry());
   assert.match(notes, /## iPhone\n\n- \*\*Setup\*\* — Guided first connection\./);
   assert.doesNotMatch(notes, /## Mac/);
+});
+
+test("a Mac preview never replaces the compatible stable download", () => {
+  const stable = entry({ macURL: "https://example.com/stable.dmg" });
+  const preview = entry({ id: "1-2-101", version: "1.2", build: "101", macStatus: "preview", iphoneStatus: "awaiting-review", macURL: "https://example.com/preview.dmg" });
+  const history = releaseHistory([stable, preview]);
+  assert.equal(latestAvailableMac(history).id, stable.id);
+  assert.equal(latestAvailableMac(releaseHistory([stable, { ...preview, macStatus: "available", iphoneStatus: "available" }])).id, preview.id);
+  assert.throws(() => releaseHistory([entry({ macStatus: "ready-ish" })]), /Mac availability/);
 });

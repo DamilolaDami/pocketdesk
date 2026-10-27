@@ -205,3 +205,18 @@ release hasn't been published yet, Sparkle reports no update rather than inventi
 
 References: [Sparkle programmatic setup](https://sparkle-project.org/documentation/programmatic-setup/),
 [signed appcast and archive publication](https://sparkle-project.org/documentation/publishing/).
+
+### Coordinating incompatible app pairs
+
+When Apple beta review is pending, publish the notarized versioned Mac release as a
+GitHub prerelease (`--latest=false`), and publish its website entry with
+`macStatus: "preview"` and `iphoneStatus: "awaiting-review"`. Preview notes and the
+versioned download remain visible, but the website's stable Mac CTA keeps the newest
+compatible available pair. Do not add the pending Mac to the live Sparkle feed.
+
+After verifying external tester availability, change both statuses to `available`,
+promote the existing GitHub release to stable/latest, and publish the signed appcast
+for its existing ZIP. Reuse the actual archive build; never rebuild just to update
+release metadata. A staged, verified feed can be copied into the site unchanged;
+editing any signed XML requires re-signing it. Then verify the live page, feed
+signature and download checksums.

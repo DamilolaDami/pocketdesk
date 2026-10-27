@@ -11,6 +11,7 @@ export function releaseHistory(entries) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(r.date || "") ||
         !Number.isFinite(Date.parse(r.date)) || new Date(r.date).toISOString().slice(0, 10) !== r.date) fail("invalid date");
     if (!["draft", "published"].includes(r.status)) fail("status must be draft or published");
+    if (r.macStatus !== undefined && !["available", "preview"].includes(r.macStatus)) fail("invalid Mac availability status");
     if (!Array.isArray(r.changes)) fail("changes must be an array");
     for (const c of r.changes) {
       if (!["mac", "iphone"].includes(c.platform) || !c.title?.trim() || !c.text?.trim()) fail("each change needs a platform, title and text");
@@ -36,4 +37,9 @@ export function releaseNotes(release) {
     const changes = release.changes.filter(c => c.platform === platform);
     return changes.length ? [`## ${platform === "mac" ? "Mac" : "iPhone"}\n\n${changes.map(c => `- **${c.title}** — ${c.text}`).join("\n")}\n`] : [];
   }).join("\n")}\n`;
+}
+
+// A preview can have public notes/downloads without displacing the compatible stable pair.
+export function latestAvailableMac(history) {
+  return history.find(release => release.macURL && release.macStatus !== "preview");
 }

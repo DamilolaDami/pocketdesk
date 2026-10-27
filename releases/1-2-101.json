@@ -3,7 +3,7 @@
   "version": "1.2",
   "build": "101",
   "date": "2026-10-27",
-  "status": "draft",
+  "status": "published",
   "title": "A workspace of your own, wherever you are.",
   "summary": "Create a separate Mac workspace on your iPhone or iPad, keep the Mac available, manage shared files, and update the host from your phone. Update both apps together; this release uses protocol 25.",
   "iphoneStatus": "awaiting-review",
@@ -50,5 +50,6 @@
       "title": "Choose where file changes are allowed",
       "text": "Grant write access separately for each shared folder. File changes stay within the folders you have enabled."
     }
-  ]
+  ],
+  "macStatus": "preview"
 }

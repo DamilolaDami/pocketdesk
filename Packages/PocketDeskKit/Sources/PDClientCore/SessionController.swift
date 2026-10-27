@@ -393,6 +393,11 @@ public final class SessionController {
             store.send(.hostsChanged(discoveredHosts()))
             store.send(.select(discovered))
         }
+        if let failure = PairingCompatibility.failure(macVersion: host.protocolVersion, macName: host.name) {
+            disconnectConnection()
+            store.send(.disconnected(reason: failure))
+            return
+        }
         connect(to: host, hostFingerprint: invite.hostFingerprint, invite: invite)
     }
 

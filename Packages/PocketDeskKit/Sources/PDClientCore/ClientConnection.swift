@@ -156,7 +156,7 @@ public actor ClientConnection {
             var local = request.endpoint
             if local == nil, let find = request.findLocal { local = await find() }
             try Task.checkCancellation()
-            try await PathFinder.connect(local: local, relay: request.relay, identity: identity, host: request.hostFingerprint, onPath: { [onEvent] in onEvent(.path($0)) }) { session in
+            try await PathFinder.connect(local: local, relay: request.relay, identity: identity, host: request.hostFingerprint, keepAliveWhileIdle: request.invite != nil, onPath: { [onEvent] in onEvent(.path($0)) }) { session in
                 try await self.drive(session, playbackID: playbackID)
             }
             Self.log.info("Session ended normally")

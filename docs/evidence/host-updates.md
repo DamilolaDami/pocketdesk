@@ -21,10 +21,22 @@ Development build 87, stream protocol 25, based on merged Phase 3.
   Keychain account. No private key was exported.
 - Website tests (4) and production build passed; release shell syntax passed.
 
-The initial signed feed is empty and awaits normal website deployment after merge.
+The initial signed feed is empty and was deployed by Website workflow 40476363647
+following merge of PR #62. The public HTTPS endpoint returned 200, matched the committed
+file byte-for-byte and passed Sparkle signature verification. The user confirmed a
+fresh update check works after deployment.
 No public app release, notarized updater ZIP, production app replacement or actual
 Sparkle installation/relaunch was published/exercised in this change. That acceptance
 requires the next signed/notarized release and versioned ZIP, followed by the documented
 appcast publication process. Existing hosts without maintenance/Sparkle require one
 manual bootstrap installation. macOS may require local authorization for unwritable
 applications; updates do not bypass that requirement.
+
+## Mac card menu follow-up
+
+Build 88 on the paired iPhone 14 Pro isolates the menu and its content from live
+playback/latency redraws, keys cards by persistent host UUID across rediscovery, and
+limits list animations to actual identity changes. The menu trigger no longer replays
+interactive glass effects. The user confirmed the menu remains stable while open and
+the update check works. The iPhone build succeeded; three updater tests passed,
+including actionable feed errors without masking signature validation failures.

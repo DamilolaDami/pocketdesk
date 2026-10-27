@@ -105,8 +105,14 @@ public protocol HostUpdating: Sendable {
         if remote { acknowledgement() } else { standard.showUpdateNotFoundWithError(error, acknowledgement: acknowledgement) }
     }
     func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
-        changed(.failed, error.localizedDescription, nil)
-        if remote { acknowledgement() } else { standard.showUpdaterError(error, acknowledgement: acknowledgement) }
+        let message = HostUpdateFailure.message(for: error)
+        changed(.failed, message, nil)
+        if remote { acknowledgement() } else {
+            let original = error as NSError
+            var details = original.userInfo
+            details[NSLocalizedDescriptionKey] = message
+            standard.showUpdaterError(NSError(domain: original.domain, code: original.code, userInfo: details), acknowledgement: acknowledgement)
+        }
     }
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
         expected = 0; received = 0; changed(.downloading, nil, 0)
@@ -140,4 +146,16 @@ public protocol HostUpdating: Sendable {
     func dismissUpdateInstallation() { standard.dismissUpdateInstallation() }
     func showUpdateInFocus() { if !remote { standard.showUpdateInFocus() } }
 }
+
+/// Preserve validation/signature failures; give feed retrieval failures an actionable message.
+enum HostUpdateFailure {
+    static func message(for error: any Error) -> String {
+        let value = error as NSError
+        if value.domain == SUSparkleErrorDomain, value.code == SUError.appcastError.rawValue {
+            return "Couldn't reach PocketDesk's update service. Check the Mac's internet connection and try again."
+        }
+        return value.localizedDescription
+    }
+}
+
 #endif

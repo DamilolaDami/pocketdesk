@@ -1,0 +1,30 @@
+{
+  "id": "1-2-1-106",
+  "version": "1.2.1",
+  "build": "106",
+  "date": "2026-10-27",
+  "status": "draft",
+  "title": "More time to pair. A clearer way to connect.",
+  "summary": "Pairing stays connected while you confirm on the Mac, and QR scans explain when an app needs updating.",
+  "iphoneStatus": "awaiting-review",
+  "macStatus": "available",
+  "macURL": "https://github.com/DamilolaDami/pocketdesk/releases/download/v1.2.1/PocketDesk.dmg",
+  "source": "https://github.com/DamilolaDami/pocketdesk/releases/tag/v1.2.1",
+  "changes": [
+    {
+      "platform": "iphone",
+      "title": "Time to confirm your pairing",
+      "text": "Keep pairing connected while you check the verification code and accept on your Mac, instead of losing the connection after 15 seconds."
+    },
+    {
+      "platform": "iphone",
+      "title": "Clearer version guidance",
+      "text": "Scanning a pairing QR code now checks the Mac’s advertised connection version first. If the apps are incompatible, PocketDesk tells you which one needs updating."
+    },
+    {
+      "platform": "mac",
+      "title": "Mac companion 1.2.1",
+      "text": "A signed and notarized companion release, available through Sparkle. It keeps protocol 25 compatibility with the iPhone 1.2 series and retains virtual workspaces, Keep Awake and shared-file controls."
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 24
+public let protocolVersion: UInt16 = 25
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -11,6 +11,8 @@ public let bonjourServiceType = "_pocketdesk._udp"
 
 /// Reliable, ordered messages on the control stream (Codable, framed by TLV).
 public enum ControlMessage: Codable, Sendable, Equatable {
+    case hostUpdate(HostUpdateRequest)
+    case hostUpdateStatus(HostUpdateStatus)
     case hello(Hello)
     case helloAck(HelloAck)
     /// First message from an unpaired phone: the token from the scanned QR invite.

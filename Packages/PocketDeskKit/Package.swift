@@ -14,6 +14,7 @@ let package = Package(
         .executable(name: "PDVirtualDisplayProbe", targets: ["PDVirtualDisplayProbe"]),
     ],
     dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle.git", exact: "2.10.0"),
         // Apache-2.0. Builds the self-signed device certificates QUIC/TLS needs.
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.10.0"),
     ],
@@ -28,7 +29,8 @@ let package = Package(
         .target(name: "PDTransport", dependencies: ["PDProtocol", "PDSecurity"]),
         // macOS host engines: capture, encode, input injection, permissions.
         .target(name: "PDHostCore", dependencies: ["PDProtocol", "PDSecurity", "PDTransport",
-                .target(name: "PDVirtualDisplayRuntime", condition: .when(platforms: [.macOS]))]),
+                .target(name: "PDVirtualDisplayRuntime", condition: .when(platforms: [.macOS])),
+                .product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS]))]),
         // iOS client: session state machine, discovery, decode, render.
         .target(name: "PDClientCore", dependencies: ["PDProtocol", "PDSecurity", "PDTransport"]),
         .target(name: "PDVirtualDisplayRuntime",

@@ -72,7 +72,7 @@ device and connection independently of the Mac desktop size.
 **Follow device rotation** is optional. It changes the workspace after orientation settles;
 keyboard and split-view layout changes keep the desktop size. Changes preserve the display's
 identity and restart capture with a new keyframe before input resumes. Both apps need
-protocol 24, so update the phone and Mac together.
+protocol 25, so update the phone and Mac together.
 
 **Return to Mac Display** keeps the workspace while you view a physical screen. **End
 Workspace** removes it and returns to the main display. The Mac owner can also end it
@@ -92,3 +92,18 @@ Please report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
 ## License
 
 [Apache License 2.0](LICENSE).
+
+### Mac host updates
+
+The Mac menu includes **Check for Updates…** using Sparkle and a signed HTTPS feed.
+On a paired Mac card, **Update Mac** opens the phone's update controls when the host's
+streaming protocol is older. You can also choose **Update PocketDesk on Mac…** from the
+card menu. Confirming downloads the latest signed host release and restarts PocketDesk;
+active remote sessions end, while other Mac apps stay open. Local Face ID locks and the
+Mac's connection approval setting still apply.
+
+Update requests use a stable, mutually authenticated maintenance channel, independent
+of the streaming protocol. Macs from before this feature need one manual installation
+first. A newer Mac may instead require an iPhone app update. See
+[the release guide](docs/RELEASING.md#mac-updates-with-sparkle) for publishing signed archives
+and the appcast; an empty feed means no updater release has been published yet.

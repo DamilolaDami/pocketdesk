@@ -9,6 +9,7 @@ import PDProtocol
 @MainActor
 public final class HostController {
     public let store = HostStore()
+    public let updater = HostUpdater()
     private var service: HostService?
     private var runTask: Task<Void, Never>?
     private var powerObservers: [any NSObjectProtocol] = []
@@ -24,6 +25,7 @@ public final class HostController {
     public var onEvent: ((HostEvent) -> Void)?
 
     public init() {
+        updater.beforeRelaunch = { [weak self] in await self?.stop() }
         store.send(.keepAwakeChanged(KeepAwakeState(settings: .load())))
         let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.willPowerOffNotification] {
@@ -114,7 +116,7 @@ public final class HostController {
                 askBeforeConnecting: askBeforeConnecting, relayServer: relayServer,
                 nowPlayingPushesURL: Self.supportDirectory.appending(path: "now-playing-pushes.json")
             ), input: InputInjector(), makeSessionInput: { InputInjector() },
-                keepAwake: keepAwake, virtualDisplays: virtualDisplays) { [weak self] event in
+                keepAwake: keepAwake, virtualDisplays: virtualDisplays, hostUpdater: updater) { [weak self] event in
                 Task { @MainActor in
                     store.send(event)
                     self?.onEvent?(event)

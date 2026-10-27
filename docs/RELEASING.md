@@ -149,3 +149,59 @@ cold-start activity adoption, and acknowledged one-shot command delivery. The 24
 control/activity/security tests and the signed iPhone build passed. This verifies the
 locked-phone development build, not TestFlight or an independently repeated terminated-app
 acceptance run.
+
+## Mac updates with Sparkle
+
+The Mac host embeds Sparkle 2.10.0. Its fixed HTTPS feed is
+`https://pocketdesk.runmira.dev/updates/appcast.xml`; `site/public/updates/appcast.xml`
+is published by the existing website workflow. The initial feed is signed and empty:
+adding updater support does not publish or advertise an untested app release.
+
+`SUPublicEDKey` in `project.yml` is the public Ed25519 key. The corresponding private
+key stays in the release Mac's login Keychain under Sparkle account `pocketdesk`.
+Never commit/export that private key into the repository. On another release machine,
+transfer it securely with Sparkle's documented key-management tools. A fork must use
+its own key, feed URL and bundle identifier.
+
+The existing Mac menu now includes **Check for Updates…** and automatic-check settings.
+A phone's **Update Mac** action requires an existing pairing, honors its local Face ID
+lock and the Mac's Ask Before Each Connection policy, and explicitly confirms that
+PocketDesk will restart. A remote install uses the fixed signed feed; neither URLs nor
+shell commands can be supplied by the phone. macOS may still require authorization if
+the installed app isn't writable by the current user.
+
+### Publish an updater-compatible release
+
+1. Build and notarize with `scripts/release-mac.sh`. In addition to the DMG, this creates
+   `.build/release/PocketDesk-<version>-<actual-build>-update.zip`, containing the stapled
+   app as `PocketDesk.app` with framework symlinks preserved. `--no-notarize` deliberately
+   does not create an update archive.
+2. Upload that ZIP to the **versioned** GitHub release, alongside `PocketDesk.dmg`. Verify
+   the published download, signing, notarization and a real update/relaunch before
+   promoting the release. Do not substitute an old archive's build number.
+3. Resolve the official Sparkle tools if needed with
+   `swift package --package-path Packages/PocketDeskKit resolve`, then run:
+
+   ```sh
+   python3 scripts/sparkle-appcast.py \
+     .build/release/PocketDesk-<version>-<build>-update.zip \
+     https://github.com/DamilolaDami/pocketdesk/releases/download/<tag>/<zip-name>.zip
+   ```
+
+   The script reads version/build/minimum macOS from the ZIP, checks its bundled public
+   key against the Keychain account, preserves previous feed entries, refuses duplicate
+   or older builds, signs the archive and feed, verifies the feed signature and replaces
+   the feed only on success. `--sign-tool` can point at another resolved Sparkle tools
+   directory. A feed edit, even whitespace, invalidates its signature: re-sign it.
+4. Commit the appcast change with the release entry. Merge/push to main to deploy the
+   site; verify the live feed and ZIP before declaring the update published.
+
+For the first deployment, install one build containing Sparkle on existing Macs
+manually. Earlier hosts neither contain Sparkle nor speak the maintenance protocol;
+the phone explains this and links to the Mac download. After that bootstrap, future
+streaming protocol mismatches can be repaired through the stable maintenance channel.
+A Mac newer than the phone still requires updating the phone. If the compatible Mac
+release hasn't been published yet, Sparkle reports no update rather than inventing one.
+
+References: [Sparkle programmatic setup](https://sparkle-project.org/documentation/programmatic-setup/),
+[signed appcast and archive publication](https://sparkle-project.org/documentation/publishing/).

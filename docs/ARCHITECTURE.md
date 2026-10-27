@@ -21,8 +21,9 @@ Your Mac, usable from your phone with your thumb. Two native apps share one Swif
 Moving the floor to 26 is what lets us use the new Swift-native Network.framework API
 (`NetworkConnection`, `NetworkListener`, `NetworkBrowser` with `QUIC`, `QUICStream`,
 `QUICDatagram` and `Coder`). That means structured async/await networking with no WebRTC.
-The only third-party dependency is Apple's open-source `swift-certificates` (Apache-2.0),
-used to mint each device's self-signed certificate.
+Apple's `swift-certificates` (Apache-2.0) mints the self-signed device certificates.
+The Mac host also embeds Sparkle 2.10.0 for signed software updates; Sparkle is never linked
+into the iPhone app.
 
 ## Repo layout
 
@@ -46,7 +47,7 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 24), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 25), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
@@ -641,7 +642,7 @@ and pinning, never on obscurity.
 ## Distribution
 
 - **iOS app**: App Store.
-- **Mac host**: Developer ID + notarization, direct download (and later Sparkle for updates).
+- **Mac host**: Developer ID + notarization, direct download and signed Sparkle updates.
   CGEvent input injection and Accessibility need a non-sandboxed app, which rules out the
   Mac App Store. Jump Desktop and Screens ship their host agents the same way.
   The host keeps its identity in the file-based login keychain for now. Moving to the data
@@ -671,3 +672,34 @@ and pinning, never on obscurity.
 4. **v1.0 – Anywhere**: relay + hole punching, wake-on-LAN, subscription. Design and checklist in
    [RELAY.md](RELAY.md).
 5. **Later – Agent**: natural-language tasks executed on the Mac with a live view.
+
+## Host update maintenance (v1; stream protocol 25)
+
+Streaming keeps its exact-version ALPN. The same listener additionally offers the frozen
+`pocketdesk-maintenance/1` ALPN so a newer phone can reach an older, update-capable host.
+The phone connects with that ALPN alone over the existing mutually authenticated QUIC
+path, locally or through the relay. `hostUpdate` / `hostUpdateStatus` are frozen maintenance
+v1 envelopes inside the control coder; preserve their wire fixtures across future stream
+version changes. No streaming hello, video, input or files are used by maintenance.
+
+The first maintenance request is accepted only from an already trusted fingerprint.
+An open invite does not grant access. Installation also uses `allowSession`, rechecks
+trust after approval, and one updater serializes local/remote work. Subsequent maintenance
+messages can only query status or request installation; sending a streaming hello ends
+that maintenance session. A normal hello with a wrong version is still refused even if
+the transport negotiated maintenance. The phone unlocks its per-Mac Face ID lock first.
+
+`HostUpdater` runs on MainActor and owns one Sparkle updater and user driver. Local and
+scheduled checks retain Sparkle's normal UI. A confirmed phone install authorizes download,
+installation and relaunch from the bundled feed, with status/progress reporting. The driver
+requires Mac attention for informational/major upgrades and leaves macOS authorization to
+the OS. Before relaunch the controller closes sessions and releases owned workspaces and
+sleep assertions. Remote retries query status and never replay an ambiguous install command.
+A changed archive build confirms restart completion; a mismatched phone may still need its
+own update. Older hosts without maintenance require one manual bootstrap installation.
+
+Both the appcast and update archive require Ed25519 signatures; download metadata uses a
+fixed HTTPS feed, and the signed/notarized release app retains normal Developer ID checks.
+The public key is bundled, the private key stays in Keychain. See RELEASING.md for artifact,
+feed-signing and deployment steps. Updater code and an empty signed feed are not evidence
+that an update has been published or that a production replacement/relaunch was exercised.

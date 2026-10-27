@@ -10,6 +10,7 @@ import Synchronization
 import PDProtocol
 import PDSecurity
 import PDTransport
+import PDClientCore
 @testable import PDHostCore
 
 /// The whole host over real QUIC on 127.0.0.1: pairing, handshake, streaming (real HEVC
@@ -38,7 +39,7 @@ final class HostServiceTests {
     }
 
     /// Starts the service. `approve` answers the verification-code prompt.
-    func startService(askBeforeConnecting: Bool = false,
+    func startService(askBeforeConnecting: Bool = false, hostUpdater: (any HostUpdating)? = nil,
                       keepAwake: KeepAwake? = nil,
                       approve: @escaping @Sendable (PairingApproval) -> Bool = { _ in true },
                       makeSessionInput: (@Sendable () -> any InputSink)? = nil) async throws -> UInt16 {
@@ -48,7 +49,7 @@ final class HostServiceTests {
             configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
                                  trustStoreURL: trustStoreURL, advertise: false, askBeforeConnecting: askBeforeConnecting),
             makeFrameSource: { [frames] in frames }, clipboard: FakeClipboard(), input: input,
-            makeSessionInput: makeSessionInput, keepAwake: keepAwake
+            makeSessionInput: makeSessionInput, keepAwake: keepAwake, hostUpdater: hostUpdater
         ) { event in
             events.append(event)
             if case .approvalRequested(let approval) = event {
@@ -69,6 +70,65 @@ final class HostServiceTests {
                  _ body: @escaping @Sendable (QUICPeerSession) async throws -> Void) async throws {
         try await QUICClient.connect(to: .hostPort(host: "127.0.0.1", port: .init(rawValue: port)!), identity: phone,
                                      host: service.identity.fingerprint, timeout: timeout, body)
+    }
+
+    @Test func phoneUpdaterQueriesAndSendsOnlyOneInstall() async throws {
+        let updater = RecordingUpdater(finishesImmediately: true)
+        let port = try await startService(hostUpdater: updater)
+        let invite = await service.openInvite()
+        try await connect(port: port) { session in
+            var replies = session.controlMessages.makeAsyncIterator()
+            try await session.send(.pairRequest(.init(token: [UInt8](invite.token), deviceName: "Phone")))
+            #expect(try await replies.next() == .pairResult(accepted: true))
+            try await session.send(.bye(reason: "paired"))
+        }
+        let statuses = Mutex<[HostUpdateStatus]>([])
+        await HostUpdateClient.watch(local: .hostPort(host: "127.0.0.1", port: .init(rawValue: port)!), relay: nil,
+            identity: phone, host: service.identity.fingerprint, deviceName: "Phone", install: true) { status in
+                statuses.withLock { $0.append(status) }
+            }
+        #expect(statuses.withLock { $0.map(\.phase) } == [.idle, .upToDate])
+        #expect(await updater.installs == 1)
+        #expect(await frames.startedSources.isEmpty)
+    }
+
+    @Test func maintenanceALPNWorksWhenStreamingProtocolDoesNotMatch() async throws {
+        let updater = RecordingUpdater()
+        let port = try await startService(hostUpdater: updater)
+        let invite = await service.openInvite()
+        try await connect(port: port) { session in
+            var replies = session.controlMessages.makeAsyncIterator()
+            try await session.send(.pairRequest(.init(token: [UInt8](invite.token), deviceName: "Phone")))
+            #expect(try await replies.next() == .pairResult(accepted: true))
+            try await session.send(.bye(reason: "paired"))
+        }
+        try await QUICClient.connect(to: .hostPort(host: "127.0.0.1", port: .init(rawValue: port)!),
+            identity: phone, host: service.identity.fingerprint, applicationProtocol: maintenanceALPN) { session in
+                var replies = session.controlMessages.makeAsyncIterator()
+                try await session.send(.hostUpdate(.init(action: .install, deviceName: "Future phone")))
+                guard case .hostUpdateStatus(let status)? = try await replies.next() else { Issue.record("no maintenance reply"); return }
+                #expect(status.phase == .downloading)
+                try await session.send(.bye(reason: "done"))
+            }
+        #expect(await updater.installs == 1)
+        #expect(await frames.startedSources.isEmpty)
+        do {
+            try await QUICClient.connect(to: .hostPort(host: "127.0.0.1", port: .init(rawValue: port)!),
+                identity: phone, host: service.identity.fingerprint, timeout: .seconds(1), applicationProtocol: "pocketdesk/999") { _ in
+                    Issue.record("Mismatched streaming ALPN must not connect")
+                }
+            Issue.record("Mismatched ALPN must fail")
+        } catch { }
+        // Offering maintenance must not bypass the normal hello version guard.
+        try await QUICClient.connect(to: .hostPort(host: "127.0.0.1", port: .init(rawValue: port)!),
+            identity: phone, host: service.identity.fingerprint, applicationProtocol: maintenanceALPN) { session in
+                var replies = session.controlMessages.makeAsyncIterator()
+                var hello = Hello(deviceName: "Future phone", viewport: .init(width: 400, height: 800, scale: 2))
+                hello.version = 999
+                try await session.send(.hello(hello))
+                guard case .bye? = try await replies.next() else { Issue.record("Wrong protocol must be refused"); return }
+            }
+        #expect(await frames.startedSources.isEmpty)
     }
 
     @Test func pairsThenStreamsAndAcceptsInput() async throws {

@@ -9,8 +9,8 @@ enum QUICOptions {
     ///
     /// Both sides use `.required`: with `.none` the validator is skipped entirely, and a phone
     /// would accept any Mac's certificate.
-    static func make(identity: DeviceIdentity, maxUDPPayloadSize: Int? = nil, validate: @escaping @Sendable (Fingerprint) async -> Bool) -> QUIC {
-        var quic = QUIC(alpn: [alpn])
+    static func make(identity: DeviceIdentity, applicationProtocols: [String] = [alpn, maintenanceALPN], maxUDPPayloadSize: Int? = nil, validate: @escaping @Sendable (Fingerprint) async -> Bool) -> QUIC {
+        var quic = QUIC(alpn: applicationProtocols)
             .idleTimeout(15_000)
             .maxDatagramFrameSize(1_200)
             .tls.localIdentity(identity.secIdentity)
@@ -85,9 +85,9 @@ public enum QUICClient {
     /// Throws if the connection fails or isn't ready within `timeout`. Network.framework
     /// otherwise keeps a rejected handshake (e.g. an impostor host) in `.waiting` forever.
     public static func connect(to endpoint: NWEndpoint, identity: DeviceIdentity, host: Fingerprint,
-                               timeout: Duration = .seconds(10), maxUDPPayloadSize: Int? = nil,
+                               timeout: Duration = .seconds(10), applicationProtocol: String = alpn, maxUDPPayloadSize: Int? = nil,
                                _ body: @escaping @Sendable (QUICPeerSession) async throws -> Void) async throws {
-        let quic = QUICOptions.make(identity: identity, maxUDPPayloadSize: maxUDPPayloadSize) { $0 == host }
+        let quic = QUICOptions.make(identity: identity, applicationProtocols: [applicationProtocol], maxUDPPayloadSize: maxUDPPayloadSize) { $0 == host }
         try await withNetworkConnection(to: endpoint, using: { quic }) { connection in
             let states = AsyncStream<NetworkChannel<QUIC>.State>.makeStream()
             connection.onStateUpdate { _, state in states.continuation.yield(state) }

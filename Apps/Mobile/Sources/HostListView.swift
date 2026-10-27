@@ -76,6 +76,9 @@ struct HostListView: View {
                 }
             }
             .sendToMac(controller, hostID: filesHost?.hostID, photos: $choosingPhotos, files: $choosingFiles)
+            .sheet(item: Binding(get: { controller.store.hostUpdateTarget }, set: { if $0 == nil { controller.dismissHostUpdate() } })) { host in
+                HostUpdateView(controller: controller, host: host)
+            }
             .sheet(isPresented: $browsingFiles) {
                 MacFilesBrowser(controller: controller, hostID: filesHost?.hostID) { browsingFiles = false }
             }
@@ -102,6 +105,9 @@ struct HostListView: View {
     }
 
     @ViewBuilder private func menu(for host: DiscoveredHost) -> some View {
+        if host.isPaired, host.isOnline || host.canRelay {
+            Button("Update PocketDesk on Mac…", systemImage: "arrow.down.circle") { controller.showHostUpdate(host) }
+        }
         if host.isOnline, host.needsUpdate == nil {
             Button("Use in Touch Mode", systemImage: "hand.point.up.left") {
                 trackpad = false
@@ -295,7 +301,7 @@ private struct PairedMacCard<Actions: View>: View {
             }
             .buttonStyle(.glassProminent)
             .tint(Brand.accent)
-            .disabled(host.needsUpdate != nil || (!host.isOnline && !host.canRelay && (!host.canWake || host.isWaking)))
+            .disabled(host.needsUpdate == .phone || (!host.isOnline && !host.canRelay && (!host.canWake || host.isWaking)))
             if let hint {
                 Text(hint)
                     .font(.footnote)
@@ -315,7 +321,7 @@ private struct PairedMacCard<Actions: View>: View {
 
     private var hint: String? {
         switch host.needsUpdate {
-        case .mac: return "This Mac has an older PocketDesk. Update it on the Mac to connect."
+        case .mac: return "This Mac needs an update before you can connect."
         case .phone: return "This Mac has a newer PocketDesk. Update this app to connect."
         case nil: return !host.isOnline && !host.canRelay && !host.canWake ? "Open PocketDesk on this Mac once; then you can wake it from here." : nil
         }
@@ -331,7 +337,8 @@ private struct PairedMacCard<Actions: View>: View {
     }
 
     private var action: (title: String, symbol: String) {
-        if host.needsUpdate != nil { ("Update Needed", "arrow.down.circle") }
+        if host.needsUpdate == .mac { ("Update Mac", "arrow.down.circle") }
+        else if host.needsUpdate == .phone { ("Update iPhone App", "arrow.down.circle") }
         else if host.isOnline, host.needsUnlock { ("Unlock", DeviceOwner.symbol) }
         else if host.isOnline { ("Use This Mac", "play.fill") }
         else if host.canRelay { ("Connect via Relay", "network") }

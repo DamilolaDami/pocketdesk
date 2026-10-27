@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>PocketDesk for Mac</title>
+    <link>https://pocketdesk.runmira.dev/</link>
+    <description>Signed stable updates for PocketDesk.</description>
+    <language>en</language>
+  </channel>
+</rss><!-- sparkle-signatures:
+edSignature: ZnQaJ23hsbsMH+AwW44ge356My3WHahISHU0D8bkN5ffI4iDoD07WI+tykp8n0aRaEe2i2i1HRZ3NQVCmecoBA==
+length: 594
+-->

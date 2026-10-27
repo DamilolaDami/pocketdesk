@@ -37,6 +37,12 @@ targets:
         CFBundleDisplayName: PocketDesk
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        SUFeedURL: https://pocketdesk.runmira.dev/updates/appcast.xml
+        SUPublicEDKey: sfNSc6mOuW5l/CKLqLyoxWlu4hLva2+uQTfp344Rkn0=
+        SURequireSignedFeed: true
+        SUVerifyUpdateBeforeExtraction: true
+        SUEnableAutomaticChecks: true
+        SUAutomaticallyUpdate: false
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.productivity
         NSLocalNetworkUsageDescription: PocketDesk uses your local network so your phone can connect to this Mac.

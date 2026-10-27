@@ -12,7 +12,7 @@ public enum ConnectionPath: String, Sendable, Equatable { case local, relay }
 public enum PathFinder {
     public static func connect(
         local: NWEndpoint?, relay: RelayServer?, identity: DeviceIdentity,
-        host: Fingerprint, applicationProtocol: String = alpn, serverPin: Fingerprint? = nil, onPath: @escaping @Sendable (ConnectionPath) -> Void,
+        host: Fingerprint, applicationProtocol: String = alpn, keepAliveWhileIdle: Bool = false, serverPin: Fingerprint? = nil, onPath: @escaping @Sendable (ConnectionPath) -> Void,
         _ body: @escaping @Sendable (QUICPeerSession) async throws -> Void
     ) async throws {
         let started = PathStarted()
@@ -20,7 +20,7 @@ public enum PathFinder {
             do {
                 try await QUICClient.connect(
                     to: local, identity: identity, host: host,
-                    timeout: relay == nil ? .seconds(10) : .seconds(2), applicationProtocol: applicationProtocol
+                    timeout: relay == nil ? .seconds(10) : .seconds(2), applicationProtocol: applicationProtocol, keepAliveWhileIdle: keepAliveWhileIdle
                 ) { session in
                     started.value.withLock { $0 = true }
                     onPath(.local)
@@ -36,7 +36,7 @@ public enum PathFinder {
         guard let relay else { throw TransportError.timedOut }
         try await RelayPhonePath.connect(server: relay, identity: identity, host: host, serverPin: serverPin) {
             endpoint in
-            try await QUICClient.connect(to: endpoint, identity: identity, host: host, applicationProtocol: applicationProtocol, maxUDPPayloadSize: 1200) { session in
+            try await QUICClient.connect(to: endpoint, identity: identity, host: host, applicationProtocol: applicationProtocol, keepAliveWhileIdle: keepAliveWhileIdle, maxUDPPayloadSize: 1200) { session in
                 onPath(.relay)
                 try await body(session)
             }

@@ -75,12 +75,14 @@ struct FailedView: View {
     private var title: String {
         if isPermissionProblem { return "Your Mac needs a permission" }
         if message.localizedCaseInsensitiveContains("declined") { return "Pairing declined" }
+        if message.localizedCaseInsensitiveContains("Update PocketDesk") { return "Update needed" }
         return "Connection lost"
     }
 
     private var symbol: String {
         if isPermissionProblem { return "lock.trianglebadge.exclamationmark.fill" }
         if message.localizedCaseInsensitiveContains("declined") { return "hand.raised.fill" }
+        if message.localizedCaseInsensitiveContains("Update PocketDesk") { return "arrow.down.circle.fill" }
         return "wifi.exclamationmark"
     }
 }

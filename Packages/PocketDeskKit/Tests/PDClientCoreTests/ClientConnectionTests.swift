@@ -31,6 +31,45 @@ final class ClientConnectionTests {
         try? FileManager.default.removeItem(at: trustStoreURL.deletingLastPathComponent())
     }
 
+    @Test func pairingSurvivesWaitingForMacApprovalPastTransportIdleTimeout() async throws {
+        let box = HostBox()
+        let service = try HostService(
+            configuration: .init(hostID: UUID(), hostName: "Test Mac", identityLabel: "com.pocketdesk.tests.host.\(run)",
+                                 trustStoreURL: trustStoreURL, approvalTimeout: .seconds(30), advertise: false),
+            makeFrameSource: { MovingFrames() }, clipboard: FakeClipboard(), input: SinkRecorder()
+        ) { event in
+            if case .approvalRequested(let approval) = event {
+                Task {
+                    try? await Task.sleep(for: .seconds(18))
+                    await box.service?.resolveApproval(approval.id, accepted: true)
+                }
+            }
+        }
+        await box.set(service)
+        let serviceTask = Task { try await service.run() }
+        defer { serviceTask.cancel() }
+        var port: UInt16?
+        for _ in 0..<200 where port == nil {
+            port = await service.port
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let invite = await service.openInvite()
+        let events = ClientEvents()
+        let connection = ClientConnection(identity: phone,
+            request: .init(endpoint: .hostPort(host: "127.0.0.1", port: .init(rawValue: try #require(port))!),
+                           hostFingerprint: invite.hostFingerprint, invite: invite,
+                           deviceName: "Test iPhone", viewport: .init(width: 402, height: 874, scale: 3)),
+            display: VideoDisplay()) { events.append($0) }
+        let task = Task { await connection.run() }
+        for _ in 0..<3500 {
+            if events.all.contains(where: { if case .paired = $0 { true } else if case .ended = $0 { true } else { false } }) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(events.all.contains { if case .paired = $0 { true } else { false } })
+        #expect(!events.all.contains { if case .ended = $0 { true } else { false } })
+        task.cancel(); await task.value
+    }
+
     @Test func pairsStreamsIntoTheLayerAndSendsInput() async throws {
         let input = SinkRecorder()
         let box = HostBox()

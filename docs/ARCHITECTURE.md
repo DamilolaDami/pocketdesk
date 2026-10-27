@@ -703,3 +703,12 @@ fixed HTTPS feed, and the signed/notarized release app retains normal Developer 
 The public key is bundled, the private key stays in Keychain. See RELEASING.md for artifact,
 feed-signing and deployment steps. Updater code and an empty signed feed are not evidence
 that an update has been published or that a production replacement/relaunch was exercised.
+
+### Pairing approval liveness
+
+Invite-based phone connections enable QUIC transport keepalives every five seconds
+once the control stream opens. This bridges the human Mac-approval wait without
+putting ping/pong application messages ahead of the expected hello. The connection's
+normal idle timeout and the host's two-minute approval deadline remain intact. Other
+connections retain their existing keepalive default. QR pairing also checks the host's
+advertised protocol before attempting the exact-version ALPN, just as the Mac card does.

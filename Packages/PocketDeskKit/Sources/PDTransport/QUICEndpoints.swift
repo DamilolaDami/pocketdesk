@@ -85,7 +85,7 @@ public enum QUICClient {
     /// Throws if the connection fails or isn't ready within `timeout`. Network.framework
     /// otherwise keeps a rejected handshake (e.g. an impostor host) in `.waiting` forever.
     public static func connect(to endpoint: NWEndpoint, identity: DeviceIdentity, host: Fingerprint,
-                               timeout: Duration = .seconds(10), applicationProtocol: String = alpn, maxUDPPayloadSize: Int? = nil,
+                               timeout: Duration = .seconds(10), applicationProtocol: String = alpn, keepAliveWhileIdle: Bool = false, maxUDPPayloadSize: Int? = nil,
                                _ body: @escaping @Sendable (QUICPeerSession) async throws -> Void) async throws {
         let quic = QUICOptions.make(identity: identity, applicationProtocols: [applicationProtocol], maxUDPPayloadSize: maxUDPPayloadSize) { $0 == host }
         try await withNetworkConnection(to: endpoint, using: { quic }) { connection in
@@ -114,6 +114,9 @@ public enum QUICClient {
                 }
                 group.addTask {
                     let session = try await QUICPeerSession.open(connection, host: host)
+                    // QUIC PING/ACK traffic keeps human approval waits alive without adding
+                    // control messages that could be mistaken for the following hello.
+                    if keepAliveWhileIdle { connection.keepalive = .seconds(5) }
                     ready.set()
                     do {
                         try await body(session)

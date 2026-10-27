@@ -14,7 +14,7 @@ public struct VirtualDisplaySelection: Sendable, Equatable {
         case reset
     }
     public var isBusy: Bool {
-        pendingID != nil || report?.phase == .creating || report?.phase == .ending
+        pendingID != nil || report?.phase == .creating || report?.phase == .configuring || report?.phase == .ending
     }
     public func reduce(_ event: Event) -> Self {
         var next = self

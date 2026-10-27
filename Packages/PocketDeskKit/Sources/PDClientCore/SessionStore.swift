@@ -14,6 +14,8 @@ public final class SessionStore {
     public func update(path: ConnectionPath) { connectionPath = path }
     /// The Mac's windows, from the last `listWindows`. Not part of the state machine.
     public private(set) var windows: [WindowInfo] = []
+    public private(set) var workspaceSizing = WorkspaceSizing()
+    public func update(workspaceSizing: WorkspaceSizing) { self.workspaceSizing = workspaceSizing }
     public private(set) var virtualDisplay = VirtualDisplaySelection()
     public func update(virtualDisplay event: VirtualDisplaySelection.Event) { virtualDisplay = virtualDisplay.reduce(event) }
     public private(set) var displaySelection = DisplaySelection()
@@ -41,6 +43,7 @@ public final class SessionStore {
             connectionPath = nil
             displaySelection = displaySelection.reduce(.reset)
             virtualDisplay = virtualDisplay.reduce(.reset)
+            workspaceSizing = WorkspaceSizing()
             link = nil
             menus = .idle
         default: break

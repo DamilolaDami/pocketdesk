@@ -105,13 +105,13 @@ final class HostServiceTests {
             #expect(second.0.frameID == header.frameID + 1)
 
             for _ in 0..<50 where input.events.isEmpty {
-                try await session.send(InputEvent.button(.left, isDown: true, x: 0.5, y: 0.5))
+                try await control.sendInput(.button(.left, isDown: true, x: 0.5, y: 0.5))
                 try await Task.sleep(for: .milliseconds(20))
             }
-            try await session.send(.insertText("héllo"))
+            try await control.sendText("héllo")
             // ⌘C over the control stream, so the key-up can't be lost.
-            try await session.send(.key(KeyPress(code: 0x08, isDown: true, modifiers: 1 << 20)))
-            try await session.send(.key(KeyPress(code: 0x08, isDown: false, modifiers: 1 << 20)))
+            try await control.sendKey(KeyPress(code: 0x08, isDown: true, modifiers: 1 << 20))
+            try await control.sendKey(KeyPress(code: 0x08, isDown: false, modifiers: 1 << 20))
 
             // Shortcuts run in order; one that can't be done says why.
             try await session.send(.run(.openURL("https://www.netflix.com")))

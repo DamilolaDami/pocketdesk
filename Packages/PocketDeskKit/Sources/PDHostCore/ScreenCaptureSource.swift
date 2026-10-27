@@ -24,21 +24,24 @@ public actor ScreenCaptureSource: FrameSource {
     private var output: StreamOutput?
     private let sampleQueue = DispatchQueue(label: "com.pocketdesk.capture", qos: .userInteractive)
 
-    public init() {}
+    private let includingOwnWindows: Bool
+    /// The developer capture proof includes only its own scratch surface. Production
+    /// callers keep the default, which excludes the host's windows from display capture.
+    public init(includingOwnWindows: Bool = false) { self.includingOwnWindows = includingOwnWindows }
 
     public func displays() async throws -> [DisplayInfo] {
-        let names = await MainActor.run {
-            Dictionary(uniqueKeysWithValues: NSScreen.screens.compactMap { screen -> (UInt32, String)? in
+        let screens = await MainActor.run {
+            Dictionary(uniqueKeysWithValues: NSScreen.screens.compactMap { screen -> (UInt32, (String, Double))? in
                 guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
-                return (number.uint32Value, screen.localizedName)
+                return (number.uint32Value, (screen.localizedName, Double(screen.backingScaleFactor)))
             })
         }
         return try await SCShareableContent.current.displays.map { display in
-            let (width, height) = Self.pixelSize(of: display.displayID)
+            let (width, height) = Self.pixelSize(of: display.displayID, scale: screens[display.displayID]?.1 ?? 1)
             let uuid = CGDisplayCreateUUIDFromDisplayID(display.displayID)?.takeRetainedValue()
             let persistentID = uuid.map { CFUUIDCreateString(nil, $0) as String }
             return DisplayInfo(id: display.displayID, width: width, height: height,
-                               name: names[display.displayID] ?? "Display", isMain: CGDisplayIsMain(display.displayID) != 0,
+                               name: screens[display.displayID]?.0 ?? "Display", isMain: CGDisplayIsMain(display.displayID) != 0,
                                persistentID: persistentID)
         }
     }
@@ -61,10 +64,10 @@ public actor ScreenCaptureSource: FrameSource {
         case nil:
             guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first
             else { throw CaptureError.sourceNotFound }
-            return Self.resolved(display)
+            return await Self.resolved(display)
         case .display(let id):
             guard let display = content.displays.first(where: { $0.displayID == id }) else { throw CaptureError.sourceNotFound }
-            return Self.resolved(display)
+            return await Self.resolved(display)
         case .window(let id):
             guard let window = content.windows.first(where: { $0.windowID == id }) else { throw CaptureError.sourceNotFound }
             let filter = SCContentFilter(desktopIndependentWindow: window)
@@ -83,7 +86,7 @@ public actor ScreenCaptureSource: FrameSource {
         case .display(let id):
             guard let display = content.displays.first(where: { $0.displayID == id }) else { throw CaptureError.sourceNotFound }
             // Leave our own UI (menu bar extra, pairing window) out of the stream.
-            let ownApps = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
+            let ownApps = includingOwnWindows ? [] : content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
             filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
         case .window(let id):
             guard let window = content.windows.first(where: { $0.windowID == id }) else { throw CaptureError.sourceNotFound }
@@ -131,16 +134,23 @@ public actor ScreenCaptureSource: FrameSource {
         output = nil
     }
 
-    private static func resolved(_ display: SCDisplay) -> ResolvedSource {
-        let (width, height) = pixelSize(of: display.displayID)
+    private static func resolved(_ display: SCDisplay) async -> ResolvedSource {
+        let id = display.displayID
+        let scale = await MainActor.run {
+            NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == id }?.backingScaleFactor ?? 1
+        }
+        let (width, height) = pixelSize(of: id, scale: scale)
         return ResolvedSource(source: .display(display.displayID), pixelWidth: width, pixelHeight: height,
                               screenFrame: CGDisplayBounds(display.displayID))
     }
 
-    private static func pixelSize(of displayID: CGDirectDisplayID) -> (Int, Int) {
+    private static func pixelSize(of displayID: CGDirectDisplayID, scale: Double) -> (Int, Int) {
         guard let mode = CGDisplayCopyDisplayMode(displayID) else {
-            return (Int(CGDisplayPixelsWide(displayID)), Int(CGDisplayPixelsHigh(displayID)))
+            let bounds = CGDisplayBounds(displayID)
+            return (Int(bounds.width * scale), Int(bounds.height * scale))
         }
+        let bounds = CGDisplayBounds(displayID)
+        if (mode.width > mode.height) != (bounds.width > bounds.height) { return (mode.pixelHeight, mode.pixelWidth) }
         return (mode.pixelWidth, mode.pixelHeight)
     }
 

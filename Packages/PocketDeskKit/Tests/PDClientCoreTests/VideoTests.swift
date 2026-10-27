@@ -66,6 +66,8 @@ struct FrameAssemblerTests {
         // A delta tagged with the next generation (stale encoder state) is dropped.
         #expect(try assembler.assemble(header: header(frames[1], id: 1, generation: 2), payload: frames[1].payload) == nil)
         #expect(try assembler.assemble(header: header(frames[0], id: 2, generation: 2), payload: frames[0].payload) != nil)
+        #expect(try assembler.assemble(header: header(frames[0], id: 3, generation: 1), payload: frames[0].payload) == nil)
+        #expect(!assembler.needsKeyframe)
     }
 
     @Test func rejectsKeyframeWithoutParameterSets() {

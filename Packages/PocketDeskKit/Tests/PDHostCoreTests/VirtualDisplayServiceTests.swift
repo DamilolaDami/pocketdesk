@@ -25,7 +25,7 @@ struct VirtualDisplayServiceTests {
         await #expect(throws: VirtualDisplayError.disabled) { try await service.create(for: owner) }
         await service.setEnabled(true)
         await #expect(throws: VirtualDisplayError.notViewing) { try await service.create(for: UUID()) }
-        for mode in [VirtualDisplayMode(width: 1920, height: 1080), VirtualDisplayMode(width: 4096, height: 2160), .init(width: 1280, height: 800, scale: 2),
+        for mode in [VirtualDisplayMode(width: 1920, height: 1080), VirtualDisplayMode(width: 4096, height: 2160), .init(width: 1280, height: 800, scale: 3),
                      .init(width: 1280, height: 800, refreshRate: 120)] {
             await #expect(throws: VirtualDisplayError.invalidMode) { try await service.create(for: owner, mode: mode) }
         }
@@ -191,6 +191,13 @@ actor FakeDisplayBackend: VirtualDisplayBackend {
     private let unavailable: String?
     private let partialFailure: Bool
     private var blockCreate: Bool
+    private var blockConfigure = false
+    private var configureGate: CheckedContinuation<Void, Never>?
+    private var configureFailure = false
+    private var destructiveConfigureFailure = false
+    private let modeChanged: @Sendable (VirtualDisplayMode) async -> Void
+    private(set) var configuredCount = 0
+    var waitingForConfigure: Bool { configureGate != nil }
     private var blockDestroy = false
     private var failDestroy = false
     private var createGate: CheckedContinuation<Void, Never>?
@@ -202,7 +209,9 @@ actor FakeDisplayBackend: VirtualDisplayBackend {
     var waitingForCreate: Bool { createGate != nil }
     var waitingForDestroy: Bool { destroyGate != nil }
 
-    init(blockCreate: Bool = false, unavailable: String? = nil, partialFailure: Bool = false) {
+    init(blockCreate: Bool = false, unavailable: String? = nil, partialFailure: Bool = false,
+         modeChanged: @escaping @Sendable (VirtualDisplayMode) async -> Void = { _ in }) {
+        self.modeChanged = modeChanged
         self.blockCreate = blockCreate; self.unavailable = unavailable; self.partialFailure = partialFailure
     }
     func unavailableReason() -> String? { unavailable }
@@ -211,6 +220,7 @@ actor FakeDisplayBackend: VirtualDisplayBackend {
         created.append(resource)
         if blockCreate { await withCheckedContinuation { createGate = $0 } }
         if partialFailure { throw VirtualDisplayCreationFailure(resource: resource) }
+        await modeChanged(mode)
         return resource
     }
     func destroy(_ resource: VirtualDisplayResource) async throws {
@@ -218,6 +228,16 @@ actor FakeDisplayBackend: VirtualDisplayBackend {
         if failDestroy { throw VirtualDisplayError.cleanupFailed }
         removed.append(resource)
     }
+    func configure(_ resource: VirtualDisplayResource, mode: VirtualDisplayMode) async throws {
+        configuredCount += 1
+        if blockConfigure { await withCheckedContinuation { configureGate = $0 } }
+        if destructiveConfigureFailure { throw VirtualDisplayConfigurationFailure() }
+        if configureFailure { throw VirtualDisplayError.unavailable("Mode restored after failed change") }
+        await modeChanged(mode)
+    }
+    func setBlockConfigure(_ value: Bool) { blockConfigure = value }
+    func completeConfigure() { blockConfigure = false; configureGate?.resume(); configureGate = nil }
+    func setConfigureFailure(destructive: Bool) { configureFailure = true; destructiveConfigureFailure = destructive }
     func completeCreate() { blockCreate = false; createGate?.resume(); createGate = nil }
     func setBlockDestroy(_ block: Bool) { blockDestroy = block }
     func completeDestroy() { blockDestroy = false; destroyGate?.resume(); destroyGate = nil }

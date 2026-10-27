@@ -17,11 +17,11 @@ struct VirtualDisplayWireTests {
     }
     @Test func devicePreferencesAreBoundedAndKeepAspectWithoutRetinaMultiplication() {
         let phone = VirtualDisplayMode.preferred(for: .init(width: 402, height: 874, scale: 3))
-        let pad = VirtualDisplayMode.preferred(for: .init(width: 1366, height: 1024, scale: 2))
+        let pad = VirtualDisplayMode.preferred(for: .init(width: 1366, height: 1024, scale: 3))
         #expect(phone.height == 1280 && phone.width < phone.height && phone.isBoundedRequest)
         #expect(pad.width == 1280 && pad.height < pad.width && pad.isBoundedRequest)
-        #expect(VirtualDisplayMode.preferred(for: .init(width: .nan, height: .infinity, scale: 2)) == .standard)
+        #expect(VirtualDisplayMode.preferred(for: .init(width: .nan, height: .infinity, scale: 3)) == .standard)
         #expect(!VirtualDisplayMode(width: Int.max, height: -1).isBoundedRequest)
-        #expect(!VirtualDisplayMode(width: 1280, height: 800, scale: 2).isBoundedRequest)
+        #expect(!VirtualDisplayMode(width: 1280, height: 800, scale: 3).isBoundedRequest)
     }
 }

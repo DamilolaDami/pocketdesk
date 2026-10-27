@@ -19,6 +19,9 @@ struct StreamView: UIViewRepresentable {
         view.onText = { [controller] in controller.insertText($0) }
         view.onTapKey = { [controller] in controller.tapKey($0, modifiers: $1) }
         view.onKey = { [controller] in controller.sendKey($0, isDown: $1, modifiers: $2) }
+        view.onSceneViewport = { [controller] portrait, viewport in
+            controller.sceneViewportChanged(portrait: portrait, viewport: viewport)
+        }
         view.onHideKeyboard = { keyboardShown = false }
         // Weak: a view that's gone just ignores it, and the next stream's view replaces it.
         controller.onCaret = { [weak view] in view?.reveal($0) }
@@ -32,6 +35,7 @@ struct StreamView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ view: StreamUIView, coordinator: ()) {
+        view.onSceneViewport = { _, _ in }
         view.onInput = { _ in }
         view.onKey = { _, _, _ in }
         view.onTapKey = { _, _ in }
@@ -65,6 +69,7 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     var videoSize: CGSize = .zero {
         didSet { if videoSize != oldValue { applyZoom() } }
     }
+    var onSceneViewport: (Bool, Viewport) -> Void = { _, _ in }
     private var viewport = ZoomViewport()
     private var pinchCentroid: CGPoint = .zero
     private var isPinching = false
@@ -235,6 +240,11 @@ final class StreamUIView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         content.bounds = CGRect(origin: .zero, size: bounds.size)
         viewport.viewSize = bounds.size
         applyZoom()
+        if let scene = window?.windowScene, scene.interfaceOrientation.isPortrait || scene.interfaceOrientation.isLandscape {
+            let size = scene.coordinateSpace.bounds.size
+            onSceneViewport(scene.interfaceOrientation.isPortrait,
+                .init(width: size.width, height: size.height, scale: scene.screen.scale))
+        }
     }
 
     /// Pinch and two-finger scroll both see the same fingers; `scrolled` stands down while

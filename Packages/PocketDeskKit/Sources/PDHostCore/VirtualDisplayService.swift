@@ -15,11 +15,23 @@ public struct VirtualDisplayResource: Sendable, Equatable {
 public protocol VirtualDisplayBackend: Sendable {
     func unavailableReason() async -> String?
     func create(logicalID: String, mode: VirtualDisplayMode) async throws -> VirtualDisplayResource
+    func configure(_ resource: VirtualDisplayResource, mode: VirtualDisplayMode) async throws
     func destroy(_ resource: VirtualDisplayResource) async throws
 }
 
 /// A failed creation whose rollback still needs attention must return its owned resource,
 /// so it stays visible/retryable rather than becoming an untracked display.
+public struct VirtualDisplayConfigurationFailure: Error, Sendable, CustomStringConvertible {
+    public init() {}
+    public var description: String { "The Mac couldn't apply or restore that mode. Return to a physical display, end the workspace if needed, and create it again." }
+}
+
+public extension VirtualDisplayBackend {
+    func configure(_ resource: VirtualDisplayResource, mode: VirtualDisplayMode) async throws {
+        throw VirtualDisplayError.unavailable("This backend can't change an active desktop's mode.")
+    }
+}
+
 public struct VirtualDisplayCreationFailure: Error, Sendable {
     public let resource: VirtualDisplayResource
     public init(resource: VirtualDisplayResource) { self.resource = resource }
@@ -33,7 +45,7 @@ public enum VirtualDisplayError: Error, Sendable, Equatable, CustomStringConvert
         case .unavailable(let reason): reason
         case .notViewing: "That viewing session has ended. Connect to this Mac again."
         case .busy: "This Mac already has a virtual display or is finishing another request."
-        case .invalidMode: "Choose the tested 1280×800, 1× display at 60 Hz."
+        case .invalidMode: "Choose a supported desktop size at 1× or 2× and 30 or 60 Hz."
         case .cancelled: "The virtual display request was cancelled."
         case .cleanupFailed: "The virtual display couldn't be removed yet. End it again, or quit PocketDesk."
         }
@@ -41,7 +53,7 @@ public enum VirtualDisplayError: Error, Sendable, Equatable, CustomStringConvert
 }
 
 public struct VirtualDisplayState: Sendable, Equatable {
-    public enum Phase: Sendable, Equatable { case idle, creating, active, ending, cleanupFailed }
+    public enum Phase: Sendable, Equatable { case idle, creating, configuring, active, ending, cleanupFailed }
     public struct Viewer: Sendable, Equatable, Identifiable {
         public let id: UUID
         public let peer: Fingerprint
@@ -74,6 +86,8 @@ public actor VirtualDisplayService {
     private let hostID: UUID
     private let backend: any VirtualDisplayBackend
     private let onChange: @Sendable (VirtualDisplayState) -> Void
+    private var beforeConfiguration: @Sendable (UInt32) async -> Void = { _ in }
+    private var afterConfiguration: @Sendable (UInt32) async -> Void = { _ in }
     private var beforeRemoval: @Sendable (UInt32) async -> Void = { _ in }
     private var state = VirtualDisplayState()
     private var operation: UUID?
@@ -102,6 +116,11 @@ public actor VirtualDisplayService {
     }
 
     func setBeforeRemoval(_ callback: @escaping @Sendable (UInt32) async -> Void) { beforeRemoval = callback }
+
+    func setConfigurationCallbacks(before: @escaping @Sendable (UInt32) async -> Void,
+                                   after: @escaping @Sendable (UInt32) async -> Void) {
+        beforeConfiguration = before; afterConfiguration = after
+    }
 
     /// Only HostSession's authenticated, approved, successfully streaming path registers.
     func registerViewingSession(id: UUID, peer: Fingerprint, name: String) {
@@ -174,6 +193,60 @@ public actor VirtualDisplayService {
                 state.phase = .idle
                 state.error = (error is CancellationError || (error as? VirtualDisplayError) == .cancelled) ? nil : String(describing: error)
                 publish()
+            }
+            throw error
+        }
+    }
+
+    /// Mutates the existing native object. The reservation covers pause, apply, rollback and resume.
+    public func configure(_ leaseID: UUID, for ownerID: UUID, mode: VirtualDisplayMode) async throws -> VirtualDisplayState.Lease {
+        guard !stopped, !state.suspended, state.enabled else { throw VirtualDisplayError.disabled }
+        guard mode.isValid else { throw VirtualDisplayError.invalidMode }
+        guard let current = owned, current.lease.id == leaseID, current.lease.owner.id == ownerID,
+              state.viewers.contains(where: { $0.id == ownerID }) else { throw VirtualDisplayError.notViewing }
+        guard operation == nil, state.phase == .active else { throw VirtualDisplayError.busy }
+        if mode == current.lease.mode { return current.lease }
+        let request = UUID()
+        operation = request; pendingOwner = ownerID; pendingCancelled = false
+        state.phase = .configuring; state.error = nil
+        publish()
+        await beforeConfiguration(current.resource.displayID)
+        do {
+            try Task.checkCancellation()
+            try await backend.configure(current.resource, mode: mode)
+            let lease = VirtualDisplayState.Lease(id: current.lease.id, owner: current.lease.owner,
+                logicalID: current.lease.logicalID, displayID: current.lease.displayID, mode: mode)
+            owned = (lease, current.resource)
+            if Task.isCancelled || pendingCancelled || stopped || state.suspended || !state.enabled {
+                await releaseOwned(operation: request)
+                throw VirtualDisplayError.cancelled
+            }
+            state.active = lease; state.phase = .active
+            // canView permits the owner again, while the operation reservation still blocks mutation.
+            await afterConfiguration(current.resource.displayID)
+            if pendingCancelled || stopped || !state.enabled || state.suspended {
+                await releaseOwned(operation: request)
+                throw VirtualDisplayError.cancelled
+            }
+            operation = nil; pendingOwner = nil
+            publish()
+            return lease
+        } catch {
+            if operation == request {
+                if error is VirtualDisplayConfigurationFailure || pendingCancelled || stopped || !state.enabled || state.suspended || Task.isCancelled {
+                    await releaseOwned(operation: request)
+                } else {
+                    // A normal backend failure guarantees restoration of the old mode.
+                    state.phase = .active; state.active = current.lease
+                    state.error = String(describing: error)
+                    await afterConfiguration(current.resource.displayID)
+                    if pendingCancelled || stopped || !state.enabled || state.suspended {
+                        await releaseOwned(operation: request)
+                    } else {
+                        operation = nil; pendingOwner = nil
+                        publish()
+                    }
+                }
             }
             throw error
         }

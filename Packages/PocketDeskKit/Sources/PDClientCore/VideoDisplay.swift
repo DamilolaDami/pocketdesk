@@ -15,9 +15,12 @@ public final class VideoDisplay: @unchecked Sendable {
     private let synchronizer = AVSampleBufferRenderSynchronizer()
     private let audioRenderer = AVSampleBufferAudioRenderer()
     private var clockStarted = false
+    private var expectedGeneration: UInt32?
+    private var decodedGeneration: UInt32?
     private var generation: UInt32?
     private var audioEnabled = true
     private var sessionID: UUID?
+    private var requestKeyframe: (@Sendable () -> Void)?
 
     public init() {
         synchronizer.delaysRateChangeUntilHasSufficientMediaData = false
@@ -53,9 +56,35 @@ public final class VideoDisplay: @unchecked Sendable {
         synchronizer.setRate(0, time: .zero)
         clockStarted = false
         generation = nil
+        expectedGeneration = nil
+        decodedGeneration = nil
         assembler = FrameAssembler()
         keyframeRequested = false
+        requestKeyframe = nil
     }
+
+    func setKeyframeRequester(sessionID: UUID, _ request: @escaping @Sendable () -> Void) {
+        let attached = lock.withLock {
+            guard self.sessionID == sessionID else { return false }
+            requestKeyframe = request
+            return layer != nil
+        }
+        if attached { request() }
+    }
+
+    func expectGeneration(_ value: UInt32, sessionID: UUID) {
+        lock.withLock {
+            guard self.sessionID == sessionID else { return }
+            if let expectedGeneration, !SourceGeneration.isNewer(value, than: expectedGeneration) { return }
+            expectedGeneration = value; decodedGeneration = nil
+            generation = value
+            audioRenderer.flush(); layer?.sampleBufferRenderer.flush()
+            synchronizer.setRate(0, time: .zero); clockStarted = false
+            assembler = FrameAssembler(); keyframeRequested = false
+        }
+    }
+
+    func hasDecodedGeneration(_ value: UInt32) -> Bool { lock.withLock { decodedGeneration == value } }
 
     public func setAudioEnabled(_ enabled: Bool) {
         lock.withLock {
@@ -76,6 +105,7 @@ public final class VideoDisplay: @unchecked Sendable {
     public func enqueueAudio(header: AudioFrameHeader, payload: [UInt8], sessionID: UUID? = nil) throws {
         try lock.withLock {
             if let sessionID, self.sessionID != sessionID { return }
+            guard expectedGeneration == nil || expectedGeneration == header.sourceGeneration else { return }
             guard audioEnabled, generation == nil || generation == header.sourceGeneration else { return }
             if generation == nil { generation = header.sourceGeneration }
             let sample = try AudioAssembler.assemble(header: header, payload: payload)
@@ -90,8 +120,8 @@ public final class VideoDisplay: @unchecked Sendable {
 
     /// The stream view's layer, or `nil` when it goes away. A new layer needs a keyframe.
     public func attach(_ layer: AVSampleBufferDisplayLayer?) {
-        lock.withLock {
-            guard self.layer !== layer else { return }
+        let request: (@Sendable () -> Void)? = lock.withLock {
+            guard self.layer !== layer else { return nil }
             if let old = self.layer {
                 synchronizer.removeRenderer(old.sampleBufferRenderer, at: .invalid)
             }
@@ -99,7 +129,9 @@ public final class VideoDisplay: @unchecked Sendable {
             if let layer { synchronizer.addRenderer(layer.sampleBufferRenderer) }
             assembler.requireKeyframe()
             keyframeRequested = false
+            return layer == nil ? nil : requestKeyframe
         }
+        request?()
     }
 
     /// Decodes and shows one frame. Returns `true` when the host should be asked for a
@@ -107,6 +139,7 @@ public final class VideoDisplay: @unchecked Sendable {
     public func enqueue(header: VideoFrameHeader, payload: [UInt8], sessionID: UUID? = nil) -> Bool {
         lock.withLock {
             if let sessionID, self.sessionID != sessionID { return false }
+            guard expectedGeneration == nil || expectedGeneration == header.sourceGeneration else { return false }
             guard let renderer = layer?.sampleBufferRenderer else {
                 assembler.requireKeyframe()
                 return false
@@ -123,6 +156,7 @@ public final class VideoDisplay: @unchecked Sendable {
                     }
                     if audioEnabled { startClock(at: sample.presentationTimeStamp) }
                     renderer.enqueue(sample)
+                    decodedGeneration = header.sourceGeneration
                     if header.flags.contains(.keyframe) { keyframeRequested = false }
                     return false
                 }

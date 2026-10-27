@@ -1,7 +1,7 @@
 import Foundation
 
 /// Wire protocol version. Bump on any incompatible change to messages or framing.
-public let protocolVersion: UInt16 = 23
+public let protocolVersion: UInt16 = 24
 
 /// ALPN token negotiated over QUIC. Encodes the major protocol version.
 public let alpn = "pocketdesk/\(protocolVersion)"
@@ -19,6 +19,11 @@ public enum ControlMessage: Codable, Sendable, Equatable {
     case pairResult(accepted: Bool)
     case listDisplays
     /// Subscribe to virtual workspace status, without creating anything.
+    case setViewport(Viewport)
+    case configureVirtualDisplay(VirtualDisplayConfiguration)
+    case sourceReady(UInt32)
+    case sourceKey(generation: UInt32, press: KeyPress)
+    case sourceText(generation: UInt32, text: String)
     case watchVirtualDisplay
     case createVirtualDisplay(VirtualDisplayRequest)
     case endVirtualDisplay(VirtualDisplayEnd)
@@ -346,6 +351,10 @@ public struct Viewport: Codable, Sendable, Equatable {
     public var height: Double
     public var scale: Double
 
+    public var isValid: Bool {
+        width.isFinite && height.isFinite && scale.isFinite && (1...4096).contains(width)
+            && (1...4096).contains(height) && (1...3).contains(scale)
+    }
     public init(width: Double, height: Double, scale: Double) {
         self.width = width
         self.height = height
@@ -400,8 +409,10 @@ public struct StreamConfig: Codable, Sendable, Equatable {
     /// The actual whole-display source; nil while streaming a window.
     public var displayID: UInt32?
     public var bitrateKbps: Int
+    public var sourceGeneration: UInt32
 
-    public init(codec: Codec, width: Int, height: Int, fps: Int, bitrateKbps: Int, displayID: UInt32? = nil) {
+    public init(codec: Codec, width: Int, height: Int, fps: Int, bitrateKbps: Int, displayID: UInt32? = nil, sourceGeneration: UInt32 = 0) {
+        self.sourceGeneration = sourceGeneration
         self.codec = codec
         self.width = width
         self.height = height

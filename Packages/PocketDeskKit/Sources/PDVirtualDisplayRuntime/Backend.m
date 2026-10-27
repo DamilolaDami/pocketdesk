@@ -4,6 +4,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import <math.h>
 
 // Independently written runtime bridge. No private headers or third-party implementation
 // are vendored. Runtime signature checks bound this experiment; they do not make a private
@@ -12,10 +13,12 @@
 // every operation holds its monitor, and destruction requires the exact ownership token.
 static NSMutableDictionary<NSNumber *, id> *ownedDisplays;
 static uint64_t nextToken = 0;
+static NSMutableDictionary<NSNumber *, NSArray *> *ownedModeTables;
+static NSMutableDictionary<NSNumber *, NSNumber *> *ownedOrientations;
 
 static NSMutableDictionary *registry(void) {
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ ownedDisplays = [[NSMutableDictionary alloc] init]; });
+    dispatch_once(&once, ^{ ownedDisplays = [[NSMutableDictionary alloc] init]; ownedModeTables = [[NSMutableDictionary alloc] init]; ownedOrientations = [[NSMutableDictionary alloc] init]; });
     return ownedDisplays;
 }
 
@@ -89,12 +92,81 @@ bool PDVDAvailable(char *error, size_t capacity) {
 #endif
 }
 
-uint64_t PDVDCreate(uint32_t width, uint32_t height, double refreshRate, uint32_t serial, char *error, size_t capacity) {
+static NSArray *modeTable(uint32_t width, uint32_t height, uint32_t scale, double rate) {
+    NSMutableArray *modes = [NSMutableArray array];
+    uint32_t preferredWidth = width * scale, preferredHeight = height * scale;
+    bool portrait = width < height;
+    [modes addObject:[(id<PDVDModeConstruction>)[NSClassFromString(@"CGVirtualDisplayMode") alloc]
+        initWithWidth:preferredWidth height:preferredHeight refreshRate:rate]];
+    const unsigned int sizes[][2] = {{1024, 768}, {1280, 800}, {1280, 960}};
+    for (unsigned int i = 0; i < 3; i++) for (unsigned int backing = 1; backing <= 2; backing++)
+        for (unsigned int hz = 30; hz <= 60; hz += 30) {
+            unsigned int w = sizes[i][portrait ? 1 : 0] * backing, h = sizes[i][portrait ? 0 : 1] * backing;
+            if (w == preferredWidth && h == preferredHeight && hz == rate) continue;
+            [modes addObject:[(id<PDVDModeConstruction>)[NSClassFromString(@"CGVirtualDisplayMode") alloc]
+                initWithWidth:w height:h refreshRate:hz]];
+        }
+    return [modes copy];
+}
+
+static bool applyTable(id display, NSArray *modes, char *error, size_t capacity) {
+    id settings = [[NSClassFromString(@"CGVirtualDisplaySettings") alloc] init];
+    ((void (*)(id, SEL, unsigned int))objc_msgSend)(settings, NSSelectorFromString(@"setHiDPI:"), 1);
+    ((void (*)(id, SEL, id))objc_msgSend)(settings, NSSelectorFromString(@"setModes:"), modes);
+    if (!((BOOL (*)(id, SEL, id))objc_msgSend)(display, NSSelectorFromString(@"applySettings:"), settings))
+        return failure(error, capacity, @"Virtual-display settings rejected.");
+    return true;
+}
+
+uint64_t PDVDCreate(uint32_t width, uint32_t height, double rate, uint32_t serial, char *error, size_t capacity) {
+    return PDVDCreateScaled(width, height, 1, rate, serial, error, capacity);
+}
+
+bool PDVDConfigure(uint64_t token, uint32_t width, uint32_t height, uint32_t scale, double rate, char *error, size_t capacity) {
+    @autoreleasepool { @synchronized (registry()) {
+        id display = ownedDisplays[@(token)];
+        if (!display) return failure(error, capacity, @"That display lease has ended.");
+        if (width < 600 || height < 600 || width > 1280 || height > 1280 || (scale != 1 && scale != 2)
+            || (uint64_t)width * height * scale * scale > 4915200 || (rate != 30 && rate != 60))
+            return failure(error, capacity, @"Invalid virtual display mode.");
+        unsigned int orientation = width < height ? 90 : 0;
+        @try {
+            if (ownedOrientations[@(token)].unsignedIntValue != orientation) {
+                NSArray *table = modeTable(width, height, scale, rate);
+                if (!applyTable(display, table, error, capacity)) return false;
+                ownedModeTables[@(token)] = table;
+                ownedOrientations[@(token)] = @(orientation);
+            }
+        } @catch (NSException *exception) { return failure(error, capacity, @"Virtual orientation couldn't be applied."); }
+        CGDirectDisplayID displayID = ((CGDirectDisplayID (*)(id, SEL))objc_msgSend)(display, NSSelectorFromString(@"displayID"));
+        CFArrayRef modes = CGDisplayCopyAllDisplayModes(displayID,
+            (__bridge CFDictionaryRef)@{(__bridge NSString *)kCGDisplayShowDuplicateLowResolutionModes: @YES});
+        bool selected = false;
+        if (modes) {
+            for (CFIndex i = 0; i < CFArrayGetCount(modes); i++) {
+                CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
+                double hz = CGDisplayModeGetRefreshRate(mode);
+                size_t w = CGDisplayModeGetWidth(mode), h = CGDisplayModeGetHeight(mode);
+                size_t pw = CGDisplayModeGetPixelWidth(mode), ph = CGDisplayModeGetPixelHeight(mode);
+                if (w == width && h == height && pw == width * scale && ph == height * scale
+                    && (hz == 0 || fabs(hz - rate) < 0.1)) {
+                    selected = CGDisplaySetDisplayMode(displayID, mode, NULL) == kCGErrorSuccess;
+                    if (selected) break;
+                }
+            }
+            CFRelease(modes);
+        }
+        return selected ? true : failure(error, capacity, @"That size, Retina scale or refresh mode isn't offered by this Mac.");
+    } }
+}
+
+uint64_t PDVDCreateScaled(uint32_t width, uint32_t height, uint32_t scale, double refreshRate, uint32_t serial, char *error, size_t capacity) {
     @autoreleasepool {
       @synchronized (registry()) {
-        if (ownedDisplays.count || width < 640 || height < 480 || width > 1920 || height > 1200
+        if (ownedDisplays.count || width < 600 || height < 600 || width > 1280 || height > 1280 || (scale != 1 && scale != 2)
+            || (uint64_t)width * height * scale * scale > 4915200
             || (refreshRate != 30 && refreshRate != 60) || nextToken == UINT64_MAX) {
-            failure(error, capacity, @"Only one bounded 1x display at 30 or 60 Hz is supported."); return 0;
+            failure(error, capacity, @"Only one bounded display at 1x/2x and 30/60 Hz is supported."); return 0;
         }
         if (!PDVDAvailable(error, capacity)) return 0;
         @try {
@@ -104,8 +176,8 @@ uint64_t PDVDCreate(uint32_t width, uint32_t height, double refreshRate, uint32_
             void (*setSize)(id, SEL, CGSize) = (void *)objc_msgSend;
             setObject(descriptor, NSSelectorFromString(@"setName:"), @"PocketDesk Virtual Display");
             setObject(descriptor, NSSelectorFromString(@"setDispatchQueue:"), dispatch_get_main_queue());
-            setInteger(descriptor, NSSelectorFromString(@"setMaxPixelsWide:"), width);
-            setInteger(descriptor, NSSelectorFromString(@"setMaxPixelsHigh:"), height);
+            setInteger(descriptor, NSSelectorFromString(@"setMaxPixelsWide:"), 2560);
+            setInteger(descriptor, NSSelectorFromString(@"setMaxPixelsHigh:"), 2560);
             setInteger(descriptor, NSSelectorFromString(@"setVendorID:"), 0x5044);
             setInteger(descriptor, NSSelectorFromString(@"setProductID:"), 0x5052);
             setInteger(descriptor, NSSelectorFromString(@"setSerialNum:"), serial);
@@ -114,19 +186,15 @@ uint64_t PDVDCreate(uint32_t width, uint32_t height, double refreshRate, uint32_
             setSize(descriptor, NSSelectorFromString(@"setSizeInMillimeters:"), CGSizeMake(width * 25.4 / 110.0, height * 25.4 / 110.0));
             id display = [(id<PDVDDisplayConstruction>)[NSClassFromString(@"CGVirtualDisplay") alloc] initWithDescriptor:descriptor];
             if (!display) { failure(error, capacity, @"WindowServer refused display creation."); return 0; }
-            id settings = [[NSClassFromString(@"CGVirtualDisplaySettings") alloc] init];
-            id mode = [(id<PDVDModeConstruction>)[NSClassFromString(@"CGVirtualDisplayMode") alloc] initWithWidth:width height:height refreshRate:refreshRate];
-            setInteger(settings, NSSelectorFromString(@"setHiDPI:"), 0);
-            setObject(settings, NSSelectorFromString(@"setModes:"), @[mode]);
-            BOOL (*apply)(id, SEL, id) = (void *)objc_msgSend;
-            if (!apply(display, NSSelectorFromString(@"applySettings:"), settings)) {
-                failure(error, capacity, @"Virtual-display mode rejected."); return 0;
-            }
+            NSArray *modes = modeTable(width, height, scale, refreshRate);
+            unsigned int orientation = width < height ? 90 : 0;
+            if (!applyTable(display, modes, error, capacity)) return 0;
             CGDirectDisplayID (*getID)(id, SEL) = (void *)objc_msgSend;
             CGDirectDisplayID displayID = getID(display, NSSelectorFromString(@"displayID"));
             if (!displayID) { failure(error, capacity, @"Virtual display has no capture ID."); return 0; }
             uint64_t token = ++nextToken;
             ownedDisplays[@(token)] = display;
+            ownedModeTables[@(token)] = modes; ownedOrientations[@(token)] = @(orientation);
             return token;
         } @catch (NSException *exception) {
             failure(error, capacity, [@"Virtual-display exception: " stringByAppendingString:exception.name]);
@@ -148,6 +216,8 @@ uint32_t PDVDCaptureID(uint64_t token) {
 bool PDVDDestroy(uint64_t token) {
     @autoreleasepool { @synchronized (registry()) {
         if (!ownedDisplays[@(token)]) return false;
+        [ownedModeTables removeObjectForKey:@(token)];
+        [ownedOrientations removeObjectForKey:@(token)];
         [ownedDisplays removeObjectForKey:@(token)];
         return true;
     } }

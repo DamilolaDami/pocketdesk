@@ -220,6 +220,9 @@ public actor HostService: PairingAuthority {
     /// Listens until the task is cancelled.
     public func run() async throws {
         await virtualDisplays?.setBeforeRemoval { [weak self] id in await self?.prepareToRemoveVirtualDisplay(id) }
+        await virtualDisplays?.setConfigurationCallbacks(
+            before: { [weak self] id in await self?.pauseVirtualDisplay(id) },
+            after: { [weak self] id in await self?.resumeVirtualDisplay(id) })
         await virtualDisplays?.start()
         onEvent(.pairedPeersChanged(Array(trustStore.peers.values)))
         // Phones that asked for pushes before the Mac last quit.
@@ -472,6 +475,16 @@ public actor HostService: PairingAuthority {
     }
 
     private static let log = Logger(subsystem: "com.pocketdesk.host", category: "session")
+
+    private func pauseVirtualDisplay(_ id: UInt32) async {
+        let live = sessions.values.flatMap { $0.values }
+        for session in live { await session.pauseForVirtualDisplayConfiguration(id) }
+    }
+
+    private func resumeVirtualDisplay(_ id: UInt32) async {
+        let live = sessions.values.flatMap { $0.values }
+        for session in live { await session.resumeAfterVirtualDisplayConfiguration(id) }
+    }
 
     private func prepareToRemoveVirtualDisplay(_ id: UInt32) async {
         let live = sessions.values.flatMap { $0.values }

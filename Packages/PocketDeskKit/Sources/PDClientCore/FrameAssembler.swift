@@ -21,6 +21,8 @@ public struct FrameAssembler {
 
     /// `nil` means the frame was dropped (see `needsKeyframe`).
     public mutating func assemble(header: VideoFrameHeader, payload: [UInt8], displayImmediately: Bool = true) throws(AssemblyError) -> CMSampleBuffer? {
+        if let generation, header.sourceGeneration != generation,
+           !SourceGeneration.isNewer(header.sourceGeneration, than: generation) { return nil }
         if header.sourceGeneration != generation {
             generation = header.sourceGeneration
             needsKeyframe = true

@@ -1,0 +1,54 @@
+{
+  "id": "1-2-101",
+  "version": "1.2",
+  "build": "101",
+  "date": "2026-10-27",
+  "status": "draft",
+  "title": "A workspace of your own, wherever you are.",
+  "summary": "Create a separate Mac workspace on your iPhone or iPad, keep the Mac available, manage shared files, and update the host from your phone. Update both apps together; this release uses protocol 25.",
+  "iphoneStatus": "awaiting-review",
+  "macURL": "https://github.com/DamilolaDami/pocketdesk/releases/download/v1.2.0/PocketDesk.dmg",
+  "source": "https://github.com/DamilolaDami/pocketdesk/releases/tag/v1.2.0",
+  "changes": [
+    {
+      "platform": "iphone",
+      "title": "Your own Mac workspace",
+      "text": "Add and end a virtual Mac display from the Displays picker. Choose a desktop size, Retina sharpness, a 30 or 60 fps limit, and optional rotation following in Workspace Settings. Virtual displays remain experimental and require Allow Virtual Displays on the Mac."
+    },
+    {
+      "platform": "iphone",
+      "title": "Update the Mac from your phone",
+      "text": "Paired Macs can download and restart into a signed host update, even when streaming protocols differ. Older hosts need one manual installation of this update first."
+    },
+    {
+      "platform": "iphone",
+      "title": "Manage your shared Mac files",
+      "text": "Create folders, rename and move files, and send items to Trash where the Mac has explicitly allowed file changes."
+    },
+    {
+      "platform": "iphone",
+      "title": "A steadier Mac card menu",
+      "text": "The Mac card menu stays stable while playback and connection status refresh in the background."
+    },
+    {
+      "platform": "mac",
+      "title": "A separate desktop for remote work",
+      "text": "Enable a session-owned virtual display without changing your physical screen layout. Resize it in place, with generation checks that reject stale input during source changes."
+    },
+    {
+      "platform": "mac",
+      "title": "Stay available when you need it",
+      "text": "Keep the Mac awake during a remote session or for a chosen time, with battery-aware controls and a visible status in the menu."
+    },
+    {
+      "platform": "mac",
+      "title": "Signed updates with Sparkle",
+      "text": "Check for updates from the Mac menu or a paired phone. Update feeds and archives are signed, and PocketDesk closes remote sessions safely before restarting."
+    },
+    {
+      "platform": "mac",
+      "title": "Choose where file changes are allowed",
+      "text": "Grant write access separately for each shared folder. File changes stay within the folders you have enabled."
+    }
+  ]
+}

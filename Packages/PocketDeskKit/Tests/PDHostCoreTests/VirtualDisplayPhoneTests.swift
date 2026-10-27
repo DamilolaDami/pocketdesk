@@ -29,9 +29,13 @@ struct VirtualDisplayPhoneTests {
             var virtual = try #require(try await video.next())
             while virtual.0.sourceGeneration == first.0.sourceGeneration { virtual = try #require(try await video.next()) }
             #expect(virtual.0.flags.contains([.keyframe, .parameterSets]))
-            try await harness.phone.send(.insertText("Workspace keyboard"))
-            try await harness.phone.send(InputEvent.pointerMove(x: 0.25, y: 0.75))
-            try await harness.phone.send(InputEvent.scroll(dx: 0, dy: 12))
+            try await harness.phone.send(.sourceReady(virtual.0.sourceGeneration))
+            try await harness.phone.send(.ping(89))
+            _ = try await control.matching { $0 == .pong(89) }
+            try await harness.phone.send(.sourceText(generation: virtual.0.sourceGeneration, text: "Workspace keyboard"))
+            try await harness.phone.send(InputEvent.scoped(generation: virtual.0.sourceGeneration, event: .pointerMove(x: 0.25, y: 0.75)))
+            try await harness.phone.send(InputEvent.scoped(generation: virtual.0.sourceGeneration, event: .scroll(dx: 0, dy: 12)))
+            for _ in 0..<100 where harness.input.events.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
             try await harness.phone.send(.clipboard(.init(text: "Workspace clipboard")))
             try await harness.phone.send(.setAudioEnabled(false))
             try await harness.phone.send(.ping(90))

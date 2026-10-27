@@ -252,7 +252,10 @@ struct MenuContent: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(active.owner.name).font(.callout.weight(.medium))
-                        Text("\(active.mode.width)×\(active.mode.height) · \(active.mode.refreshRate) Hz")
+                        if display.phase == .configuring {
+                            HStack { ProgressView().controlSize(.mini); Text("Applying workspace size…").font(.caption) }
+                        }
+                        Text("\(active.mode.width)×\(active.mode.height) · \(active.mode.scale)× · \(active.mode.refreshRate) Hz")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()

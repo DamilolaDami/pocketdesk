@@ -64,9 +64,15 @@ or iPad. Open **Displays → Virtual Display → Add Workspace** to create and s
 Mac desktop. Move a window onto it using the Mac's display arrangement, then use the normal
 keyboard, trackpad, clipboard and audio controls on your device.
 
-The Mac currently accepts a tested 1280×800, 1× desktop. The stream fits your device; extra
-sizes, Retina and rotation-following desktops are later qualification work. Both apps need
-protocol 23, so update the phone and Mac together.
+Choose **Larger text** (1024×768), **More space** (1280×800) or **Tablet** (1280×960).
+Landscape offers 1× or Retina 2× backing; portrait uses Retina 2×. The frame-rate limit is
+30 or 60 fps. Best, Balanced and Battery Saver continue fitting the encoded stream to your
+device and connection independently of the Mac desktop size.
+
+**Follow device rotation** is optional. It changes the workspace after orientation settles;
+keyboard and split-view layout changes keep the desktop size. Changes preserve the display's
+identity and restart capture with a new keyframe before input resumes. Both apps need
+protocol 24, so update the phone and Mac together.
 
 **Return to Mac Display** keeps the workspace while you view a physical screen. **End
 Workspace** removes it and returns to the main display. The Mac owner can also end it

@@ -1,0 +1,865 @@
+{
+  "native": {
+    "baseline": [
+      {
+        "bounds": [
+          0,
+          0,
+          1440,
+          900
+        ],
+        "builtIn": true,
+        "id": 1,
+        "main": true,
+        "mirrorOf": 0,
+        "pixels": [
+          2880,
+          1800
+        ]
+      }
+    ],
+    "final": [
+      {
+        "bounds": [
+          0,
+          0,
+          1440,
+          900
+        ],
+        "builtIn": true,
+        "id": 1,
+        "main": true,
+        "mirrorOf": 0,
+        "pixels": [
+          2880,
+          1800
+        ]
+      }
+    ],
+    "os": "Version 26.3 (Build 25D125)",
+    "portraitCreationVerified": true,
+    "results": [
+      {
+        "backingPixels": [
+          1024,
+          768
+        ],
+        "capturedPixels": [
+          1024,
+          768
+        ],
+        "displayID": 53,
+        "frameCount": 59,
+        "maxCaptureDeliveryMillis": 18.064749892801046,
+        "meanCaptureDeliveryMillis": 10.062805493362248,
+        "mode": {
+          "height": 768,
+          "refreshRate": 30,
+          "scale": 1,
+          "width": 1024
+        },
+        "observationSeconds": 2.497792375,
+        "observedFramesPerSecond": 28.761126864039902,
+        "processCPUPercentOfOneCore": 11.431334439877135,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061687.1103292,
+        "transitionMilliseconds": 328.509209
+      },
+      {
+        "backingPixels": [
+          1024,
+          768
+        ],
+        "capturedPixels": [
+          1024,
+          768
+        ],
+        "displayID": 53,
+        "frameCount": 73,
+        "maxCaptureDeliveryMillis": 5.340958014130592,
+        "meanCaptureDeliveryMillis": 1.4206797059159726,
+        "mode": {
+          "height": 768,
+          "refreshRate": 60,
+          "scale": 1,
+          "width": 1024
+        },
+        "observationSeconds": 2.1886079169999997,
+        "observedFramesPerSecond": 35.70350470840898,
+        "processCPUPercentOfOneCore": 12.53161874585324,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061689.939083,
+        "transitionMilliseconds": 279.929667
+      },
+      {
+        "backingPixels": [
+          2048,
+          1536
+        ],
+        "capturedPixels": [
+          2048,
+          1536
+        ],
+        "displayID": 53,
+        "frameCount": 61,
+        "maxCaptureDeliveryMillis": 2.037583151832223,
+        "meanCaptureDeliveryMillis": 1.086803452510919,
+        "mode": {
+          "height": 768,
+          "refreshRate": 30,
+          "scale": 2,
+          "width": 1024
+        },
+        "observationSeconds": 2.372007416,
+        "observedFramesPerSecond": 29.269158262772276,
+        "processCPUPercentOfOneCore": 14.547930907480769,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061692.40873,
+        "transitionMilliseconds": 249.995917
+      },
+      {
+        "backingPixels": [
+          2048,
+          1536
+        ],
+        "capturedPixels": [
+          2048,
+          1536
+        ],
+        "displayID": 53,
+        "frameCount": 71,
+        "maxCaptureDeliveryMillis": 14.551999978721142,
+        "meanCaptureDeliveryMillis": 3.2033186049803213,
+        "mode": {
+          "height": 768,
+          "refreshRate": 60,
+          "scale": 2,
+          "width": 1024
+        },
+        "observationSeconds": 2.183281167,
+        "observedFramesPerSecond": 34.42724892047212,
+        "processCPUPercentOfOneCore": 13.13770321181907,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061695.032833,
+        "transitionMilliseconds": 325.34025
+      },
+      {
+        "backingPixels": [
+          1536,
+          2048
+        ],
+        "capturedPixels": [
+          1536,
+          2048
+        ],
+        "displayID": 53,
+        "frameCount": 61,
+        "maxCaptureDeliveryMillis": 14.488332904875278,
+        "meanCaptureDeliveryMillis": 7.3528743814677,
+        "mode": {
+          "height": 1024,
+          "refreshRate": 30,
+          "scale": 2,
+          "width": 768
+        },
+        "observationSeconds": 2.2089888330000003,
+        "observedFramesPerSecond": 29.509088050894267,
+        "processCPUPercentOfOneCore": 14.750912052256629,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061697.542455,
+        "transitionMilliseconds": 176.392334
+      },
+      {
+        "backingPixels": [
+          1536,
+          2048
+        ],
+        "capturedPixels": [
+          1536,
+          2048
+        ],
+        "displayID": 53,
+        "frameCount": 67,
+        "maxCaptureDeliveryMillis": 6.745749851688743,
+        "meanCaptureDeliveryMillis": 1.3322827040350862,
+        "mode": {
+          "height": 1024,
+          "refreshRate": 60,
+          "scale": 2,
+          "width": 768
+        },
+        "observationSeconds": 2.184396042,
+        "observedFramesPerSecond": 32.46003342763749,
+        "processCPUPercentOfOneCore": 12.249243949142805,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061699.929512,
+        "transitionMilliseconds": 209.196333
+      },
+      {
+        "backingPixels": [
+          1280,
+          800
+        ],
+        "capturedPixels": [
+          1280,
+          800
+        ],
+        "displayID": 53,
+        "frameCount": 60,
+        "maxCaptureDeliveryMillis": 18.357833148911595,
+        "meanCaptureDeliveryMillis": 6.8896341189328165,
+        "mode": {
+          "height": 800,
+          "refreshRate": 30,
+          "scale": 1,
+          "width": 1280
+        },
+        "observationSeconds": 2.193672167,
+        "observedFramesPerSecond": 29.017308547372238,
+        "processCPUPercentOfOneCore": 10.135014855207386,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061702.3248959,
+        "transitionMilliseconds": 598.28225
+      },
+      {
+        "backingPixels": [
+          1280,
+          800
+        ],
+        "capturedPixels": [
+          1280,
+          800
+        ],
+        "displayID": 53,
+        "frameCount": 70,
+        "maxCaptureDeliveryMillis": 9.947250131517649,
+        "meanCaptureDeliveryMillis": 2.051028757705353,
+        "mode": {
+          "height": 800,
+          "refreshRate": 60,
+          "scale": 1,
+          "width": 1280
+        },
+        "observationSeconds": 2.145494375,
+        "observedFramesPerSecond": 33.93551661661242,
+        "processCPUPercentOfOneCore": 12.329978725765715,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061705.1176271,
+        "transitionMilliseconds": 360.41133299999996
+      },
+      {
+        "backingPixels": [
+          2560,
+          1600
+        ],
+        "capturedPixels": [
+          2560,
+          1600
+        ],
+        "displayID": 53,
+        "frameCount": 60,
+        "mode": {
+          "height": 800,
+          "refreshRate": 30,
+          "scale": 2,
+          "width": 1280
+        },
+        "observationSeconds": 2.233202542,
+        "observedFramesPerSecond": 29.01733055420114,
+        "processCPUPercentOfOneCore": 12.546197433085313,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061707.6256042,
+        "transitionMilliseconds": 250.692792
+      },
+      {
+        "backingPixels": [
+          2560,
+          1600
+        ],
+        "capturedPixels": [
+          2560,
+          1600
+        ],
+        "displayID": 53,
+        "frameCount": 75,
+        "maxCaptureDeliveryMillis": 6.418708944693208,
+        "meanCaptureDeliveryMillis": 2.3838788249783893,
+        "mode": {
+          "height": 800,
+          "refreshRate": 60,
+          "scale": 2,
+          "width": 1280
+        },
+        "observationSeconds": 2.179556875,
+        "observedFramesPerSecond": 36.69540671395863,
+        "processCPUPercentOfOneCore": 12.375497198255044,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061710.110671,
+        "transitionMilliseconds": 267.779417
+      },
+      {
+        "backingPixels": [
+          1600,
+          2560
+        ],
+        "capturedPixels": [
+          1600,
+          2560
+        ],
+        "displayID": 53,
+        "frameCount": 60,
+        "mode": {
+          "height": 1280,
+          "refreshRate": 30,
+          "scale": 2,
+          "width": 800
+        },
+        "observationSeconds": 2.205039417,
+        "observedFramesPerSecond": 29.257170360357488,
+        "processCPUPercentOfOneCore": 17.851426916238207,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061712.559366,
+        "transitionMilliseconds": 496.586708
+      },
+      {
+        "backingPixels": [
+          1600,
+          2560
+        ],
+        "capturedPixels": [
+          1600,
+          2560
+        ],
+        "displayID": 53,
+        "frameCount": 74,
+        "maxCaptureDeliveryMillis": 13.20041692815721,
+        "meanCaptureDeliveryMillis": 3.7339353261308537,
+        "mode": {
+          "height": 1280,
+          "refreshRate": 60,
+          "scale": 2,
+          "width": 800
+        },
+        "observationSeconds": 2.1949375,
+        "observedFramesPerSecond": 36.19954154265931,
+        "processCPUPercentOfOneCore": 12.643731313533957,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061715.261959,
+        "transitionMilliseconds": 266.411042
+      },
+      {
+        "backingPixels": [
+          1280,
+          960
+        ],
+        "capturedPixels": [
+          1280,
+          960
+        ],
+        "displayID": 53,
+        "frameCount": 59,
+        "mode": {
+          "height": 960,
+          "refreshRate": 30,
+          "scale": 1,
+          "width": 1280
+        },
+        "observationSeconds": 2.2158982089999997,
+        "observedFramesPerSecond": 28.5255371255601,
+        "processCPUPercentOfOneCore": 11.20173295830304,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061717.725105,
+        "transitionMilliseconds": 509.37654100000003
+      },
+      {
+        "backingPixels": [
+          1280,
+          960
+        ],
+        "capturedPixels": [
+          1280,
+          960
+        ],
+        "displayID": 53,
+        "frameCount": 76,
+        "maxCaptureDeliveryMillis": 10.040333028882742,
+        "meanCaptureDeliveryMillis": 2.1198823562134868,
+        "mode": {
+          "height": 960,
+          "refreshRate": 60,
+          "scale": 1,
+          "width": 1280
+        },
+        "observationSeconds": 2.2070638330000003,
+        "observedFramesPerSecond": 37.19134285503285,
+        "processCPUPercentOfOneCore": 13.702775401331133,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061720.453227,
+        "transitionMilliseconds": 230.53616699999998
+      },
+      {
+        "backingPixels": [
+          2560,
+          1920
+        ],
+        "capturedPixels": [
+          2560,
+          1920
+        ],
+        "displayID": 53,
+        "frameCount": 61,
+        "maxCaptureDeliveryMillis": 33.67908322252333,
+        "meanCaptureDeliveryMillis": 9.999784524552524,
+        "mode": {
+          "height": 960,
+          "refreshRate": 30,
+          "scale": 2,
+          "width": 1280
+        },
+        "observationSeconds": 2.364900375,
+        "observedFramesPerSecond": 29.509204751797686,
+        "processCPUPercentOfOneCore": 15.525516587564484,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061722.8920279,
+        "transitionMilliseconds": 399.337209
+      },
+      {
+        "backingPixels": [
+          2560,
+          1920
+        ],
+        "capturedPixels": [
+          2560,
+          1920
+        ],
+        "displayID": 53,
+        "frameCount": 64,
+        "maxCaptureDeliveryMillis": 7.4562078807502985,
+        "meanCaptureDeliveryMillis": 2.1674083545804024,
+        "mode": {
+          "height": 960,
+          "refreshRate": 60,
+          "scale": 2,
+          "width": 1280
+        },
+        "observationSeconds": 2.168751958,
+        "observedFramesPerSecond": 30.9846948429474,
+        "processCPUPercentOfOneCore": 14.066569432925421,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061725.658558,
+        "transitionMilliseconds": 247.0355
+      },
+      {
+        "backingPixels": [
+          1920,
+          2560
+        ],
+        "capturedPixels": [
+          1920,
+          2560
+        ],
+        "displayID": 53,
+        "frameCount": 60,
+        "maxCaptureDeliveryMillis": 2.476833062246442,
+        "meanCaptureDeliveryMillis": 1.2948194053024054,
+        "mode": {
+          "height": 1280,
+          "refreshRate": 30,
+          "scale": 2,
+          "width": 960
+        },
+        "observationSeconds": 2.198718333,
+        "observedFramesPerSecond": 29.01741143116244,
+        "processCPUPercentOfOneCore": 12.82374353131841,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061728.0762749,
+        "transitionMilliseconds": 696.70925
+      },
+      {
+        "backingPixels": [
+          1920,
+          2560
+        ],
+        "capturedPixels": [
+          1920,
+          2560
+        ],
+        "displayID": 53,
+        "frameCount": 68,
+        "maxCaptureDeliveryMillis": 6.5576250199228525,
+        "meanCaptureDeliveryMillis": 2.3383158749263537,
+        "mode": {
+          "height": 1280,
+          "refreshRate": 60,
+          "scale": 2,
+          "width": 960
+        },
+        "observationSeconds": 2.4807978339999996,
+        "observedFramesPerSecond": 33.22433697722257,
+        "processCPUPercentOfOneCore": 13.871948583779666,
+        "processPeakRSSBytes": 56180736,
+        "startedAtUnixSeconds": 1793061730.973077,
+        "transitionMilliseconds": 239.493875
+      }
+    ]
+  },
+  "gpu": {
+    "started_at_unix_seconds": 1793061693.716608,
+    "model": "MacBookPro17,1",
+    "gpu_scope": "whole_machine_not_process_attributed",
+    "samples": [
+      {
+        "seconds": 0.0025792920496314764,
+        "ps_cpu_percent": 10.7,
+        "resident_bytes": 52215808,
+        "gpu": {
+          "Device Utilization %": 21,
+          "Renderer Utilization %": 20,
+          "Tiler Utilization %": 21,
+          "In use system memory": 441860096
+        }
+      },
+      {
+        "seconds": 1.0450246250256896,
+        "ps_cpu_percent": 14.5,
+        "resident_bytes": 52199424,
+        "gpu": {
+          "Device Utilization %": 8,
+          "Renderer Utilization %": 7,
+          "Tiler Utilization %": 8,
+          "In use system memory": 363053056
+        }
+      },
+      {
+        "seconds": 2.0912404579576105,
+        "ps_cpu_percent": 12.8,
+        "resident_bytes": 51937280,
+        "gpu": {
+          "Device Utilization %": 18,
+          "Renderer Utilization %": 17,
+          "Tiler Utilization %": 18,
+          "In use system memory": 367542272
+        }
+      },
+      {
+        "seconds": 3.6163214170373976,
+        "ps_cpu_percent": 16.2,
+        "resident_bytes": 52019200,
+        "gpu": {
+          "Device Utilization %": 17,
+          "Renderer Utilization %": 16,
+          "Tiler Utilization %": 17,
+          "In use system memory": 424214528
+        }
+      },
+      {
+        "seconds": 4.703589292010292,
+        "ps_cpu_percent": 13.2,
+        "resident_bytes": 50249728,
+        "gpu": {
+          "Device Utilization %": 16,
+          "Renderer Utilization %": 15,
+          "Tiler Utilization %": 16,
+          "In use system memory": 435798016
+        }
+      },
+      {
+        "seconds": 5.926208541961387,
+        "ps_cpu_percent": 18.1,
+        "resident_bytes": 45957120,
+        "gpu": {
+          "Device Utilization %": 10,
+          "Renderer Utilization %": 9,
+          "Tiler Utilization %": 10,
+          "In use system memory": 438452224
+        }
+      },
+      {
+        "seconds": 7.032935332972556,
+        "ps_cpu_percent": 10.7,
+        "resident_bytes": 44564480,
+        "gpu": {
+          "Device Utilization %": 24,
+          "Renderer Utilization %": 23,
+          "Tiler Utilization %": 24,
+          "In use system memory": 457244672
+        }
+      },
+      {
+        "seconds": 8.413518417160958,
+        "ps_cpu_percent": 11.1,
+        "resident_bytes": 42418176,
+        "gpu": {
+          "Device Utilization %": 5,
+          "Renderer Utilization %": 5,
+          "Tiler Utilization %": 5,
+          "In use system memory": 422215680
+        }
+      },
+      {
+        "seconds": 9.477132291998714,
+        "ps_cpu_percent": 15.0,
+        "resident_bytes": 40239104,
+        "gpu": {
+          "Device Utilization %": 15,
+          "Renderer Utilization %": 15,
+          "Tiler Utilization %": 15,
+          "In use system memory": 417202176
+        }
+      },
+      {
+        "seconds": 11.166720791952685,
+        "ps_cpu_percent": 9.7,
+        "resident_bytes": 40271872,
+        "gpu": {
+          "Device Utilization %": 17,
+          "Renderer Utilization %": 16,
+          "Tiler Utilization %": 17,
+          "In use system memory": 436404224
+        }
+      },
+      {
+        "seconds": 12.291112917009741,
+        "ps_cpu_percent": 11.0,
+        "resident_bytes": 40288256,
+        "gpu": {
+          "Device Utilization %": 18,
+          "Renderer Utilization %": 17,
+          "Tiler Utilization %": 18,
+          "In use system memory": 380682240
+        }
+      },
+      {
+        "seconds": 13.481823542155325,
+        "ps_cpu_percent": 11.1,
+        "resident_bytes": 40271872,
+        "gpu": {
+          "Device Utilization %": 12,
+          "Renderer Utilization %": 11,
+          "Tiler Utilization %": 12,
+          "In use system memory": 373784576
+        }
+      },
+      {
+        "seconds": 14.548068833071738,
+        "ps_cpu_percent": 13.3,
+        "resident_bytes": 40337408,
+        "gpu": {
+          "Device Utilization %": 21,
+          "Renderer Utilization %": 20,
+          "Tiler Utilization %": 21,
+          "In use system memory": 522616832
+        }
+      },
+      {
+        "seconds": 15.917610458098352,
+        "ps_cpu_percent": 10.1,
+        "resident_bytes": 40321024,
+        "gpu": {
+          "Device Utilization %": 21,
+          "Renderer Utilization %": 20,
+          "Tiler Utilization %": 21,
+          "In use system memory": 497500160
+        }
+      },
+      {
+        "seconds": 17.036836083047092,
+        "ps_cpu_percent": 15.0,
+        "resident_bytes": 40124416,
+        "gpu": {
+          "Device Utilization %": 17,
+          "Renderer Utilization %": 16,
+          "Tiler Utilization %": 17,
+          "In use system memory": 424935424
+        }
+      },
+      {
+        "seconds": 18.315288875019178,
+        "ps_cpu_percent": 10.5,
+        "resident_bytes": 40026112,
+        "gpu": {
+          "Device Utilization %": 19,
+          "Renderer Utilization %": 18,
+          "Tiler Utilization %": 19,
+          "In use system memory": 418250752
+        }
+      },
+      {
+        "seconds": 19.38427866715938,
+        "ps_cpu_percent": 13.3,
+        "resident_bytes": 39780352,
+        "gpu": {
+          "Device Utilization %": 15,
+          "Renderer Utilization %": 14,
+          "Tiler Utilization %": 15,
+          "In use system memory": 507281408
+        }
+      },
+      {
+        "seconds": 20.656381250126287,
+        "ps_cpu_percent": 18.4,
+        "resident_bytes": 39878656,
+        "gpu": {
+          "Device Utilization %": 20,
+          "Renderer Utilization %": 19,
+          "Tiler Utilization %": 20,
+          "In use system memory": 384647168
+        }
+      },
+      {
+        "seconds": 21.927577125141397,
+        "ps_cpu_percent": 18.3,
+        "resident_bytes": 39829504,
+        "gpu": {
+          "Device Utilization %": 16,
+          "Renderer Utilization %": 15,
+          "Tiler Utilization %": 16,
+          "In use system memory": 421265408
+        }
+      },
+      {
+        "seconds": 23.462692625122145,
+        "ps_cpu_percent": 9.7,
+        "resident_bytes": 39895040,
+        "gpu": {
+          "Device Utilization %": 22,
+          "Renderer Utilization %": 21,
+          "Tiler Utilization %": 22,
+          "In use system memory": 466993152
+        }
+      },
+      {
+        "seconds": 24.520362708019093,
+        "ps_cpu_percent": 13.1,
+        "resident_bytes": 40370176,
+        "gpu": {
+          "Device Utilization %": 12,
+          "Renderer Utilization %": 12,
+          "Tiler Utilization %": 12,
+          "In use system memory": 418643968
+        }
+      },
+      {
+        "seconds": 25.78389437496662,
+        "ps_cpu_percent": 7.9,
+        "resident_bytes": 40419328,
+        "gpu": {
+          "Device Utilization %": 16,
+          "Renderer Utilization %": 15,
+          "Tiler Utilization %": 16,
+          "In use system memory": 411254784
+        }
+      },
+      {
+        "seconds": 27.346673167077824,
+        "ps_cpu_percent": 15.2,
+        "resident_bytes": 38371328,
+        "gpu": {
+          "Device Utilization %": 36,
+          "Renderer Utilization %": 35,
+          "Tiler Utilization %": 36,
+          "In use system memory": 501923840
+        }
+      },
+      {
+        "seconds": 29.023862458067015,
+        "ps_cpu_percent": 15.0,
+        "resident_bytes": 38158336,
+        "gpu": {
+          "Device Utilization %": 26,
+          "Renderer Utilization %": 25,
+          "Tiler Utilization %": 26,
+          "In use system memory": 452657152
+        }
+      },
+      {
+        "seconds": 30.10684487503022,
+        "ps_cpu_percent": 12.3,
+        "resident_bytes": 38207488,
+        "gpu": {
+          "Device Utilization %": 34,
+          "Renderer Utilization %": 34,
+          "Tiler Utilization %": 34,
+          "In use system memory": 540262400
+        }
+      },
+      {
+        "seconds": 31.26518770796247,
+        "ps_cpu_percent": 17.9,
+        "resident_bytes": 37502976,
+        "gpu": {
+          "Device Utilization %": 42,
+          "Renderer Utilization %": 41,
+          "Tiler Utilization %": 42,
+          "In use system memory": 557088768
+        }
+      },
+      {
+        "seconds": 32.34210033295676,
+        "ps_cpu_percent": 17.1,
+        "resident_bytes": 37748736,
+        "gpu": {
+          "Device Utilization %": 32,
+          "Renderer Utilization %": 31,
+          "Tiler Utilization %": 32,
+          "In use system memory": 526532608
+        }
+      },
+      {
+        "seconds": 33.727788750082254,
+        "ps_cpu_percent": 12.9,
+        "resident_bytes": 37732352,
+        "gpu": {
+          "Device Utilization %": 20,
+          "Renderer Utilization %": 20,
+          "Tiler Utilization %": 20,
+          "In use system memory": 501972992
+        }
+      },
+      {
+        "seconds": 34.84097162494436,
+        "ps_cpu_percent": 6.6,
+        "resident_bytes": 37765120,
+        "gpu": {
+          "Device Utilization %": 33,
+          "Renderer Utilization %": 32,
+          "Tiler Utilization %": 33,
+          "In use system memory": 588136448
+        }
+      },
+      {
+        "seconds": 36.583746375050396,
+        "ps_cpu_percent": 11.1,
+        "resident_bytes": 37552128,
+        "gpu": {
+          "Device Utilization %": 32,
+          "Renderer Utilization %": 31,
+          "Tiler Utilization %": 32,
+          "In use system memory": 543686656
+        }
+      },
+      {
+        "seconds": 38.04472037497908,
+        "ps_cpu_percent": 13.3,
+        "resident_bytes": 37421056,
+        "gpu": {
+          "Device Utilization %": 37,
+          "Renderer Utilization %": 36,
+          "Tiler Utilization %": 37,
+          "In use system memory": 583139328
+        }
+      },
+      {
+        "seconds": 40.171449874993414,
+        "ps_cpu_percent": 12.7,
+        "resident_bytes": 38715392,
+        "gpu": {
+          "Device Utilization %": 41,
+          "Renderer Utilization %": 40,
+          "Tiler Utilization %": 41,
+          "In use system memory": 537018368
+        }
+      }
+    ]
+  }
+}

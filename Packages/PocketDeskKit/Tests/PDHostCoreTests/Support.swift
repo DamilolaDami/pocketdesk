@@ -73,6 +73,8 @@ actor SyntheticFrameSource: FrameSource {
     init(noisy: Bool = false) { self.noisy = noisy }
     func setNoisy(_ noisy: Bool) { self.noisy = noisy }
     let window = WindowInfo(id: 42, appName: "Notes", bundleID: "com.apple.Notes", title: "Shopping", width: 800, height: 600)
+    private var virtualMode: VirtualDisplayMode?
+    func setVirtualMode(_ mode: VirtualDisplayMode) { virtualMode = mode }
     private var task: Task<Void, Never>?
     private(set) var audioConfigurations: [(Bool, UInt32)] = []
     func configureAudio(enabled: Bool, generation: UInt32) { audioConfigurations.append((enabled, generation)) }
@@ -87,15 +89,19 @@ actor SyntheticFrameSource: FrameSource {
     func resolve(_ source: CaptureSource?) throws -> ResolvedSource {
         switch source {
         case .display(2):
-            ResolvedSource(source: .display(2), pixelWidth: 2560, pixelHeight: 1440,
+            if let mode = virtualMode {
+                return ResolvedSource(source: .display(2), pixelWidth: mode.pixelWidth, pixelHeight: mode.pixelHeight,
+                    screenFrame: CGRect(x: -mode.width, y: -80, width: mode.width, height: mode.height))
+            }
+            return ResolvedSource(source: .display(2), pixelWidth: 2560, pixelHeight: 1440,
                            screenFrame: CGRect(x: -2560, y: 0, width: 2560, height: 1440))
         case nil, .display(1):
-            ResolvedSource(source: .display(1), pixelWidth: displaySize.width, pixelHeight: displaySize.height,
+            return ResolvedSource(source: .display(1), pixelWidth: displaySize.width, pixelHeight: displaySize.height,
                            screenFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080))
         case .display:
             throw CaptureError.sourceNotFound
         case .window(let id):
-            ResolvedSource(source: .window(id), pixelWidth: 1600, pixelHeight: 1200,
+            return ResolvedSource(source: .window(id), pixelWidth: 1600, pixelHeight: 1200,
                            screenFrame: CGRect(x: 100, y: 50, width: 800, height: 600), window: window)
         }
     }
@@ -129,15 +135,35 @@ actor SyntheticFrameSource: FrameSource {
 struct PhoneControl {
     let session: any PeerSession
     var messages: AsyncThrowingStream<ControlMessage, any Error>.AsyncIterator
+    var latestConfig: StreamConfig?
+    let acknowledgeConfigurations: Bool
 
-    init(_ session: any PeerSession) {
+    init(_ session: any PeerSession, acknowledgeConfigurations: Bool = true) {
+        self.acknowledgeConfigurations = acknowledgeConfigurations
         self.session = session
         messages = session.controlMessages.makeAsyncIterator()
+    }
+
+    func sendInput(_ input: InputEvent) async throws {
+        guard let latestConfig else { throw TransportError.closed }
+        try await session.send(.scoped(generation: latestConfig.sourceGeneration, event: input))
+    }
+    func sendText(_ text: String) async throws {
+        guard let latestConfig else { throw TransportError.closed }
+        try await session.send(.sourceText(generation: latestConfig.sourceGeneration, text: text))
+    }
+    func sendKey(_ press: KeyPress) async throws {
+        guard let latestConfig else { throw TransportError.closed }
+        try await session.send(.sourceKey(generation: latestConfig.sourceGeneration, press: press))
     }
 
     mutating func next() async throws -> ControlMessage? {
         while let message = try await messages.next() {
             switch message {
+            case .streamConfig(let config):
+                latestConfig = config
+                if acknowledgeConfigurations { try await session.send(.sourceReady(config.sourceGeneration)) }
+                return message
             case .ping(let value): try await session.send(.pong(value))
             case .linkQuality, .clipboard: continue
             default: return message

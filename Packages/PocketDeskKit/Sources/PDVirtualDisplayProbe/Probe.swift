@@ -14,6 +14,7 @@ struct Options {
     var hold = 0
     var unavailable = false
     var inventory = false
+    var sizingMatrix = false
     var surfaceDisplay: UInt32?
 
     init(_ arguments: [String]) throws {
@@ -32,6 +33,7 @@ struct Options {
                 hold = value
             case "--simulate-unavailable": unavailable = true
             case "--inventory": inventory = true
+            case "--sizing-matrix": sizingMatrix = true
             case "--surface-display":
                 guard let id = args.next().flatMap(UInt32.init), id != 0 else { throw ProbeError("--surface-display needs a display ID") }
                 surfaceDisplay = id
@@ -102,13 +104,14 @@ final class Surface: NSObject {
     let button = NSButton(title: "Mapped input target", target: nil, action: nil)
     private(set) var clicks = 0
     private let originalFrame: NSRect
+    private var animation: Task<Void, Never>?
 
     override init() {
         window = NSWindow(contentRect: NSRect(x: 120, y: 180, width: 360, height: 180),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
         originalFrame = window.frame
         super.init()
-        window.title = "PocketDesk Phase 0 — scratch window"
+        window.title = "PocketDesk display proof — scratch window"
         window.isReleasedWhenClosed = false
         button.frame = NSRect(x: 65, y: 65, width: 230, height: 50)
         button.target = self
@@ -138,7 +141,23 @@ final class Surface: NSObject {
             && window.frame.intersection($0.visibleFrame).height >= 40 }
     }
 
+    func animate() {
+        window.contentView?.wantsLayer = true
+        animation = Task { [weak self] in
+            var tick = 0
+            while !Task.isCancelled {
+                guard let self else { return }
+                tick += 1
+                self.button.title = "Retina text · Frame \(tick)"
+                self.window.contentView?.layer?.backgroundColor = NSColor(calibratedHue: CGFloat(tick % 120) / 120,
+                    saturation: 0.3, brightness: 0.9, alpha: 1).cgColor
+                do { try await Task.sleep(for: .milliseconds(8)) } catch { return }
+            }
+        }
+    }
+
     func close() {
+        animation?.cancel(); animation = nil
         window.setFrame(originalFrame, display: false)
         window.orderOut(nil)
     }
@@ -303,6 +322,10 @@ struct Main {
                         try JSONEncoder().encode(result).write(to: options.report, options: .atomic)
                     }
                     surface.close()
+                    exit(0)
+                }
+                if options.sizingMatrix {
+                    try await SizingProof.run(report: options.report)
                     exit(0)
                 }
                 let success = await Probe(options: options).run()

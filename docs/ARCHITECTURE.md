@@ -46,12 +46,12 @@ used to mint each device's self-signed certificate.
 
 ## Transport
 
-One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 23), four logical channels:
+One QUIC connection per session, ALPN `pocketdesk/<protocolVersion>` (now 24), four logical channels:
 
 | Channel | QUIC primitive | Payload | Why |
 |---|---|---|---|
 | control | bidirectional stream, opened by the phone | `ControlMessage` as JSON via `Coder` | Reliable, ordered, easy to evolve |
-| input | datagrams (max frame 1200 B) | `InputEvent`, ≤11 bytes binary | Lost pointer moves are superseded by the next one, so no retransmit lag. Keys go on the control stream (`ControlMessage.key`): a lost key-up would leave ⌘ held down |
+| input | datagrams (max frame 1200 B) | `InputEvent.scoped`, ≤16 bytes binary | Lost pointer moves are superseded by the next one, so no retransmit lag. Keys go on the control stream (`ControlMessage.key`): a lost key-up would leave ⌘ held down |
 | video | unidirectional stream, opened by the Mac on its first frame; initial byte `0` | `VideoFrameHeader` (21 B) + payload | Reliable, but the host drops frames *before* encoding under backpressure |
 | audio | independent unidirectional stream, opened by the Mac on its first packet; initial byte `1` | `AudioFrameHeader` (16 B) + raw AAC-LC packet | Timestamped audio cannot block video delivery |
 
@@ -151,32 +151,46 @@ ceiling (`QualityCeiling`) that link adaptation steps down from:
 Low Power Mode on the phone means Battery Saver whatever the setting
 (`StreamQuality.effective`). A change restarts the stream at the new size.
 
-## Virtual workspace requests (protocol v23)
+## Virtual workspaces and sizing (protocol v24)
 
-The Displays picker subscribes with `watchVirtualDisplay`. This is read-only; only an
-explicit `createVirtualDisplay` on an approved streaming connection can allocate a display.
-Catalog/status/shortcut-only connections ignore these requests. The Mac's default-off
-Allow Virtual Displays setting and runtime checks remain authoritative.
+The picker subscribes with `watchVirtualDisplay`. This is read-only; an explicit
+`createVirtualDisplay` on an approved stream allocates one workspace under the Mac's
+Allow Virtual Displays setting. Catalog/status/shortcut-only connections cannot allocate.
 
-Requests carry UUIDs and a bounded desired logical mode. The host negotiates the currently
-qualified 1280×800 1× mode; it reports both requested and accepted mode. Arbitrary sizes,
-Retina and rotation-driven desktop mode changes remain Phase 3. Existing viewport fitting
-and quality adaptation size the encoded stream without resizing the Mac desktop.
+Modes separate logical desktop dimensions, 1×/2× backing pixels, and encoded video size.
+The bounded catalogue offers 1024×768, 1280×800 and 1280×960 landscape desktops at 1×/2×,
+and their portrait counterparts at 2×, each at 30/60 Hz. Maximum backing area is 4,915,200
+pixels and maximum side 2560. `configureVirtualDisplay` carries the current lease, desired
+mode, optional viewport and request UUID. The lifecycle actor validates owner and lease,
+serializes pause/apply/rollback/resume, retains native identity and reports accepted geometry.
+Normal configuration failure restores the old mode; failed restoration ends the owned
+workspace or leaves cleanup visibly retryable. No physical display is reconfigured.
 
-`virtualDisplay` snapshots carry capability, permission, lifecycle revision, owner name,
-per-connection ownership, stable logical identity, lease UUID, transient capture ID and
-actual capture geometry in global points/backing pixels. Request acknowledgments are
-correlated separately from state revisions. Delayed acknowledgments cannot replace newer
-state. A request timeout offers physical streaming and refresh; it never reconnects or
-blindly repeats creation. Disconnect/switching Macs clears pending ownership state.
+The native bridge publishes a bounded table for the current desktop orientation, replacing
+it only when switching orientation. It selects dimensions/scale/refresh in that table without
+recreating the display. A fresh signed AppKit process qualifies actual backing dimensions,
+capture and cleanup. The service rejects creation without an active main display; headless
+operation remains unqualified. See the Phase 3 decision and evidence.
 
-The host automatically selects and streams a created workspace through the existing
-capture/encode/audio/input pipeline. Failures return a typed problem and useful text while
-preserving physical streaming when possible. The existing source-generation and keyframe
-barrier applies, and native connections have separate input injectors. `endVirtualDisplay`
-requires both the current lease and its owning connection, verified together in the
-lifecycle actor. Capture returns to the main display before native release. Mac-local End,
-disabling permission, and lifecycle errors are pushed to subscribed phones.
+The UI debounces scene changes by 450 ms, retains the latest intent while a request is in
+flight, and acknowledges before applying another. Follow Rotation uses the window scene's
+interface orientation, not view/keyboard aspect ratio. Scene viewport changes can refit
+encoded video with `setViewport`; quality/link adaptation never calls the display backend.
+Errors/timeouts stop automatic mode retries. Logical size and backing sharpness remain
+explicit choices in the Displays picker.
+
+`StreamConfig.sourceGeneration` confirms the picture's coordinate epoch. Every streaming
+pointer/scroll packet carries `InputEvent.scoped(generation:event:)`; reliable key/text use
+`sourceKey`/`sourceText`. Unscoped streaming input is rejected. The client waits for an actual
+decoded keyframe of the expected generation before `sourceReady`; the host then accepts
+only that generation. Old configs, video, audio and input cannot roll the stream backwards.
+Pressed keys/buttons are released before changing coordinates. Attaching a video layer asks
+for a new keyframe so an idle desktop cannot leave input permanently waiting.
+
+Reports include capability, permission, revisions, logical identity, lease, owner and actual
+global capture bounds/backing pixels. The same owner/lease checks govern End. Before native
+release, capture returns to the main display. Local Mac End, permission changes and lifecycle
+errors are pushed to subscribers. Pending state is cleared at connection boundaries.
 
 ## Display selection (protocol v4)
 

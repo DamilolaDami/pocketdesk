@@ -18,6 +18,13 @@ public final class SessionController {
     /// Set by the app before connecting (screen size in points + scale, device name).
     public var viewport = Viewport(width: 402, height: 874, scale: 3)
     public var deviceName = "iPhone"
+    private var performanceTrace: Task<Void, Never>?
+    private var sizingTask: Task<Void, Never>?
+    private var desiredWorkspaceMode: VirtualDisplayMode?
+    private var modeRequestID: UUID?
+    private var lastScenePortrait: Bool?
+    private var lastSentViewport: Viewport?
+
 
     public var audioEnabled: Bool {
         get { UserDefaults.standard.object(forKey: "streamAudio") as? Bool ?? true }
@@ -444,6 +451,21 @@ public final class SessionController {
             store.send(.pairingConfirmed)
         case .virtualDisplay(let report):
             store.update(virtualDisplay: .received(report))
+            if let modeRequestID, report.requestID == modeRequestID {
+                self.modeRequestID = nil
+                if report.problem != nil { desiredWorkspaceMode = nil }
+                else if report.workspace?.acceptedMode == desiredWorkspaceMode { desiredWorkspaceMode = nil }
+            }
+            if let workspace = report.workspace, workspace.isOwner {
+                if desiredWorkspaceMode == nil, !store.virtualDisplay.isBusy {
+                    var sizing = store.workspaceSizing
+                    sizing.accept(workspace.acceptedMode)
+                    store.update(workspaceSizing: sizing)
+                }
+                if !store.virtualDisplay.isBusy, desiredWorkspaceMode != nil || lastSentViewport != viewport { scheduleWorkspaceUpdate() }
+            } else if report.phase == .idle {
+                desiredWorkspaceMode = nil
+            }
         case .displays(let displays):
             store.update(displays: displays)
         case .wallpaper(let jpeg):
@@ -457,6 +479,9 @@ public final class SessionController {
         case .streamConfig(let config):
             if config.displayID != nil { store.send(.sourceChanged(nil)) }
             store.send(.connected(config))
+#if DEBUG && os(iOS)
+            if performanceTrace == nil { performanceTrace = WorkspacePerformanceTrace.start(self) }
+#endif
             if let hostID = connectionHostID {
                 lastUsed[hostID] = .now
                 try? lastUsed.save(to: lastUsedURL)
@@ -466,6 +491,15 @@ public final class SessionController {
                displayID != store.virtualDisplay.report?.workspace?.displayID {
                 displayPreferences.remember(selected.persistentID, for: hostID)
                 try? displayPreferences.save(to: displayPreferencesURL)
+            }
+            if config.displayID == store.virtualDisplay.report?.workspace?.displayID,
+               store.virtualDisplay.report?.workspace?.isOwner == true, let lastScenePortrait {
+                var sizing = store.workspaceSizing
+                if sizing.observeOrientation(portrait: lastScenePortrait) {
+                    store.update(workspaceSizing: sizing)
+                    desiredWorkspaceMode = sizing.mode
+                    scheduleWorkspaceUpdate()
+                }
             }
             if let action = pendingAction {
                 pendingAction = nil
@@ -491,6 +525,9 @@ public final class SessionController {
         case .files(let files):
             streamFiles = files
         case .ended(let reason):
+            performanceTrace?.cancel(); performanceTrace = nil
+            sizingTask?.cancel(); sizingTask = nil
+            desiredWorkspaceMode = nil; modeRequestID = nil; lastSentViewport = nil; lastScenePortrait = nil
             stopKeyRepeat()
             activeConnectionID = nil
             connectionHostID = nil
@@ -617,13 +654,73 @@ public final class SessionController {
         connection?.send(.watchVirtualDisplay)
     }
 
+#if DEBUG && os(iOS)
+    func sampleTraceStatistics() -> StreamStats { connection?.sampleTraceStatistics() ?? StreamStats() }
+#endif
+
     public func createVirtualDisplay() {
         guard case .streaming = store.state, store.virtualDisplay.report?.canCreate == true,
               !store.virtualDisplay.isBusy, let connection else { return }
-        let request = VirtualDisplayRequest(mode: .preferred(for: viewport))
+        var sizing = store.workspaceSizing
+        if sizing.followsRotation, let lastScenePortrait { sizing.portrait = lastScenePortrait }
+        store.update(workspaceSizing: sizing)
+        let request = VirtualDisplayRequest(mode: sizing.mode)
         store.update(virtualDisplay: .requested(request.id))
         connection.send(.createVirtualDisplay(request))
         expireVirtualDisplayRequest(request.id)
+    }
+
+    public func setWorkspaceSizing(_ sizing: WorkspaceSizing) {
+        var next = sizing
+        if next.portrait { next.scale = 2 }
+        guard next.mode.isValid else { return }
+        if next.followsRotation, let lastScenePortrait { next.portrait = lastScenePortrait }
+        store.update(workspaceSizing: next)
+        if store.virtualDisplay.report?.workspace?.isOwner == true {
+            desiredWorkspaceMode = next.mode
+            scheduleWorkspaceUpdate()
+        }
+    }
+
+    public func sceneViewportChanged(portrait: Bool, viewport: Viewport) {
+        guard viewport.isValid else { return }
+        let viewportChanged = self.viewport != viewport
+        let orientationChanged = lastScenePortrait != portrait
+        self.viewport = viewport
+        lastScenePortrait = portrait
+        guard viewportChanged || orientationChanged else { return }
+        var sizing = store.workspaceSizing
+        if store.virtualDisplay.report?.workspace?.isOwner == true,
+           store.displaySelection.selectedID == store.virtualDisplay.report?.workspace?.displayID,
+           sizing.observeOrientation(portrait: portrait) {
+            store.update(workspaceSizing: sizing)
+            desiredWorkspaceMode = sizing.mode
+        }
+        scheduleWorkspaceUpdate()
+    }
+
+    private func scheduleWorkspaceUpdate() {
+        sizingTask?.cancel()
+        sizingTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(450)) } catch { return }
+            guard let self, !Task.isCancelled, case .streaming = self.store.state, let connection = self.connection else { return }
+            guard !self.store.virtualDisplay.isBusy else { return } // Latest intent stays queued until acknowledgment.
+            if let mode = self.desiredWorkspaceMode, let workspace = self.store.virtualDisplay.report?.workspace, workspace.isOwner,
+               mode != workspace.acceptedMode {
+                let request = VirtualDisplayConfiguration(leaseID: workspace.leaseID, mode: mode, viewport: self.viewport)
+                self.modeRequestID = request.id
+                self.store.update(virtualDisplay: .requested(request.id))
+                connection.send(.configureVirtualDisplay(request))
+                self.lastSentViewport = self.viewport
+                self.expireVirtualDisplayRequest(request.id)
+            } else {
+                self.desiredWorkspaceMode = nil
+                if self.lastSentViewport != self.viewport {
+                    self.lastSentViewport = self.viewport
+                    connection.send(.setViewport(self.viewport))
+                }
+            }
+        }
     }
 
     public func endVirtualDisplay() {
@@ -640,6 +737,7 @@ public final class SessionController {
             try? await Task.sleep(for: .seconds(12))
             guard let self, self.store.virtualDisplay.pendingID == id else { return }
             self.store.update(virtualDisplay: .timedOut(id))
+            if self.modeRequestID == id { self.modeRequestID = nil; self.desiredWorkspaceMode = nil }
             self.refreshDisplays()
         }
     }

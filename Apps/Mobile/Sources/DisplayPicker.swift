@@ -66,27 +66,36 @@ struct DisplayPicker: View {
 
     @ViewBuilder private var virtualWorkspaceSection: some View {
         Section {
-            Label {
+            HStack(spacing: 14) {
+                Image(systemName: "display.badge.plus")
+                    .font(.title2).foregroundStyle(Brand.accent)
+                    .frame(width: 48, height: 48)
+                    .background(Brand.accent.opacity(0.1), in: .rect(cornerRadius: 14))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Virtual Display").font(.body.weight(.semibold))
-                    Text("Add an extra workspace to your Mac, then use it here.")
+                    Text("Virtual workspace").font(.headline)
+                    Text(workspace == nil ? "An extra desktop for this device." : (workspace?.isOwner == true ? "Your own space on the Mac." : "Currently in use on another device."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
-            } icon: {
-                Image(systemName: "display.badge.plus").font(.title2).foregroundStyle(Brand.accent)
+                Spacer(minLength: 0)
+                if workspace?.isOwner == true {
+                    Text("Active").font(.caption.weight(.medium))
+                        .foregroundStyle(Brand.accent)
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(Brand.accent.opacity(0.1), in: .capsule)
+                }
             }
+            .padding(.vertical, 6)
             if virtual.isBusy {
                 HStack {
                     ProgressView()
-                    Text(virtual.report?.phase == .ending ? "Ending workspace…" : "Waiting for your Mac…")
+                    Text(virtual.report?.phase == .ending ? "Ending workspace…" : (virtual.report?.phase == .configuring ? "Resizing workspace…" : "Waiting for your Mac…"))
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
             }
             if let workspace, workspace.isOwner {
                 let mode = workspace.acceptedMode
-                Text("\(mode.width) × \(mode.height) · \(mode.scale)× workspace")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                workspaceSettings(mode: mode)
                 if let display = controller.store.displaySelection.displays.first(where: { $0.id == workspace.displayID }) {
                     Button {
                         controller.selectDisplay(display)
@@ -114,10 +123,14 @@ struct DisplayPicker: View {
                 Text("A workspace is in use by \(workspace.ownerName). End it on the Mac or from its viewing device before creating another.")
                     .font(.subheadline).foregroundStyle(.secondary)
             } else if virtual.report?.canCreate == true {
-                Button("Add Workspace") { controller.createVirtualDisplay() }
-                    .disabled(virtual.isBusy)
-                Text("This Mac currently offers 1280 × 800 at 1×. The stream fits your iPhone or iPad.")
-                    .font(.caption).foregroundStyle(.secondary)
+                workspaceSettings(mode: controller.store.workspaceSizing.mode)
+                Button { controller.createVirtualDisplay() } label: {
+                    Label("Add Workspace", systemImage: "plus")
+                        .font(.body.weight(.semibold)).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(Brand.accent)
+                .listRowSeparator(.hidden)
+                .disabled(virtual.isBusy)
             } else if virtual.report == nil {
                 Text("Checking Mac support…").font(.subheadline).foregroundStyle(.secondary)
                 Button("Refresh") { controller.refreshDisplays() }
@@ -126,7 +139,25 @@ struct DisplayPicker: View {
                 Text(message).font(.caption).foregroundStyle(.secondary)
             }
         } footer: {
-            Text("Physical screens stay on. Returning to a Mac display keeps this workspace until you end it or disconnect.")
+            Text("Your Mac screens stay on. The workspace closes when you end it or disconnect.")
         }
     }
+
+    private func workspaceSettings(mode: VirtualDisplayMode) -> some View {
+        NavigationLink {
+            WorkspaceSizingControls(controller: controller)
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Workspace settings").font(.subheadline.weight(.medium))
+                    Text("\(mode.width) × \(mode.height)  ·  \(mode.scale == 2 ? "Retina" : "Standard")  ·  \(mode.refreshRate) fps")
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                }
+                Spacer()
+            }
+            .padding(.vertical, 3)
+        }
+        .disabled(virtual.isBusy)
+    }
+
 }

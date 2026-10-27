@@ -43,6 +43,7 @@ public final class InputInjector: InputSink, @unchecked Sendable {
 
     private func injectLocked(_ event: InputEvent) {
         switch event {
+        case .scoped: return // Transport envelopes must be validated/unwrapped by HostSession.
         case let .pointerMove(x, y):
             let type: CGEventType = pressedButtons.contains(.left) ? .leftMouseDragged
                 : pressedButtons.contains(.right) ? .rightMouseDragged : .mouseMoved
@@ -73,6 +74,12 @@ public final class InputInjector: InputSink, @unchecked Sendable {
                 post(CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: false))
             }
             pressedKeys = []
+            let location = CGEvent(source: eventSource)?.location ?? sourceFrame.origin
+            for button in pressedButtons {
+                let (type, mouseButton) = Self.mouseEvent(for: button, isDown: false)
+                post(CGEvent(mouseEventSource: eventSource, mouseType: type, mouseCursorPosition: location, mouseButton: mouseButton))
+            }
+            pressedButtons = []
         }
     }
 

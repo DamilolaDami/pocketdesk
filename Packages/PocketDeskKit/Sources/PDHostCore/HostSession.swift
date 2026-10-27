@@ -103,6 +103,11 @@ public actor HostSession {
     /// without a word: Now Playing pushes treat a phone this quiet as gone.
     private var lastHeard = ContinuousClock.now
     private var isStreaming = false
+    private var isModeChanging = false
+    private var configurationStreamError: String?
+    private var pausedForVirtualDisplay: UInt32?
+    private var inputReady = false
+    private var virtualRefreshCeiling = 60
     private var watchesStatus = false
 
     /// The phone is on screen with PocketDesk: streaming, or watching status and still pinging.
@@ -339,22 +344,41 @@ public actor HostSession {
         clipboardTask = Task { await self.watchClipboard() }
         // Owned by the actor so `stopStreaming` can wait for it: tasks holding the session must
         // not outlive the connection.
-        inputTask = Task { [session, input] in
-            do { for try await event in session.inputEvents { input.inject(event) } } catch {}
+        inputTask = Task { [session] in
+            do { for try await event in session.inputEvents { await self.deliverInput(event) } } catch {}
         }
 
         while let message = try await messages.next() {
             lastHeard = .now
             switch message {
+            case .setViewport(let value):
+                guard value.isValid, value != viewport else { continue }
+                viewport = value
+                if !isModeChanging { try await startStreaming(currentSource, keepingSource: true) }
+            case .sourceReady(let value):
+                if isStreaming && value == generation && !isModeChanging { inputReady = true }
+            case .sourceKey(let value, let press):
+                guard isStreaming, inputReady, !isModeChanging, value == generation else { continue }
+                input.inject(.key(code: press.code, isDown: press.isDown, modifiers: press.modifiers))
+                if press.isDown { followCaret() }
+            case .sourceText(let value, let text):
+                guard isStreaming, inputReady, !isModeChanging, value == generation else { continue }
+                input.insertText(text); followCaret()
+            case .configureVirtualDisplay(let request):
+                if virtualRequestTask != nil {
+                    await sendVirtualDisplay(requestID: request.id, problem: .busy, message: "A workspace change is already finishing.")
+                } else {
+                    virtualRequestTask = Task { await self.configureVirtualDisplay(request) }
+                }
             case .setAudioEnabled(let enabled):
                 if enabled != audioEnabled {
                     audioEnabled = enabled
-                    try await startStreaming(currentSource)
+                    if !isModeChanging { try await startStreaming(currentSource) }
                 }
             case .setQuality(let newQuality):
                 if newQuality != quality {
                     quality = newQuality
-                    try await startStreaming(currentSource, keepingSource: true)
+                    if !isModeChanging { try await startStreaming(currentSource, keepingSource: true) }
                 }
             case .requestKeyframe:
                 encoder?.requestKeyframe()
@@ -380,6 +404,7 @@ public actor HostSession {
             case .listDisplays:
                 try await session.send(.displays(try await visibleDisplays()))
             case .selectDisplay(let id):
+                guard !isModeChanging else { try await session.send(.actionFailed("Wait for the workspace size change to finish.")); continue }
                 // Resolve before stopping the current pump: a stale picker must not end it.
                 do {
                     try await startStreaming(.display(id))
@@ -390,18 +415,16 @@ public actor HostSession {
             case .listWindows:
                 try await session.send(.windows(try await frameSource.windows()))
             case .selectSource(let windowID):
+                guard !isModeChanging else { try await session.send(.actionFailed("Wait for the workspace size change to finish.")); continue }
                 do {
                     try await startStreaming(windowID.map(CaptureSource.window) ?? selectedDisplayID.map(CaptureSource.display))
                 } catch {
                     await finish(with: .bye(reason: Self.describeStreamingFailure(error)))
                     throw error
                 }
-            case .insertText(let text):
-                input.insertText(text)
-                followCaret()
-            case .key(let press):
-                input.inject(.key(code: press.code, isDown: press.isDown, modifiers: press.modifiers))
-                if press.isDown { followCaret() }
+            case .insertText, .key:
+                // Protocol 24 streaming input must carry its source generation.
+                continue
             case .run(let action):
                 _ = try await run(action)
             case .listApps, .requestAppIcons, .listMacShortcuts:
@@ -595,20 +618,24 @@ public actor HostSession {
     }
 
     private func restartStreaming(_ source: CaptureSource?) async throws {
-        guard isStreaming else { throw CancellationError() }
+        guard isStreaming, !isModeChanging else { throw CancellationError() }
         if case .display(let id) = source, await virtualDisplays?.canView(displayID: id, sessionID: viewingSessionID) == false {
             throw CaptureError.sourceNotFound
         }
         let resolved = try await frameSource.resolve(source)
         guard isStreaming else { throw CancellationError() }
+        if let lease = await virtualDisplays?.snapshot().active,
+           resolved.source == .display(lease.displayID) || resolved.screenFrame.intersects(CGDisplayBounds(lease.displayID)) {
+            virtualRefreshCeiling = lease.mode.refreshRate
+        } else { virtualRefreshCeiling = 60 }
         let full = StreamSizing.fit(sourceWidth: resolved.pixelWidth, sourceHeight: resolved.pixelHeight, into: viewport,
                                     zoomHeadroom: ceiling.zoomHeadroom)
         let size = StreamSizing.scale(full, by: rate.step.scale)
         let displayID: UInt32?
         if case .display(let id) = resolved.source { displayID = id } else { displayID = nil }
         fullBitrateKbps = Int(Double(StreamSizing.bitrateKbps(width: full.width, height: full.height,
-                                                              fps: min(configuration.fps, ceiling.fps))) * ceiling.bitrate)
-        let config = StreamConfig(codec: .hevc, width: size.width, height: size.height, fps: streamFPS,
+                                                              fps: min(configuration.fps, ceiling.fps, virtualRefreshCeiling))) * ceiling.bitrate)
+        var config = StreamConfig(codec: .hevc, width: size.width, height: size.height, fps: streamFPS,
                                   bitrateKbps: streamBitrateKbps, displayID: displayID)
         let encoder = try await HEVCEncoder.make(width: config.width, height: config.height, fps: config.fps,
                                       bitrateKbps: config.bitrateKbps)
@@ -618,6 +645,9 @@ public actor HostSession {
         currentSource = resolved.source
         if let displayID { selectedDisplayID = displayID }
         generation &+= 1
+        config.sourceGeneration = generation
+        inputReady = false
+        input.releaseKeys()
         framesInFlight = 0
         lastFrame = nil
         refinesLeft = 0
@@ -744,7 +774,7 @@ public actor HostSession {
     // MARK: Fitting the stream to the link
 
     private var ceiling: QualityCeiling { QualityCeiling(quality) }
-    private var streamFPS: Int { min(configuration.fps, rate.step.fps, ceiling.fps) }
+    private var streamFPS: Int { min(configuration.fps, rate.step.fps, ceiling.fps, virtualRefreshCeiling) }
 
     private var streamBitrateKbps: Int {
         max(Self.minBitrateKbps, Int(Double(fullBitrateKbps) * rate.step.bitrate))
@@ -789,6 +819,7 @@ public actor HostSession {
                 continue
             }
 
+            if isModeChanging { continue }
             let previous = rate.step
             guard rate.update(sample) else { continue }
             if rate.step.scale != previous.scale {
@@ -848,7 +879,7 @@ public actor HostSession {
         let reason = message ?? state.error ?? state.unavailableReason
             ?? (!state.enabled ? "Enable Allow Virtual Displays in PocketDesk's Mac menu. Physical displays are still available." : nil)
         let report = VirtualDisplayReport(revision: state.revision, supported: state.available, allowed: state.enabled,
-            suspended: state.suspended, modes: state.available ? [.standard] : [],
+            suspended: state.suspended, modes: state.available ? VirtualDisplayMode.supported : [],
             phase: .init(rawValue: String(describing: state.phase)) ?? .idle, workspace: workspace,
             requestID: requestID, requestedMode: requestedVirtualMode, problem: problem, message: reason)
         try? await session.send(.virtualDisplay(report))
@@ -864,7 +895,7 @@ public actor HostSession {
         guard let virtualDisplays else { await sendVirtualDisplay(requestID: request.id); return }
         do {
             // Negotiate against the host's qualified modes, never trust client dimensions.
-            let lease = try await virtualDisplays.create(for: viewingSessionID, mode: .standard)
+            let lease = try await virtualDisplays.create(for: viewingSessionID, mode: request.mode.isValid ? request.mode : .standard)
             do {
                 try Task.checkCancellation()
                 try await startStreaming(.display(lease.displayID))
@@ -895,6 +926,82 @@ public actor HostSession {
             default: problem = error is CancellationError ? .cancelled : .failed
             }
             await sendVirtualDisplay(requestID: request.id, problem: problem, message: String(describing: error))
+        }
+    }
+
+    private func configureVirtualDisplay(_ request: VirtualDisplayConfiguration) async {
+        defer { virtualRequestTask = nil }
+        requestedVirtualMode = request.mode
+        if let value = request.viewport {
+            guard value.isValid else {
+                await sendVirtualDisplay(requestID: request.id, problem: .invalidMode, message: "That device viewport isn't supported.")
+                return
+            }
+        }
+        guard let virtualDisplays else { await sendVirtualDisplay(requestID: request.id); return }
+        do {
+            let snapshot = await virtualDisplays.snapshot()
+            guard let owned = snapshot.active, owned.id == request.leaseID, owned.owner.id == viewingSessionID else {
+                throw VirtualDisplayError.notViewing
+            }
+            guard request.mode.isValid else { throw VirtualDisplayError.invalidMode }
+            let oldMode = owned.mode
+            let oldViewport = viewport
+            if let value = request.viewport { viewport = value }
+            configurationStreamError = nil
+            _ = try await virtualDisplays.configure(request.leaseID, for: viewingSessionID, mode: request.mode)
+            if oldMode == request.mode, viewport != oldViewport { try await startStreaming(currentSource, keepingSource: true) }
+            try await session.send(.displays(try await visibleDisplays()))
+            await sendVirtualDisplay(requestID: request.id, problem: configurationStreamError == nil ? nil : .failed,
+                                     message: configurationStreamError)
+        } catch {
+            let problem: VirtualDisplayReport.Problem
+            switch error as? VirtualDisplayError {
+            case .notViewing: problem = .notOwner
+            case .invalidMode: problem = .invalidMode
+            case .busy: problem = .busy
+            case .disabled: problem = .disabled
+            case .cancelled: problem = .cancelled
+            default: problem = .failed
+            }
+            await sendVirtualDisplay(requestID: request.id, problem: problem, message: String(describing: error))
+        }
+    }
+
+    private func deliverInput(_ event: InputEvent) {
+        guard isStreaming, !isModeChanging else { return }
+        if case .scoped(let value, let payload) = event {
+            guard inputReady, value == generation else { return }
+            if case .scoped = payload { return }
+            input.inject(payload)
+        }
+    }
+
+    func pauseForVirtualDisplayConfiguration(_ id: UInt32) async {
+        guard isStreaming, currentSource == .display(id) || sourceFrame?.intersects(CGDisplayBounds(id)) == true else { return }
+        pausedForVirtualDisplay = id
+        isModeChanging = true; inputReady = false
+        input.releaseKeys()
+        if let streamChange { _ = await streamChange.result }
+        await stopPump()
+        await frameSource.stop()
+    }
+
+    func resumeAfterVirtualDisplayConfiguration(_ id: UInt32) async {
+        guard pausedForVirtualDisplay == id else { return }
+        pausedForVirtualDisplay = nil; isModeChanging = false
+        guard isStreaming else { return }
+        do { try await startStreaming(currentSource) }
+        catch {
+            let message = "The resized workspace couldn't be streamed. Showing the Mac display; you can end the workspace or try again."
+            configurationStreamError = message
+            do {
+                try await startStreaming(nil)
+                try await session.send(.actionFailed(message))
+            } catch {
+                try? await session.send(.bye(reason: "The Mac display couldn't resume. Check Screen Recording permission on the Mac."))
+                await session.close()
+            }
         }
     }
 
@@ -973,6 +1080,7 @@ public actor HostSession {
 
     func prepareToRemoveVirtualDisplay(_ id: UInt32) async {
         guard isStreaming else { return }
+        if pausedForVirtualDisplay == id { pausedForVirtualDisplay = nil; isModeChanging = false }
         if selectedDisplayID == id { selectedDisplayID = nil }
         let onDisplay: Bool
         if currentSource == .display(id) { onDisplay = true }

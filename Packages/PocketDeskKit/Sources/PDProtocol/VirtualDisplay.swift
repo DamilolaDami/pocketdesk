@@ -10,10 +10,26 @@ public struct VirtualDisplayMode: Codable, Sendable, Equatable, Hashable {
         self.width = width; self.height = height; self.scale = scale; self.refreshRate = refreshRate
     }
     public static let standard = Self(width: 1280, height: 800)
-    /// The initial backend qualification. More modes require native validation.
-    public var isValid: Bool { self == .standard }
+    public static let presets = [(1024, 768), (1280, 800), (1280, 960)]
+    public static var supported: [Self] {
+        presets.flatMap { width, height in
+            [false, true].flatMap { portrait in
+                [1, 2].flatMap { scale in [30, 60].map { hz in
+                    Self(width: portrait ? height : width, height: portrait ? width : height, scale: scale, refreshRate: hz)
+                } }
+            }
+        }.filter { $0.isValid }
+    }
+    public var pixelWidth: Int { isValid ? width * scale : 0 }
+    public var pixelHeight: Int { isValid ? height * scale : 0 }
+    public var isPortrait: Bool { height > width }
+    public var rotated: Self { Self(width: height, height: width, scale: height < width ? 2 : scale, refreshRate: refreshRate) }
+    public var isValid: Bool {
+        [1, 2].contains(scale) && [30, 60].contains(refreshRate) && (width >= height || scale == 2)
+            && Self.presets.contains { (width == $0.0 && height == $0.1) || (height == $0.0 && width == $0.1) }
+    }
     public var isBoundedRequest: Bool {
-        (480...4096).contains(width) && (480...4096).contains(height) && scale == 1 && [30, 60].contains(refreshRate)
+        (480...4096).contains(width) && (480...4096).contains(height) && [1, 2].contains(scale) && [30, 60].contains(refreshRate)
     }
     /// Ask for the device's aspect ratio without allocating at the device's Retina scale.
     public static func preferred(for viewport: Viewport) -> Self {
@@ -37,7 +53,7 @@ public struct VirtualDisplayEnd: Codable, Sendable, Equatable {
 }
 
 public struct VirtualDisplayReport: Codable, Sendable, Equatable {
-    public enum Phase: String, Codable, Sendable { case idle, creating, active, ending, cleanupFailed }
+    public enum Phase: String, Codable, Sendable { case idle, creating, configuring, active, ending, cleanupFailed }
     public enum Problem: String, Codable, Sendable { case disabled, unsupported, busy, invalidMode, notOwner, cancelled, failed }
     public struct Geometry: Codable, Sendable, Equatable {
         public var x: Double
@@ -83,4 +99,14 @@ public struct VirtualDisplayReport: Codable, Sendable, Equatable {
         self.requestedMode = requestedMode; self.problem = problem; self.message = message
     }
     public var canCreate: Bool { supported && allowed && !suspended && phase == .idle && workspace == nil }
+}
+
+public struct VirtualDisplayConfiguration: Codable, Sendable, Equatable {
+    public var id: UUID
+    public var leaseID: UUID
+    public var mode: VirtualDisplayMode
+    public var viewport: Viewport?
+    public init(id: UUID = UUID(), leaseID: UUID, mode: VirtualDisplayMode, viewport: Viewport? = nil) {
+        self.id = id; self.leaseID = leaseID; self.mode = mode; self.viewport = viewport
+    }
 }

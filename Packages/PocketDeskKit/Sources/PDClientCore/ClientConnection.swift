@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Synchronization
 import Network
 import os
 import PDProtocol
@@ -96,6 +97,28 @@ public actor ClientConnection {
 
     /// UI → Mac, in order. Streams (not ad-hoc Tasks) so a button-down never overtakes its
     /// button-up.
+    private nonisolated let sourceEpoch = SourceEpochBox()
+#if DEBUG && os(iOS)
+    private nonisolated let traceCounters = Mutex(TraceCounters())
+    private struct TraceCounters: Sendable {
+        var frames = 0
+        var bytes = 0
+        var lastSample = ProcessInfo.processInfo.systemUptime
+        var roundTripMillis: Double = 0
+    }
+    nonisolated func sampleTraceStatistics() -> StreamStats {
+        traceCounters.withLock { value in
+            let now = ProcessInfo.processInfo.systemUptime
+            let elapsed = max(0.001, now - value.lastSample)
+            var sample = StreamStats()
+            sample.framesPerSecond = Double(value.frames) / elapsed
+            sample.bitrateKbps = Double(value.bytes) * 8 / elapsed / 1000
+            sample.roundTripMillis = value.roundTripMillis
+            value.frames = 0; value.bytes = 0; value.lastSample = now
+            return sample
+        }
+    }
+#endif
     private let inputs = AsyncStream<InputEvent>.makeStream(bufferingPolicy: .bufferingNewest(256))
     private let outbox = AsyncStream<ControlMessage>.makeStream()
 
@@ -108,16 +131,26 @@ public actor ClientConnection {
     }
 
     public nonisolated func send(_ input: InputEvent) {
-        inputs.continuation.yield(input)
+        guard let generation = sourceEpoch.state.withLock({ $0.ready ? $0.generation : nil }) else { return }
+        inputs.continuation.yield(.scoped(generation: generation, event: input))
     }
 
     public nonisolated func send(_ message: ControlMessage) {
-        outbox.continuation.yield(message)
+        switch message {
+        case .key(let press):
+            guard let generation = sourceEpoch.state.withLock({ $0.ready ? $0.generation : nil }) else { return }
+            outbox.continuation.yield(.sourceKey(generation: generation, press: press))
+        case .insertText(let text):
+            guard let generation = sourceEpoch.state.withLock({ $0.ready ? $0.generation : nil }) else { return }
+            outbox.continuation.yield(.sourceText(generation: generation, text: text))
+        default: outbox.continuation.yield(message)
+        }
     }
 
     /// Runs until the connection ends; always finishes with `.ended`.
     public func run() async {
         let playbackID = display.beginSession(audioEnabled: request.audioEnabled)
+        display.setKeyframeRequester(sessionID: playbackID) { [weak self] in self?.send(.requestKeyframe) }
         defer { display.endSession(playbackID) }
         do {
             var local = request.endpoint
@@ -177,6 +210,7 @@ public actor ClientConnection {
                                     inputs: AsyncStream<InputEvent>, outbox: AsyncStream<ControlMessage>,
                                     onEvent: @escaping @Sendable (ClientEvent) -> Void,
                                     hostReason: HostReason, playbackID: UUID) async throws {
+        let sourceEpoch = sourceEpoch
         let files = MacFiles(send: { try await session.send($0) }, sendChunk: { try await session.send(chunk: $0) })
         onEvent(.files(files))
         defer {
@@ -196,8 +230,16 @@ public actor ClientConnection {
                         if let wallpaper = ack.wallpaper.flatMap({ Data(base64Encoded: $0) }) { onEvent(.wallpaper(wallpaper)) }
                     case .displays(let displays): onEvent(.displays(displays))
                     case .virtualDisplay(let report): onEvent(.virtualDisplay(report))
-                    case .streamConfig(let config): onEvent(.streamConfig(config))
-                    case .linkQuality(let quality): onEvent(.linkQuality(quality))
+                    case .streamConfig(let config):
+                        guard sourceEpoch.state.withLock({ $0.configure(config.sourceGeneration) }) else { continue }
+                        display.expectGeneration(config.sourceGeneration, sessionID: playbackID)
+                        onEvent(.streamConfig(config))
+                        try await session.send(.requestKeyframe)
+                    case .linkQuality(let quality):
+#if DEBUG && os(iOS)
+                        self.traceCounters.withLock { $0.roundTripMillis = Double(quality.roundTripMillis ?? 0) }
+#endif
+                        onEvent(.linkQuality(quality))
                     case .clipboard(let item): onEvent(.clipboard(item))
                     case .macStatus(let status): onEvent(.macStatus(status))
                     case .windows(let windows): onEvent(.windows(windows))
@@ -209,7 +251,7 @@ public actor ClientConnection {
                         hostReason.value = reason
                         throw ClientError.hostEnded(reason)
                     case .ping(let value): try await session.send(.pong(value))
-                    case .watchVirtualDisplay, .createVirtualDisplay, .endVirtualDisplay, .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .getClipboard, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
+                    case .setViewport, .configureVirtualDisplay, .sourceReady, .sourceKey, .sourceText, .watchVirtualDisplay, .createVirtualDisplay, .endVirtualDisplay, .listDisplays, .selectDisplay, .setAudioEnabled, .setClipboardEnabled, .getClipboard, .pong, .hello, .pairRequest, .pairResult, .listWindows, .selectSource,
                          .requestKeyframe, .insertText, .key, .run, .listApps, .apps, .requestAppIcons, .appIcon,
                          .listMacShortcuts, .macShortcuts, .watchStatus, .watchMenus, .pressMenuItem, .setQuality,
                          .sendFile, .getFile, .fileData, .listFiles, .mutateFile:
@@ -224,8 +266,17 @@ public actor ClientConnection {
             }
             group.addTask {
                 for try await (header, payload) in session.videoFrames {
+#if DEBUG && os(iOS)
+                    if sourceEpoch.state.withLock({ $0.generation == header.sourceGeneration }) {
+                        self.traceCounters.withLock { $0.frames += 1; $0.bytes += payload.count }
+                    }
+#endif
                     if display.enqueue(header: header, payload: payload, sessionID: playbackID) {
                         try await session.send(.requestKeyframe)
+                    }
+                    if header.flags.contains(.keyframe), display.hasDecodedGeneration(header.sourceGeneration),
+                       sourceEpoch.state.withLock({ $0.decodedKeyframe(header.sourceGeneration) }) {
+                        try await session.send(.sourceReady(header.sourceGeneration))
                     }
                 }
                 return "video"
@@ -605,4 +656,9 @@ private final class HostReason: Sendable {
         get { storage.withLock { $0 } }
         set { storage.withLock { $0 = newValue } }
     }
+}
+
+/// Reference ownership lets concurrent channel tasks share the noncopyable mutex safely.
+private final class SourceEpochBox: Sendable {
+    let state = Mutex(SourceInputEpoch())
 }

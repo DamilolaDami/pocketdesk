@@ -8,6 +8,13 @@ import Testing
 
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct HostUpdateTests {
+    @Test func feedFailuresAreActionableWithoutHidingSignatureFailures() {
+        let unavailable = NSError(domain: "SUSparkleErrorDomain", code: 1002)
+        #expect(HostUpdateFailure.message(for: unavailable).contains("internet connection"))
+        let signature = NSError(domain: "SUSparkleErrorDomain", code: 3001, userInfo: [NSLocalizedDescriptionKey: "Update signature invalid"])
+        #expect(HostUpdateFailure.message(for: signature) == "Update signature invalid")
+    }
+
     @Test func maintenanceNeedsExistingTrustAndNeverStartsCapture() async throws {
         for trusted in [false, true] {
             let pair = LoopbackSession.pair(), updater = RecordingUpdater(), frames = SyntheticFrameSource()

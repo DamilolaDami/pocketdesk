@@ -34,7 +34,7 @@ struct HostListView: View {
                     }
                     if !paired.isEmpty {
                         section("Your Macs") {
-                            ForEach(paired) { host in
+                            ForEach(paired, id: \.cardIdentity) { host in
                                 let watched = host.hostID != nil && host.hostID == statusHostID
                                 PairedMacCard(host: host,
                                               status: watched ? controller.store.macStatus : nil,
@@ -50,7 +50,7 @@ struct HostListView: View {
                                 }
                                 // Lift the whole card, not just its button.
                                 .contentShape(.contextMenuPreview, .rect(cornerRadius: Brand.cornerRadius))
-                                .contextMenu { menu(for: host) }
+                                .contextMenu { StableMacMenuContent(host: host) { menu(for: host) }.equatable() }
                             }
                         }
                     }
@@ -65,7 +65,7 @@ struct HostListView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 32)
-                .animation(.smooth, value: hosts)
+                .animation(.smooth, value: hosts.map(\.cardIdentity))
             }
             .scrollBounceBehavior(.basedOnSize)
             .background { AppBackground() }
@@ -276,16 +276,7 @@ private struct PairedMacCard<Actions: View>: View {
                     .minimumScaleFactor(0.85)
                 }
                 Spacer(minLength: 0)
-                Menu(content: menu) {
-                    Image(systemName: "ellipsis")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 36, height: 36)
-                        .contentShape(.circle)
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: .circle)
-                .accessibilityLabel("More for \(host.name)")
+                MacCardMenu(host: host, content: menu).equatable()
             }
             if live {
                 MacVitals(latency: latency, battery: status?.battery)
@@ -699,4 +690,51 @@ private extension MacCommand {
         case .screenshot: "camera.viewfinder"
         }
     }
+}
+
+
+private extension DiscoveredHost {
+    // Bonjour service IDs can change on rediscovery; a paired card keeps its identity.
+    var cardIdentity: String { hostID?.uuidString ?? id }
+}
+
+/// Keep the system menu out of the live status/latency render loop. Its content only
+/// changes when an actual menu capability changes, never when playback or ping updates.
+private struct MacMenuIdentity: Equatable {
+    let id: String
+    let name: String
+    let online: Bool
+    let paired: Bool
+    let locked: Bool
+    let relay: Bool
+    let update: DiscoveredHost.Side?
+    init(_ host: DiscoveredHost) {
+        id = host.cardIdentity; name = host.name; online = host.isOnline
+        paired = host.isPaired; locked = host.isLocked; relay = host.canRelay; update = host.needsUpdate
+    }
+}
+
+private struct MacCardMenu<Content: View>: View, Equatable {
+    let host: DiscoveredHost
+    @ViewBuilder let content: () -> Content
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { MacMenuIdentity(lhs.host) == MacMenuIdentity(rhs.host) }
+    var body: some View {
+        Menu { StableMacMenuContent(host: host, content: content).equatable() } label: {
+            Image(systemName: "ellipsis")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 36)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular, in: .circle)
+        .accessibilityLabel("More for \(host.name)")
+    }
+}
+
+private struct StableMacMenuContent<Content: View>: View, Equatable {
+    let host: DiscoveredHost
+    @ViewBuilder let content: () -> Content
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool { MacMenuIdentity(lhs.host) == MacMenuIdentity(rhs.host) }
+    var body: some View { content() }
 }

@@ -19,29 +19,26 @@ struct NowPlayingLiveActivity: Widget {
             let artwork = card.savedArtwork
             let siteIcon = card.savedSiteIcon
             let playing = card.isPlaying && !context.isStale
-            // The island is always black: draw the buttons as on a dark card.
-            let dark = NowPlayingPalette(card: darkCard(card))
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    NowPlayingArtworkView(image: artwork, siteIcon: siteIcon, size: 54, palette: palette)
+                    NowPlayingArtworkView(image: artwork, siteIcon: siteIcon, size: 48, palette: palette)
                         .padding(.leading, 4)
-                        .frame(maxHeight: .infinity)
-                }
-                DynamicIslandExpandedRegion(.trailing) {
-                    NowPlayingPlayButton(card: darkCard(card), palette: dark, size: 42)
-                        .padding(.trailing, 4)
-                        .frame(maxHeight: .infinity)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     NowPlayingHeadline(card: card, palette: palette, isStale: context.isStale)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .padding(.leading, 4)
+                        .padding(.trailing, 4)
+                        .frame(maxHeight: .infinity)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    NowPlayingTransport(card: darkCard(card), palette: dark, isStale: context.isStale, skipSize: 32)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 4)
-                        .padding(.top, 8)
+                    // The island is always black: draw in white whatever the card's style.
+                    VStack(spacing: 8) {
+                        NowPlayingProgress(card: card, foreground: .white)
+                        NowPlayingControls(card: card, scale: 0.9)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.top, 6)
                 }
             } compactLeading: {
                 NowPlayingArtworkView(image: artwork, siteIcon: siteIcon, size: 24, palette: palette)
@@ -53,13 +50,5 @@ struct NowPlayingLiveActivity: Widget {
             }
             .keylineTint(palette.accent)
         }
-    }
-
-    /// The system style draws in the Lock Screen's colors, which on the island's black would
-    /// vanish in light mode.
-    private func darkCard(_ card: NowPlayingCard) -> NowPlayingCard {
-        var card = card
-        if card.style == .system { card.style = .brand }
-        return card
     }
 }

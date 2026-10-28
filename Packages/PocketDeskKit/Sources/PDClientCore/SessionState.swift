@@ -12,6 +12,10 @@ public enum SessionState: Sendable, Equatable {
     case pairing(host: DiscoveredHost, code: String?)
     case connecting(host: DiscoveredHost)
     case streaming(host: DiscoveredHost, config: StreamConfig, source: WindowInfo?)
+    /// The stream dropped and attempt `attempt` (from 1) to get it back is waiting or under
+    /// way. Keeps the last config and source so the stream screen stays up and the source
+    /// can be restored.
+    case reconnecting(host: DiscoveredHost, config: StreamConfig, source: WindowInfo?, attempt: Int)
     case failed(message: String)
 }
 
@@ -90,6 +94,8 @@ public enum SessionEvent: Sendable, Equatable {
     case connected(StreamConfig)
     case sourceChanged(WindowInfo?)
     case disconnected(reason: String?)
+    /// The connection dropped for a reason that may pass (the network, the Mac asleep).
+    case interrupted(reason: String)
     case cancel
 }
 
@@ -126,11 +132,45 @@ extension SessionState {
             return .streaming(host: host, config: config, source: source)
 
         case (.connecting, .disconnected(let reason)), (.streaming, .disconnected(let reason)),
-             (.pairing, .disconnected(let reason)):
+             (.pairing, .disconnected(let reason)), (.reconnecting, .disconnected(let reason)):
             return .failed(message: reason ?? "Disconnected")
+
+        case (.streaming(let host, let config, let source), .interrupted):
+            return .reconnecting(host: host, config: config, source: source, attempt: 1)
+
+        case (.reconnecting(let host, let config, let source, let attempt), .interrupted):
+            return .reconnecting(host: host, config: config, source: source, attempt: attempt + 1)
+
+        // Only a session that was streaming comes back by itself; a first connection says why.
+        case (.connecting, .interrupted(let reason)), (.pairing, .interrupted(let reason)):
+            return .failed(message: reason)
+
+        // The Mac starts on a display; the controller asks for the window again.
+        case (.reconnecting(let host, _, _, _), .connected(let config)):
+            return .streaming(host: host, config: config, source: nil)
 
         default:
             return self
         }
+    }
+}
+
+/// How often, and for how long, a dropped stream tries to come back before giving up.
+public struct ReconnectPolicy: Sendable, Equatable {
+    /// Waits before each attempt; one entry per attempt.
+    public var delays: [Duration]
+
+    public init(delays: [Duration] = [0.5, 1, 2, 4, 8, 8].map(Duration.seconds)) {
+        self.delays = delays
+    }
+
+    /// The wait before attempt `attempt` (from 1), or `nil` once the attempts are used up.
+    public func delay(beforeAttempt attempt: Int) -> Duration? {
+        delays.indices.contains(attempt - 1) ? delays[attempt - 1] : nil
+    }
+
+    /// What the failure screen says after the last attempt.
+    public static func gaveUp(on hostName: String, reason: String) -> String {
+        "Couldn't reconnect to \(hostName). \(reason)"
     }
 }

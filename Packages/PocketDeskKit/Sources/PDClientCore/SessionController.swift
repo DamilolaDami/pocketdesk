@@ -94,6 +94,13 @@ public final class SessionController {
     private var wakeTasks: [UUID: Task<Void, Never>] = [:]
     private var connectionHostID: UUID?
     private var activeConnectionID: UUID?
+    public var reconnectPolicy = ReconnectPolicy()
+    /// Waiting out the delay before the next reconnect attempt.
+    private var reconnectTask: Task<Void, Never>?
+    /// What the dropped stream showed, to put back once it's up again.
+    private var restoring: (window: WindowInfo?, displayID: String?, hadWorkspace: Bool)?
+    /// Asked for the windows to find the one being restored; `.windows` finishes the restore.
+    private var restoringWindow: WindowInfo?
 
     private let identityLabel: String
     private let trustStoreURL: URL
@@ -484,8 +491,11 @@ public final class SessionController {
                 try? wakeBook.save(to: wakeBookURL)
             }
         case .streamConfig(let config):
+            let reconnected: Bool
+            if case .reconnecting = store.state { reconnected = true } else { reconnected = false }
             if config.displayID != nil { store.send(.sourceChanged(nil)) }
             store.send(.connected(config))
+            if reconnected { restoreSession(config) }
 #if DEBUG && os(iOS)
             if performanceTrace == nil { performanceTrace = WorkspacePerformanceTrace.start(self) }
 #endif
@@ -520,6 +530,15 @@ public final class SessionController {
             store.post(notice: item.text != nil ? "Copied from your Mac" : "Image copied from your Mac", kind: .done)
         case .windows(let windows):
             store.update(windows: windows)
+            if let wanted = restoringWindow {
+                restoringWindow = nil
+                if let window = windows.first(where: { $0.id == wanted.id }) {
+                    selectSource(window)
+                    if let host = lastHost { store.post(notice: "Reconnected to \(host.name)", kind: .done) }
+                } else {
+                    store.post(notice: "“\(wanted.title.isEmpty ? wanted.appName : wanted.title)” isn't open any more. Showing the whole display.")
+                }
+            }
         case .menuBar(let bar):
             store.update(menus: bar.map(MenusState.ready) ?? .unavailable)
         case .caret(let caret):
@@ -532,16 +551,89 @@ public final class SessionController {
         case .files(let files):
             streamFiles = files
         case .ended(let reason):
-            performanceTrace?.cancel(); performanceTrace = nil
-            sizingTask?.cancel(); sizingTask = nil
-            desiredWorkspaceMode = nil; modeRequestID = nil; lastSentViewport = nil; lastScenePortrait = nil
-            stopKeyRepeat()
-            activeConnectionID = nil
-            connectionHostID = nil
-            pendingAction = nil
-            connection = nil
-            connectionTask = nil
+            connectionEnded()
+            restoring = nil
             store.send(.disconnected(reason: reason))
+        case .interrupted(let reason):
+            interrupted(reason)
+        }
+    }
+
+    /// Forgets the connection that just ended. Nothing it was asked to do is sent again.
+    private func connectionEnded() {
+        performanceTrace?.cancel(); performanceTrace = nil
+        sizingTask?.cancel(); sizingTask = nil
+        desiredWorkspaceMode = nil; modeRequestID = nil; lastSentViewport = nil; lastScenePortrait = nil
+        stopKeyRepeat()
+        activeConnectionID = nil
+        connectionHostID = nil
+        pendingAction = nil
+        restoringWindow = nil
+        connection = nil
+        connectionTask = nil
+    }
+
+    // MARK: Reconnecting
+
+    /// A stream dropped (or an attempt to bring it back failed): try again after a while,
+    /// until the policy runs out.
+    private func interrupted(_ reason: String) {
+        if case .streaming(_, _, let source) = store.state {
+            // The Mac ends a workspace with the session that owns it.
+            let ownedWorkspace = store.virtualDisplay.report?.workspace?.isOwner == true
+            restoring = (source, displayPreferences.displayID(for: connectionHostID), ownedWorkspace)
+        }
+        // The stream screen stays up, so its orientation won't be reported again.
+        let portrait = lastScenePortrait
+        connectionEnded()
+        lastScenePortrait = portrait
+        store.send(.interrupted(reason: reason))
+        guard case .reconnecting(let host, _, _, let attempt) = store.state else { return }
+        guard let delay = reconnectPolicy.delay(beforeAttempt: attempt) else {
+            restoring = nil
+            store.send(.disconnected(reason: ReconnectPolicy.gaveUp(on: host.name, reason: reason)))
+            return
+        }
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            await self?.reconnect()
+        }
+    }
+
+    /// Back in front while waiting to reconnect: try now rather than at the end of the wait.
+    public func reconnectNow() {
+        guard case .reconnecting = store.state, connection == nil else { return }
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in await self?.reconnect() }
+    }
+
+    private func reconnect() async {
+        reconnectTask = nil
+        guard case .reconnecting(let host, _, _, _) = store.state, connection == nil,
+              let peer = host.hostID.flatMap(trustStore.peer(hostID:)) else { return }
+        // Away long enough for the lock to come back: Face ID first, as for a new session.
+        guard await unlock(host) else { return disconnect() }
+        guard case .reconnecting = store.state, connection == nil else { return }
+        connect(endpoint: browsed[host.id]?.endpoint, hostID: host.hostID, hostFingerprint: peer.fingerprint, invite: nil)
+    }
+
+    /// The first config after reconnecting: the window or display it was showing, or why not.
+    private func restoreSession(_ config: StreamConfig) {
+        guard let restoring else { return }
+        self.restoring = nil
+        if restoring.hadWorkspace {
+            store.post(notice: "The virtual workspace ended when the connection dropped.")
+        } else if let wanted = restoring.displayID, let shown = config.displayID,
+                  let display = store.displaySelection.displays.first(where: { $0.id == shown }),
+                  display.persistentID != wanted {
+            store.post(notice: "The display you were using isn't available. Showing \(display.name).")
+        }
+        if let window = restoring.window {
+            restoringWindow = window
+            refreshWindows()
+        } else if let host = lastHost {
+            store.post(notice: "Reconnected to \(host.name)", kind: .done)
         }
     }
 
@@ -893,6 +985,11 @@ public final class SessionController {
             connection.send(.run(action))
             return true
         }
+        // Not queued for after: by then it may not be what the person wants.
+        if case .reconnecting(let host, _, _, _) = store.state, shortcut.macID == nil || shortcut.macID == host.hostID {
+            store.post(notice: "Reconnecting to \(host.name). Try “\(shortcut.name)” again once it's back.")
+            return false
+        }
         guard let host = shortcutTarget(preferredHostID: preferredHostID) else {
             store.post(notice: "Open PocketDesk on a paired Mac to run “\(shortcut.name)”.")
             return false
@@ -1216,6 +1313,8 @@ public final class SessionController {
     public func checkLockOnReturn() {
         locks.returned(at: .now, delay: relockDelay)
         store.send(.hostsChanged(discoveredHosts()))
+        // The attempt asks for Face ID itself if it's needed.
+        if case .reconnecting = store.state { return reconnectNow() }
         guard case .streaming(let host, _, _) = store.state, locks.needsUnlock(host.hostID) else { return }
         Task {
             if await !unlock(host) { disconnect() }
@@ -1543,6 +1642,10 @@ public final class SessionController {
     }
 
     private func disconnectConnection() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        restoring = nil
+        restoringWindow = nil
         stopKeyRepeat()
         activeConnectionID = nil
         connectionHostID = nil

@@ -176,6 +176,20 @@ final class ClientConnectionTests {
         #expect(events.all.last == .ended(reason: ClientError.pairingDeclined.description))
     }
 
+    /// Network trouble is worth another try; anything the Mac decided is not.
+    @Test func onlyNetworkFailuresAreTransient() {
+        #expect(ClientConnection.isTransient(TransportError.timedOut))
+        #expect(ClientConnection.isTransient(TransportError.closed))
+        #expect(ClientConnection.isTransient(TransportError.connectionFailed(.posix(.ENETDOWN))))
+        #expect(ClientConnection.isTransient(NWError.posix(.ECONNRESET)))
+        #expect(!ClientConnection.isTransient(ClientError.hostEnded("Disconnected on the Mac")))
+        #expect(!ClientConnection.isTransient(ClientError.pairingDeclined))
+        #expect(!ClientConnection.isTransient(TransportError.connectionFailed(.posix(.EINVAL))))
+        #expect(!ClientConnection.isTransient(TransportError.connectionFailed(.tls(-9808))))
+        #expect(!ClientConnection.isTransient(TransportError.unauthenticatedPeer))
+        #expect(!ClientConnection.isTransient(CancellationError()))
+    }
+
     /// Siri, the Shortcuts app and widgets: one action over a connection with no picture.
     @Test func performsAShortcutWithoutStreaming() async throws {
         try TrustStore(peers: [PairedPeer(fingerprint: phone.fingerprint, name: "Test iPhone")]).save(to: trustStoreURL)

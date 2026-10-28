@@ -43,7 +43,7 @@ public final class SessionStore {
         state = state.reduce(event)
         switch event {
         case .connected(let config): displaySelection = displaySelection.reduce(.streaming(config.displayID))
-        case .cancel, .disconnected, .select:
+        case .cancel, .disconnected, .select, .interrupted:
             connectionPath = nil
             displaySelection = displaySelection.reduce(.reset)
             virtualDisplay = virtualDisplay.reduce(.reset)

@@ -48,4 +48,47 @@ import PDProtocol
     @Test func cancelAlwaysReturnsToIdle() {
         #expect(SessionState.connecting(host: newHost).reduce(.cancel) == .idle)
     }
+
+    @Test func aDroppedStreamReconnectsAndKeepsWhatItShowed() {
+        let window = WindowInfo(id: 1, appName: "Notes", bundleID: nil, title: "Todo", width: 800, height: 600)
+        var state = SessionState.streaming(host: newHost, config: config, source: window)
+            .reduce(.interrupted(reason: "The Mac closed the connection."))
+        #expect(state == .reconnecting(host: newHost, config: config, source: window, attempt: 1))
+
+        state = state.reduce(.interrupted(reason: "Couldn't reach the Mac."))
+        #expect(state == .reconnecting(host: newHost, config: config, source: window, attempt: 2))
+        // Still on the screen it was: a window picked meanwhile doesn't count.
+        #expect(state.reduce(.sourceChanged(nil)) == state)
+
+        // The Mac starts again on a display; the controller asks for the window.
+        let smaller = StreamConfig(codec: .hevc, width: 1600, height: 1200, fps: 60, bitrateKbps: 8_000)
+        #expect(state.reduce(.connected(smaller)) == .streaming(host: newHost, config: smaller, source: nil))
+    }
+
+    @Test func reconnectingEndsOnAFinalReasonOrCancel() {
+        let state = SessionState.reconnecting(host: newHost, config: config, source: nil, attempt: 3)
+        #expect(state.reduce(.disconnected(reason: "Declined on the Mac")) == .failed(message: "Declined on the Mac"))
+        #expect(state.reduce(.cancel) == .idle)
+    }
+
+    @Test func onlyAStreamThatWasUpReconnects() {
+        #expect(SessionState.connecting(host: newHost).reduce(.interrupted(reason: "Couldn't reach the Mac."))
+                == .failed(message: "Couldn't reach the Mac."))
+        #expect(SessionState.pairing(host: newHost, code: "123456").reduce(.interrupted(reason: "Lost"))
+                == .failed(message: "Lost"))
+        #expect(SessionState.idle.reduce(.interrupted(reason: "Lost")) == .idle)
+    }
+
+    @Test func reconnectAttemptsBackOffThenStop() {
+        let policy = ReconnectPolicy()
+        #expect(policy.delay(beforeAttempt: 0) == nil)
+        #expect(policy.delay(beforeAttempt: 1) == .milliseconds(500))
+        #expect(policy.delay(beforeAttempt: 2) == .seconds(1))
+        let delays = (1...policy.delays.count).compactMap(policy.delay(beforeAttempt:))
+        #expect(delays == delays.sorted())
+        #expect(delays.reduce(.zero, +) < .seconds(30))
+        #expect(policy.delay(beforeAttempt: policy.delays.count + 1) == nil)
+        #expect(ReconnectPolicy.gaveUp(on: "Studio Mac", reason: "Couldn't reach the Mac.")
+                == "Couldn't reconnect to Studio Mac. Couldn't reach the Mac.")
+    }
 }

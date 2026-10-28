@@ -36,6 +36,9 @@ public enum ClientEvent: Sendable, Equatable {
     /// Something to tell the person without ending the session (a shortcut that failed).
     case notice(String)
     case ended(reason: String?)
+    /// Ended the way a lost network or a sleeping Mac ends it, not by anyone's choice: worth
+    /// connecting again.
+    case interrupted(reason: String)
 }
 
 public enum ClientError: Error, Sendable, Equatable, CustomStringConvertible {
@@ -166,7 +169,7 @@ public actor ClientConnection {
             onEvent(.ended(reason: nil))
         } catch {
             Self.log.error("Session ended: \(String(describing: error), privacy: .public)")
-            onEvent(.ended(reason: Self.describe(error)))
+            onEvent(Self.isTransient(error) ? .interrupted(reason: Self.describe(error)) : .ended(reason: Self.describe(error)))
         }
         inputs.continuation.finish()
         outbox.continuation.finish()
@@ -322,6 +325,20 @@ public actor ClientConnection {
             throw ClientError.hostEnded(reason)
         default:
             throw ClientError.unexpectedMessage
+        }
+    }
+
+    /// A failure that may pass by itself. Anything the Mac decided (a `bye`, a declined
+    /// pairing or approval) or its TLS gate turning this phone away is final.
+    static func isTransient(_ error: any Error) -> Bool {
+        switch error {
+        case is ClientError: false
+        case TransportError.connectionFailed(.posix(.EINVAL)), TransportError.connectionFailed(.tls): false
+        case TransportError.timedOut, TransportError.closed, TransportError.connectionFailed: true
+        case is TransportError: false
+        case NWError.tls: false
+        case is NWError: true
+        default: false
         }
     }
 

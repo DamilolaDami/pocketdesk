@@ -181,7 +181,8 @@ struct RootView: View {
         case .connecting(let host):
             ConnectingView(hostName: host.name, kind: host.kind) { controller.disconnect() }
                 .transition(.opacity)
-        case .streaming(let host, let config, _):
+        // One case, so reconnecting keeps the stream screen (its zoom, keyboard, sheets).
+        case .streaming(let host, let config, _), .reconnecting(let host, let config, _, _):
             StreamScreen(controller: controller, hostName: host.name, config: config)
                 .transition(.opacity)
         case .failed(let message):
@@ -211,7 +212,7 @@ struct RootView: View {
         case .idle, .discovering: 1
         case .pairing: 2
         case .connecting: 3
-        case .streaming: 4
+        case .streaming, .reconnecting: 4
         case .failed: 5
         }
     }

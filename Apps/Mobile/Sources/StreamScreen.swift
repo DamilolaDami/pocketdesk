@@ -38,11 +38,22 @@ struct StreamScreen: View {
         .ignoresSafeArea(.container)
         // The app switcher shows a snapshot of the screen: not the Mac's, if asked.
         .overlay {
+            if case .reconnecting(_, _, _, let attempt) = controller.store.state {
+                ReconnectingCover(hostName: hostName, attempt: attempt) { controller.disconnect() }
+                    .transition(.opacity)
+            }
+        }
+        .animation(.smooth, value: isReconnecting)
+        .overlay {
             if hideInSwitcher, scenePhase != .active {
                 PrivacyCover(hostName: hostName)
             }
         }
         .onAppear { if keyboardOnOpen { keyboardShown = true } }
+    }
+
+    private var isReconnecting: Bool {
+        if case .reconnecting = controller.store.state { true } else { false }
     }
 
     private func stream(isLandscape: Bool) -> some View {
@@ -318,6 +329,38 @@ struct WindowPicker: View {
 
 
 /// Stands in for the Mac's screen while PocketDesk isn't in front.
+/// Over the last picture while the stream comes back; it also keeps touches from reaching
+/// a Mac that isn't listening.
+private struct ReconnectingCover: View {
+    let hostName: String
+    let attempt: Int
+    let cancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.regularMaterial)
+            VStack(spacing: 14) {
+                ProgressView().controlSize(.large)
+                VStack(spacing: 6) {
+                    Text("Reconnecting").font(.title3.weight(.bold))
+                    Text(attempt > 1 ? "\(hostName) isn't answering yet. Still trying…"
+                                     : "The connection to \(hostName) dropped.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Button("Cancel", action: cancel)
+                    .buttonStyle(.glass)
+                    .controlSize(.large)
+                    .padding(.top, 8)
+            }
+            .multilineTextAlignment(.center)
+            .padding()
+        }
+        .ignoresSafeArea()
+        .accessibilityElement(children: .contain)
+    }
+}
+
 private struct PrivacyCover: View {
     let hostName: String
 

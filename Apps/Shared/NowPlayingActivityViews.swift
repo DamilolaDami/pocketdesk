@@ -49,7 +49,8 @@ struct NowPlayingPalette {
     private func lifted(_ value: Double) -> Double { value + (1 - value) * 0.45 }
 }
 
-/// The Lock Screen card: cover, title and artist, where it's playing, and the buttons.
+/// The Lock Screen card: cover, where it's playing, title and artist, and play / pause; then
+/// previous · progress · next along the bottom.
 struct NowPlayingLockScreenView: View {
     let card: NowPlayingCard
     let artwork: UIImage?
@@ -59,34 +60,42 @@ struct NowPlayingLockScreenView: View {
     private var palette: NowPlayingPalette { NowPlayingPalette(card: card) }
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             HStack(spacing: 12) {
-                NowPlayingArtworkView(image: artwork, siteIcon: siteIcon, size: 56, palette: palette)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(card.title)
-                        .font(.headline)
-                        .lineLimit(1)
-                    if let subtitle = card.artist ?? card.appName {
-                        Text(subtitle)
-                            .font(.subheadline)
-                            .opacity(0.72)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 8)
-                NowPlayingBars(isPlaying: card.isPlaying && !isStale, color: palette.accent)
-                    .frame(width: 22, height: 18)
+                NowPlayingArtworkView(image: artwork, siteIcon: siteIcon, size: 58, palette: palette)
+                NowPlayingHeadline(card: card, palette: palette, isStale: isStale)
+                Spacer(minLength: 4)
+                NowPlayingPlayButton(card: card, palette: palette, size: 42)
             }
-            NowPlayingProgress(card: card, foreground: palette.foreground)
-            HStack(spacing: 10) {
-                NowPlayingSource(card: card, isStale: isStale)
-                Spacer(minLength: 8)
-                NowPlayingControls(card: card, palette: palette, size: 40)
-            }
+            NowPlayingTransport(card: card, palette: palette, isStale: isStale)
         }
         .foregroundStyle(palette.foreground)
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background { palette.background }
+    }
+}
+
+/// Where it's playing (with the level bars), then the title and artist.
+struct NowPlayingHeadline: View {
+    let card: NowPlayingCard
+    let palette: NowPlayingPalette
+    var isStale = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            NowPlayingSource(card: card, palette: palette, isStale: isStale)
+                .padding(.bottom, 2)
+            Text(card.title)
+                .font(.headline)
+                .lineLimit(1)
+            if let subtitle = card.artist ?? card.appName {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .opacity(0.72)
+                    .lineLimit(1)
+            }
+        }
     }
 }
 
@@ -94,58 +103,88 @@ struct NowPlayingLockScreenView: View {
 /// be out of date.
 struct NowPlayingSource: View {
     let card: NowPlayingCard
+    let palette: NowPlayingPalette
     var isStale = false
 
     var body: some View {
-        Label {
+        HStack(spacing: 5) {
+            if isStale {
+                Image(systemName: "clock.arrow.circlepath")
+            } else {
+                NowPlayingBars(isPlaying: card.isPlaying, color: palette.accent)
+                    .frame(width: 11, height: 9)
+            }
             Text(isStale ? "Open PocketDesk to refresh"
                          : [card.site ?? card.appName, card.macName].compactMap(\.self).joined(separator: " on "))
                 .lineLimit(1)
-        } icon: {
-            Image(systemName: isStale ? "clock.arrow.circlepath" : "laptopcomputer")
+                .opacity(0.65)
         }
-        .font(.caption.weight(.medium))
-        .opacity(0.65)
-        .labelStyle(.titleAndIcon)
+        .font(.caption2.weight(.semibold))
     }
 }
 
-/// Previous, play / pause and next. Skips can be hidden in Settings.
-struct NowPlayingControls: View {
+/// Previous · progress · next. Without a timeline the middle says where it's playing from;
+/// without skips (hidden in Settings) the progress runs the full width.
+struct NowPlayingTransport: View {
     let card: NowPlayingCard
     let palette: NowPlayingPalette
-    var size: CGFloat = 40
+    var isStale = false
+    var skipSize: CGFloat = 34
 
     var body: some View {
-        HStack(spacing: 6) {
-            if card.showsSkipButtons {
-                skip(.previous, symbol: "backward.fill", label: "Previous")
-            }
-            Button(intent: NowPlayingControlIntent(.playPause)) {
-                Image(systemName: card.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: size * 0.42, weight: .bold))
-                    .contentTransition(.symbolEffect(.replace))
-                    .foregroundStyle(card.style == .system ? Color(uiColor: .systemBackground) : .black)
-                    .frame(width: size, height: size)
-                    .background(palette.foreground, in: .circle)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(card.isPlaying ? "Pause" : "Play")
-            if card.showsSkipButtons {
-                skip(.next, symbol: "forward.fill", label: "Next")
+        if card.hasTimeline || card.showsSkipButtons {
+            HStack(spacing: 10) {
+                if card.showsSkipButtons {
+                    NowPlayingSkipButton(control: .previous, palette: palette, size: skipSize)
+                }
+                if card.hasTimeline {
+                    NowPlayingProgress(card: card, foreground: palette.foreground)
+                } else {
+                    Spacer(minLength: 0)
+                }
+                if card.showsSkipButtons {
+                    NowPlayingSkipButton(control: .next, palette: palette, size: skipSize)
+                }
             }
         }
     }
+}
 
-    private func skip(_ control: MediaControl, symbol: String, label: String) -> some View {
+/// The filled play / pause circle.
+struct NowPlayingPlayButton: View {
+    let card: NowPlayingCard
+    let palette: NowPlayingPalette
+    var size: CGFloat = 42
+
+    var body: some View {
+        Button(intent: NowPlayingControlIntent(.playPause)) {
+            Image(systemName: card.isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: size * 0.4, weight: .bold))
+                .contentTransition(.symbolEffect(.replace))
+                .foregroundStyle(card.style == .system ? Color(uiColor: .systemBackground) : .black)
+                .frame(width: size, height: size)
+                .background(palette.foreground, in: .circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(card.isPlaying ? "Pause" : "Play")
+    }
+}
+
+/// Previous or next, as a soft circle either side of the progress.
+struct NowPlayingSkipButton: View {
+    let control: MediaControl
+    let palette: NowPlayingPalette
+    var size: CGFloat = 34
+
+    var body: some View {
         Button(intent: NowPlayingControlIntent(control)) {
-            Image(systemName: symbol)
-                .font(.system(size: size * 0.36, weight: .semibold))
+            Image(systemName: control == .next ? "forward.fill" : "backward.fill")
+                .font(.system(size: size * 0.38, weight: .semibold))
                 .frame(width: size, height: size)
                 .background(palette.foreground.opacity(0.14), in: .circle)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(label)
+        .accessibilityLabel(control == .next ? "Next" : "Previous")
     }
 }
 
@@ -241,30 +280,57 @@ extension NowPlayingCard {
     }
 }
 
-/// System timers continue on the Lock Screen when the app isn't running.
+extension NowPlayingCard {
+    /// Whether there's a position to draw: a known length, and a start (playing) or a frozen
+    /// position (paused).
+    var hasTimeline: Bool {
+        guard let duration, duration.isFinite, duration > 0 else { return false }
+        if isPlaying { return startedAt.map { $0.timeIntervalSince1970.isFinite } ?? false }
+        return pausedElapsed?.isFinite ?? false
+    }
+}
+
+/// A thin bar with the elapsed time under its left end and the length under its right. System
+/// timers keep it moving on the Lock Screen while the app isn't running.
 struct NowPlayingProgress: View {
     let card: NowPlayingCard
     let foreground: Color
 
     var body: some View {
-        if let duration = card.duration, duration.isFinite, duration > 0 {
-            VStack(spacing: 4) {
-                if card.isPlaying, let start = card.startedAt, start.timeIntervalSince1970.isFinite {
+        if card.hasTimeline, let duration = card.duration {
+            VStack(spacing: 3) {
+                if card.isPlaying, let start = card.startedAt {
                     let interval = start...start.addingTimeInterval(duration)
-                    ProgressView(timerInterval: interval, countsDown: false)
+                    ProgressView(timerInterval: interval, countsDown: false) { EmptyView() } currentValueLabel: { EmptyView() }
                         .labelsHidden()
-                    Text(timerInterval: interval, countsDown: false)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else if !card.isPlaying, let elapsed = card.pausedElapsed, elapsed.isFinite {
-                    ProgressView(value: min(max(elapsed, 0), duration), total: duration)
-                    Text(Duration.seconds(min(max(elapsed, 0), duration)), format: .time(pattern: .minuteSecond))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack {
+                        // A timer text is as wide as it can be; pin it so it can't push the length off.
+                        Text(timerInterval: interval, countsDown: false)
+                            .frame(width: 44, alignment: .leading)
+                        Spacer(minLength: 4)
+                        length(duration)
+                    }
+                } else if let elapsed = card.pausedElapsed {
+                    let position = min(max(elapsed, 0), duration)
+                    ProgressView(value: position, total: duration)
+                        .labelsHidden()
+                    HStack {
+                        Text(Duration.seconds(position), format: .time(pattern: .minuteSecond))
+                        Spacer(minLength: 4)
+                        length(duration)
+                    }
                 }
             }
+            .progressViewStyle(.linear)
             .tint(foreground)
-            .foregroundStyle(foreground.opacity(0.7))
-            .font(.caption2.monospacedDigit())
+            .foregroundStyle(foreground.opacity(0.62))
+            .font(.caption2.weight(.medium).monospacedDigit())
+            .accessibilityElement(children: .combine)
             .accessibilityLabel("Playback progress")
         }
+    }
+
+    private func length(_ duration: Double) -> some View {
+        Text(Duration.seconds(duration), format: .time(pattern: duration >= 3600 ? .hourMinuteSecond : .minuteSecond))
     }
 }

@@ -77,13 +77,20 @@ token and the port pool, and keeps every public UDP packet within 1,200 bytes.
 
 Datagram wire packets, in both directions: **16 raw session UUID bytes + 16 raw
 packet UUID bytes + one fragment index byte + one fragment count byte + payload fragment**.
-Payloads up to 1000 bytes have index 0/count 1. Larger packets split into a 1000-byte first
-fragment and remainder, index 0/1, count 2. Each packet gets a fresh UUID. The receiving
+Payloads up to 1000 bytes have index 0/count 1. Larger packets split into two halves (the
+first takes the odd byte) and a parity piece, index 0/1/2, count 3: the parity piece is the
+packet's length as two big-endian bytes, then the halves XORed together, the second padded
+with a zero. Any two of the three rebuild the packet, so one lost piece doesn't lose it. Each
+packet gets a fresh UUID. The receiving
 device reassembles before passing to its loopback shim; the relay doesn't reassemble. The inner UDP payload limit is 1500 bytes; configure the shim's
 inner QUIC MTU accordingly. Fragmentation lets 1200-byte QUIC Initial packets fit inside the
 outer QUIC connection without increasing its minimum MTU. Devices expire incomplete packets
-after one second and buffer one pending packet per session.
-Datagrams are lossy; inner QUIC handles loss and retransmission.
+after one second, hold up to 64 at once, and remember recently rebuilt ones so a leftover
+piece is dropped.
+Datagrams are lossy; inner QUIC handles loss and retransmission. The relay's connections use
+a fixed 512 KiB congestion window (`src/window.rs`): the inner session already controls its
+rate end to end, and a second controller on the relay's leg read every lost piece as
+congestion. The per-connection budget (2 MiB/s) still bounds what a device can make it send.
 
 ## Live Activity pushes
 

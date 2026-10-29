@@ -49,6 +49,21 @@
             #expect(kbps > 1_500)
         }
 
+        /// The deployed relay's leg back to a device loses about 2% of pieces. Losing either
+        /// half of a split packet lost it, which held this path near 250 kbps; a parity piece
+        /// rebuilds the packet from any two of its three pieces.
+        @Test(.enabled(if: ProcessInfo.processInfo.environment["POCKETDESK_RELAY_BINARY"] != nil))
+        func videoThroughRelayWithLossyDownloadLeg() async throws {
+            let binary = try #require(ProcessInfo.processInfo.environment["POCKETDESK_RELAY_BINARY"])
+            let (relay, pin, stop) = try await LocalRelay.start(binary: binary)
+            defer { stop() }
+            let proxy = try UDPLimitProxy(upstream: relay.port, limit: 1200, delay: .milliseconds(67), loss: 0.02)
+            defer { proxy.close() }
+            let kbps = try await measure(server: RelayServer(host: "127.0.0.1", port: proxy.port), pin: pin)
+            print("Relay throughput with 2% loss from the relay: \(kbps) kbps; lost: \(proxy.dropped.lost)")
+            #expect(kbps > 1_500)
+        }
+
         @Test(.enabled(if: ProcessInfo.processInfo.environment["POCKETDESK_RELAY_REMOTE"] != nil))
         func videoThroughDeployedRelay() async throws {
             let address = try #require(ProcessInfo.processInfo.environment["POCKETDESK_RELAY_REMOTE"])
@@ -191,10 +206,11 @@
 
     /// Forwards UDP between clients on this Mac and a relay on `upstream`, dropping (and
     /// counting) payloads over `limit` bytes the way Fly's public UDP path does. Each packet
-    /// waits `delay`; a `late` share waits a little longer, so it lands behind the next.
+    /// waits `delay`; a `late` share waits a little longer, so it lands behind the next, and a
+    /// `loss` share of the relay's packets back to clients never arrives.
     final class UDPLimitProxy: Sendable {
         struct Dropped: Sendable, CustomStringConvertible {
-            var toRelay = 0, fromRelay = 0, largest = 0
+            var toRelay = 0, fromRelay = 0, largest = 0, lost = 0
             var description: String { "\(toRelay) to the relay, \(fromRelay) from it, largest \(largest) bytes" }
         }
         let port: UInt16
@@ -206,12 +222,14 @@
 
         private let delay: DispatchTimeInterval
         private let late: (share: Double, by: DispatchTimeInterval)
+        private let loss: Double
         private let queue = DispatchQueue(label: "pocketdesk.tests.udp-proxy")
 
         init(upstream: UInt16, limit: Int, delay: DispatchTimeInterval,
-             late: (share: Double, by: DispatchTimeInterval) = (0, .never)) throws {
+             late: (share: Double, by: DispatchTimeInterval) = (0, .never), loss: Double = 0) throws {
             self.delay = delay
             self.late = late
+            self.loss = loss
             front = try RelayLoopbackSocket()
             port = front.port
             let front = front
@@ -238,6 +256,10 @@
             let task = Task { [self] in
                 do {
                     for try await (data, _) in back.packets where pass(data, limit: limit, toRelay: false) {
+                        if Double.random(in: 0..<1) < loss {
+                            counts.withLock { $0.lost += 1 }
+                            continue
+                        }
                         later { try? front.send(data, to: client) }
                     }
                 } catch {}

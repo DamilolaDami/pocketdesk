@@ -150,8 +150,16 @@ public struct RelayServer: Sendable, Equatable, Codable {
 }
 
 /// Opaque nested UDP packets, fragmented to fit the outer QUIC minimum MTU.
+///
+/// A piece is a 16-byte session ID, 16-byte packet ID, index and count bytes, then its share
+/// of the packet. Packets up to 1000 bytes travel whole. Larger ones travel as two halves and a
+/// parity piece, any two of which rebuild the packet: the relay's leg to a phone loses a few
+/// percent of pieces, and losing either half of a two-piece packet lost it, which held the
+/// inner session well below what the path carries. The parity piece is the packet's length
+/// (two bytes, big-endian), then the halves XORed together, the second padded with a zero.
 public enum RelayPacket {
     public static let maximumPayload = 1500
+    static let wholeLimit = 1000
     public static func uuidBytes(_ value: UUID) -> Data { withUnsafeBytes(of: value.uuid) { Data($0) } }
     public static func uuid(_ bytes: Data) -> UUID? {
         guard bytes.count == 16 else { return nil }
@@ -162,49 +170,77 @@ public enum RelayPacket {
     }
     public static func fragments(session: UUID, payload: Data, packet: UUID = UUID()) -> [Data] {
         guard !payload.isEmpty, payload.count <= maximumPayload else { return [] }
-        let count: UInt8 = payload.count > 1000 ? 2 : 1
-        return stride(from: 0, to: payload.count, by: 1000).enumerated().map { index, offset in
-            uuidBytes(session) + uuidBytes(packet) + Data([UInt8(index), count])
-                + payload.subdata(in: offset..<min(offset + 1000, payload.count))
+        let header = uuidBytes(session) + uuidBytes(packet)
+        guard payload.count > wholeLimit else { return [header + Data([0, 1]) + payload] }
+        let bytes = Array(payload)
+        let half = (bytes.count + 1) / 2
+        let first = bytes[..<half], second = bytes[half...]
+        var parity = [UInt8(bytes.count >> 8), UInt8(truncatingIfNeeded: bytes.count)] + first
+        for (offset, byte) in second.enumerated() { parity[2 + offset] ^= byte }
+        return [
+            header + Data([0, 3]) + Data(first), header + Data([1, 3]) + Data(second), header + Data([2, 3]) + Data(parity),
+        ]
+    }
+    /// The packet from any two of its three pieces, or nil if they don't fit together.
+    static func rebuild(first: Data?, second: Data?, parity: Data?) -> Data? {
+        if let first, let second {
+            guard second.count == first.count || second.count == first.count - 1,
+                first.count + second.count > wholeLimit
+            else { return nil }
+            return first + second
         }
+        guard let parity, parity.count > 2 else { return nil }
+        let p = Array(parity)
+        let length = Int(p[0]) << 8 | Int(p[1])
+        let half = (length + 1) / 2
+        guard length > wholeLimit, length <= maximumPayload, p.count == 2 + half else { return nil }
+        let known = Array(first ?? second ?? Data())
+        guard known.count == (first == nil ? length - half : half) else { return nil }
+        var missing = Array(p[2...])
+        for (offset, byte) in known.enumerated() { missing[offset] ^= byte }
+        return first == nil ? Data(missing) + Data(known) : Data(known) + Data(missing.prefix(length - half))
     }
 }
 
-/// Reassembles two-piece packets; bounded and expiring, even under malformed traffic.
+/// Reassembles split packets; bounded and expiring, even under malformed traffic.
 ///
 /// Networks reorder back-to-back packets (Fly's UDP path does it often), so a piece of the
-/// next packet can arrive between the two pieces of this one. Holding a single incomplete
-/// packet per session threw this one away each time, which lost most full-size packets as
-/// soon as there was any reordering. Several are held instead, the oldest giving way.
+/// next packet can arrive between the pieces of this one. Holding a single incomplete packet
+/// per session threw this one away each time, which lost most full-size packets as soon as
+/// there was any reordering. Several are held instead, the oldest giving way. Packets already
+/// rebuilt are remembered for a while, so their leftover piece doesn't start another.
 public struct RelayPacketAssembler: Sendable {
     /// Incomplete packets held at once, across sessions: well over a round of reordering.
     public static let maximumPending = 64
+    /// Rebuilt packets remembered: the third piece trails the other two by a few packets.
+    static let maximumDone = 256
     private struct Key: Hashable, Sendable {
         var session: UUID
         var packet: UUID
     }
     private struct Pending: Sendable {
-        var first: Data?
-        var second: Data?
+        var pieces: [Data?] = [nil, nil, nil]
         var deadline: ContinuousClock.Instant
     }
     private var pending: [Key: Pending] = [:]
+    private var done: Set<Key> = []
+    private var doneOrder: [Key] = []
     public init() {}
     public mutating func remove(_ session: UUID) { pending = pending.filter { $0.key.session != session } }
     public mutating func receive(_ data: Data, now: ContinuousClock.Instant = .now) -> (session: UUID, payload: Data)? {
-        guard data.count > 34, data.count <= 1034,
+        guard data.count > 34, data.count <= 34 + RelayPacket.wholeLimit,
             let session = RelayPacket.uuid(Data(data.prefix(16))),
             let packet = RelayPacket.uuid(Data(data.dropFirst(16).prefix(16)))
         else { return nil }
         let bytes = Array(data.prefix(34))
-        let index = bytes[32]
+        let index = Int(bytes[32])
         let count = bytes[33]
         let payload = Data(data.dropFirst(34))
         if count == 1, index == 0 { return (session, payload) }
-        guard count == 2, index <= 1, index != 0 || payload.count == 1000,
-            index != 1 || payload.count <= 500
-        else { return nil }
+        let half = (RelayPacket.maximumPayload + 1) / 2
+        guard count == 3, index <= 2, payload.count <= (index == 2 ? 2 + half : half) else { return nil }
         let key = Key(session: session, packet: packet)
+        guard !done.contains(key) else { return nil }
         if let held = pending[key], held.deadline <= now { pending[key] = nil }
         if pending[key] == nil {
             pending = pending.filter { $0.value.deadline > now }
@@ -214,9 +250,16 @@ public struct RelayPacketAssembler: Sendable {
             }
             pending[key] = Pending(deadline: now + .seconds(1))
         }
-        if index == 0 { pending[key]?.first = payload } else { pending[key]?.second = payload }
-        guard let first = pending[key]?.first, let second = pending[key]?.second else { return nil }
+        pending[key]?.pieces[index] = payload
+        guard let pieces = pending[key]?.pieces, pieces.compactMap({ $0 }).count >= 2 else { return nil }
         pending[key] = nil
-        return (session, first + second)
+        remember(key)
+        guard let rebuilt = RelayPacket.rebuild(first: pieces[0], second: pieces[1], parity: pieces[2]) else { return nil }
+        return (session, rebuilt)
+    }
+    private mutating func remember(_ key: Key) {
+        done.insert(key)
+        doneOrder.append(key)
+        if doneOrder.count > Self.maximumDone { done.remove(doneOrder.removeFirst()) }
     }
 }

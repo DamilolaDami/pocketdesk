@@ -116,7 +116,7 @@ phone                          relay                             Mac
 The relay forwards **sealed packets**, not decrypted data, much like a TURN server:
 
 - On each device, the inner QUIC session talks to a loopback **shim**. The shim splits each
-  packet into at most two pieces and sends them as QUIC datagrams on the device's relay
+  packet into one piece, or two halves and a parity piece (any two rebuild it), and sends them as QUIC datagrams on the device's relay
   connection (protocol version 2).
 - The relay passes each piece to the other device's relay connection unchanged; the receiving
   shim reassembles it. Every public UDP packet stays within 1,200 bytes, Fly's limit.
@@ -286,7 +286,14 @@ apps use the internet") must describe the relay, as it already promises.
   the shims kept only one incomplete packet per session, so any reordering between two packets'
   pieces threw one away (0.8 → 3 Mbps there); and the relay advertised Quinn's default
   1,472-byte `max_udp_payload_size`, so Apple's QUIC sometimes grew its packets past Fly's limit
-  and they vanished. Needs confirming against the deployed relay once it's redeployed.
+  and they vanished. Through the deployed relay this took video from under 0.1 to 0.7–0.9 Mbps.
+- [x] Survive loss on the relay → phone leg, which loses 2–5% of pieces through Fly. Two
+  changes, each worth almost nothing alone (about 0.3 Mbps with 2% emulated loss,
+  `RelayThroughputTests.videoThroughRelayWithLossyDownloadLeg`) and 4–5 Mbps together:
+  a parity piece per split packet, so one lost piece no longer loses the packet (protocol 26);
+  and a fixed congestion window on the relay's connections, since Cubic there cut its window
+  on every loss and queued seconds of datagrams behind it. Through the deployed relay: 2.4–4.1
+  Mbps (from 0.7–0.9).
 - [ ] Validate physical devices across the real network matrix.
 
 ### Phase 3: direct connections
@@ -312,19 +319,13 @@ apps use the internet") must describe the relay, as it already promises.
 
 ## Open questions
 
-- Reordering still costs throughput (about 3 Mbps with 5% of packets late, against 15 Mbps
-  without): the QUIC sessions inside read a late packet as a lost one. A sequence number per
-  piece would let the shims put packets back in order, at the cost of a little delay.
-- What's left through Fly is real loss on the relay → phone leg, not the relay. Measured from
-  a Mac with a 134 ms round trip to London: the relay received every piece the Mac sent and
-  forwarded all of them, but about 2% of what it sent to the phone was lost, often several
-  pieces in a row (it logs these counts per connection, without identities). Each full-size
-  packet is two pieces, so the session inside sees about 4% loss over a long round trip and
-  backs off to well under 1 Mbps. Emulating 2% loss on that leg locally gives 250 kbps, with
-  Quinn's default congestion control or BBR alike: the inner session's reaction is the limit.
-  Options: recover pieces on the relay leg (a parity piece per packet, or retransmitting there
-  with its shorter round trip), which changes the piece format; or check whether direct paths
-  (phase 3) avoid the lossy leg.
+- Reordering cost much less once the relay's congestion window stopped shrinking (14.5 Mbps
+  with 5% of packets late, against 21 Mbps locally without). If it matters again, a sequence
+  number per piece would let the shims put packets back in order, at the cost of a little delay.
+- Loss on the relay → phone leg is now absorbed rather than fixed: a split packet survives
+  one lost piece, and single-piece packets (up to 1,000 bytes) still have none. If phones on
+  cellular see longer runs of loss, interleaving parity pieces with the next packet's halves
+  would help more than adding more parity. Direct paths (phase 3) may avoid the leg entirely.
 - Should forwarding be free with a cap, and direct always free?
 - Is a helper on the home network (for waking) worth building, or is "keep awake on power" enough?
 - Do we want IPv6 first? Many mobile networks give phones public IPv6 addresses, which makes

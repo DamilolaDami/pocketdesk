@@ -35,6 +35,8 @@ struct RelayTests {
         let payload = Data(repeating: 42, count: 1500)
         let id = UUID()
         let fragments = RelayPacket.fragments(session: id, payload: payload)
+        #expect(fragments.count == 3)
+        #expect(fragments.allSatisfy { $0.count <= 34 + 752 })
         var assembler = RelayPacketAssembler()
         let now = ContinuousClock.now
         #expect(assembler.receive(fragments[1], now: now) == nil)
@@ -42,13 +44,45 @@ struct RelayTests {
         let packet = try #require(assembled)
         #expect(packet.session == id)
         #expect(packet.payload == payload)
+        // The trailing parity piece doesn't start another packet.
+        #expect(assembler.receive(fragments[2], now: now) == nil)
         #expect(assembler.receive(Data(repeating: 0, count: 1600)) == nil)
-        #expect(assembler.receive(fragments[0], now: now) == nil)
-        #expect(assembler.receive(fragments[1], now: now + .seconds(2)) == nil)
+        let late = RelayPacket.fragments(session: id, payload: payload)
+        #expect(assembler.receive(late[0], now: now) == nil)
+        #expect(assembler.receive(late[1], now: now + .seconds(2)) == nil)
         #expect(RelayPacket.fragments(session: id, payload: Data(repeating: 0, count: 1501)).isEmpty)
+        #expect(RelayPacket.fragments(session: id, payload: Data(repeating: 0, count: 1000)).count == 1)
     }
-    /// Back-to-back packets swap places on real networks: one packet's pieces arriving around
-    /// another's must still make both.
+    /// The relay's leg to a phone loses a few percent of pieces: any two of a packet's three
+    /// pieces must rebuild it, whichever is lost, at odd and even lengths.
+    @Test(arguments: [1001, 1200, 1351, 1500])
+    func packetReassemblySurvivesALostPiece(length: Int) {
+        let id = UUID()
+        let payload = Data((0..<length).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ 7) })
+        let pieces = RelayPacket.fragments(session: id, payload: payload)
+        for lost in 0..<3 {
+            var assembler = RelayPacketAssembler()
+            let kept = pieces.indices.filter { $0 != lost }.map { pieces[$0] }
+            #expect(assembler.receive(kept[1]) == nil)
+            #expect(assembler.receive(kept[0])?.payload == payload)
+        }
+    }
+    @Test func packetReassemblyRejectsInconsistentPieces() {
+        let id = UUID()
+        let packet = UUID()
+        let pieces = RelayPacket.fragments(session: id, payload: Data(repeating: 5, count: 1200), packet: packet)
+        var parity = pieces[2]
+        parity[34] = 0x02  // claims 512 + the low byte: too short to need splitting
+        var assembler = RelayPacketAssembler()
+        #expect(assembler.receive(pieces[0]) == nil)
+        #expect(assembler.receive(parity) == nil)
+        let other = RelayPacket.fragments(session: id, payload: Data(repeating: 5, count: 1400))
+        var mismatched = other[1]
+        mismatched.replaceSubrange(16..<32, with: RelayPacket.uuidBytes(packet))
+        var fresh = RelayPacketAssembler()
+        #expect(fresh.receive(pieces[0]) == nil)
+        #expect(fresh.receive(mismatched) == nil)
+    }
     @Test func packetReassemblySurvivesReordering() throws {
         let id = UUID()
         let a = RelayPacket.fragments(session: id, payload: Data(repeating: 1, count: 1200))

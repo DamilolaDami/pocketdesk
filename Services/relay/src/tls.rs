@@ -95,7 +95,8 @@ pub fn server(
         .max_idle_timeout(Some(std::time::Duration::from_secs(60).try_into()?))
         .keep_alive_interval(Some(std::time::Duration::from_secs(25)))
         .datagram_receive_buffer_size(Some(256 * 1024))
-        .datagram_send_buffer_size(256 * 1024);
+        .datagram_send_buffer_size(256 * 1024)
+        .congestion_controller_factory(Arc::new(crate::window::Fixed));
     Ok(config)
 }
 

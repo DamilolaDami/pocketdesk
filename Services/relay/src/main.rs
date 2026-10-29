@@ -2,6 +2,7 @@ mod apns;
 mod protocol;
 mod relay;
 mod tls;
+mod window;
 
 use clap::Parser;
 use sha2::{Digest, Sha256};

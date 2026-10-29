@@ -315,6 +315,16 @@ apps use the internet") must describe the relay, as it already promises.
 - Reordering still costs throughput (about 3 Mbps with 5% of packets late, against 15 Mbps
   without): the QUIC sessions inside read a late packet as a lost one. A sequence number per
   piece would let the shims put packets back in order, at the cost of a little delay.
+- What's left through Fly is real loss on the relay → phone leg, not the relay. Measured from
+  a Mac with a 134 ms round trip to London: the relay received every piece the Mac sent and
+  forwarded all of them, but about 2% of what it sent to the phone was lost, often several
+  pieces in a row (it logs these counts per connection, without identities). Each full-size
+  packet is two pieces, so the session inside sees about 4% loss over a long round trip and
+  backs off to well under 1 Mbps. Emulating 2% loss on that leg locally gives 250 kbps, with
+  Quinn's default congestion control or BBR alike: the inner session's reaction is the limit.
+  Options: recover pieces on the relay leg (a parity piece per packet, or retransmitting there
+  with its shorter round trip), which changes the piece format; or check whether direct paths
+  (phase 3) avoid the lossy leg.
 - Should forwarding be free with a cap, and direct always free?
 - Is a helper on the home network (for waking) worth building, or is "keep awake on power" enough?
 - Do we want IPv6 first? Many mobile networks give phones public IPv6 addresses, which makes

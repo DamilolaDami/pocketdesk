@@ -4,7 +4,10 @@ use quinn::Connection;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
@@ -109,6 +112,7 @@ impl Relay {
             hex::encode(Sha256::digest(leaf.as_ref()))
         };
         let (out, mut messages) = mpsc::channel(32);
+        let counts = Counts::default();
         let result = async {
             let (mut send, mut recv) =
                 tokio::time::timeout(Duration::from_secs(10), connection.accept_bi()).await??;
@@ -145,10 +149,12 @@ impl Relay {
                 let mut budget = Budget::new();
                 loop {
                     let bytes = connection.read_datagram().await?;
+                    Counts::add(&counts.received);
                     if bytes.len() < MIN_PIECE
                         || bytes.len() > MAX_PIECE
                         || !budget.take(bytes.len())
                     {
+                        Counts::add(&counts.refused);
                         continue;
                     }
                     let Ok(id) = Uuid::from_slice(&bytes[..16]) else {
@@ -161,7 +167,12 @@ impl Relay {
                             .route(id, &fingerprint, connection.stable_id());
                     if let Some(target) = target {
                         // Datagrams are lossy: a full send buffer drops, and the inner session retransmits.
-                        let _ = target.send_datagram(bytes);
+                        match target.send_datagram(bytes) {
+                            Ok(()) => Counts::add(&counts.forwarded),
+                            Err(_) => Counts::add(&counts.failed),
+                        }
+                    } else {
+                        Counts::add(&counts.unrouted);
                     }
                 }
                 #[allow(unreachable_code)]
@@ -171,6 +182,23 @@ impl Relay {
         }
         .await;
         let _ = result; // Never log device identities, addresses, or packet content.
+        // Counts only, for telling where forwarded traffic is lost.
+        if counts.received.load(Ordering::Relaxed) > 0 {
+            let stats = connection.stats();
+            eprintln!(
+                "connection ended: pieces in {} forwarded {} failed {} unrouted {} refused {}; \
+                 packets sent {} lost {} congestion events {}; rtt {} ms",
+                counts.received.load(Ordering::Relaxed),
+                counts.forwarded.load(Ordering::Relaxed),
+                counts.failed.load(Ordering::Relaxed),
+                counts.unrouted.load(Ordering::Relaxed),
+                counts.refused.load(Ordering::Relaxed),
+                stats.path.sent_packets,
+                stats.path.lost_packets,
+                stats.path.congestion_events,
+                stats.path.rtt.as_millis(),
+            );
+        }
         connection.close(0u32.into(), b"control connection ended");
         let mut state = self.state.lock().unwrap();
         if state
@@ -382,6 +410,21 @@ impl Relay {
         Ok(())
     }
 }
+/// Pieces one connection sent the relay, and what became of them.
+#[derive(Default)]
+struct Counts {
+    received: AtomicUsize,
+    forwarded: AtomicUsize,
+    failed: AtomicUsize,
+    unrouted: AtomicUsize,
+    refused: AtomicUsize,
+}
+impl Counts {
+    fn add(counter: &AtomicUsize) {
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 struct Budget {
     start: Instant,
     bytes: usize,

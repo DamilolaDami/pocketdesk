@@ -59,6 +59,17 @@ impl ClientCertVerifier for DeviceVerifier {
             .supported_schemes()
     }
 }
+/// The endpoint's own settings. Its `max_udp_payload_size` is what devices are told they may
+/// send: left at Quinn's 1,472, Apple's QUIC grows its packets past Fly's 1,200-byte limit
+/// (whatever its own maximum says), and Fly silently drops them.
+pub fn endpoint_config() -> quinn::EndpointConfig {
+    let mut config = quinn::EndpointConfig::default();
+    config
+        .max_udp_payload_size(1200)
+        .expect("1,200 is a valid UDP payload size");
+    config
+}
+
 pub fn server(
     certs: Vec<CertificateDer<'static>>,
     key: rustls::pki_types::PrivateKeyDer<'static>,
@@ -91,6 +102,10 @@ pub fn server(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn devices_are_told_to_stay_within_flys_udp_limit() {
+        assert_eq!(endpoint_config().get_max_udp_payload_size(), 1200);
+    }
     #[tokio::test]
     async fn missing_device_certificate_is_rejected() {
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();

@@ -1,6 +1,7 @@
 #if os(macOS)
     import Foundation
     import Network
+    import Synchronization
     import PDProtocol
     import PDClientCore
     import PDSecurity
@@ -12,9 +13,6 @@
     /// (`POCKETDESK_RELAY_REMOTE=relay.pocketdesk.runmira.dev:4433`) both ends run here, so every
     /// packet goes out to the relay and back: a real long-round-trip path, like a phone on cellular.
     ///
-    /// Known issue: through the deployed relay this measures well under 0.1 Mbps, because about
-    /// one full-size packet in five is lost while streaming (small packets and a local relay are
-    /// fine). The cause isn't found yet; see "Open questions" in docs/RELAY.md.
     @Suite(.serialized, .timeLimit(.minutes(2)))
     struct RelayThroughputTests {
         static let frames = 40
@@ -29,6 +27,25 @@
             defer { stop() }
             let kbps = try await measure(server: server, pin: pin)
             print("Local relay throughput: \(kbps) kbps")
+            #expect(kbps > 1_500)
+        }
+
+        /// The local relay behind a stand-in for Fly's public UDP path: payloads over 1,200 bytes
+        /// are dropped, there's a round trip, and now and then a packet arrives late, behind the
+        /// next. Reordering used to cost most two-piece packets (about 0.8 Mbps here, and under
+        /// 0.1 Mbps through the deployed relay); oversized packets vanished without a trace.
+        @Test(.enabled(if: ProcessInfo.processInfo.environment["POCKETDESK_RELAY_BINARY"] != nil))
+        func videoThroughRelayWithFlysUDPLimit() async throws {
+            let binary = try #require(ProcessInfo.processInfo.environment["POCKETDESK_RELAY_BINARY"])
+            let (relay, pin, stop) = try await LocalRelay.start(binary: binary)
+            defer { stop() }
+            let proxy = try UDPLimitProxy(upstream: relay.port, limit: 1200, delay: .milliseconds(10),
+                                          late: (share: 0.05, by: .microseconds(500)))
+            defer { proxy.close() }
+            let kbps = try await measure(server: RelayServer(host: "127.0.0.1", port: proxy.port), pin: pin)
+            let dropped = proxy.dropped
+            print("Relay throughput over a Fly-like path: \(kbps) kbps; oversized: \(dropped)")
+            #expect(dropped.toRelay == 0 && dropped.fromRelay == 0)
             #expect(kbps > 1_500)
         }
 
@@ -169,6 +186,85 @@
             p.standardError = FileHandle.nullDevice
             try p.run()
             p.waitUntilExit()
+        }
+    }
+
+    /// Forwards UDP between clients on this Mac and a relay on `upstream`, dropping (and
+    /// counting) payloads over `limit` bytes the way Fly's public UDP path does. Each packet
+    /// waits `delay`; a `late` share waits a little longer, so it lands behind the next.
+    final class UDPLimitProxy: Sendable {
+        struct Dropped: Sendable, CustomStringConvertible {
+            var toRelay = 0, fromRelay = 0, largest = 0
+            var description: String { "\(toRelay) to the relay, \(fromRelay) from it, largest \(largest) bytes" }
+        }
+        let port: UInt16
+        private let front: RelayLoopbackSocket
+        private let counts = Mutex(Dropped())
+        private let backs = Mutex([UInt16: RelayLoopbackSocket]())
+        private let tasks = Mutex([Task<Void, Never>]())
+        var dropped: Dropped { counts.withLock { $0 } }
+
+        private let delay: DispatchTimeInterval
+        private let late: (share: Double, by: DispatchTimeInterval)
+        private let queue = DispatchQueue(label: "pocketdesk.tests.udp-proxy")
+
+        init(upstream: UInt16, limit: Int, delay: DispatchTimeInterval,
+             late: (share: Double, by: DispatchTimeInterval) = (0, .never)) throws {
+            self.delay = delay
+            self.late = late
+            front = try RelayLoopbackSocket()
+            port = front.port
+            let front = front
+            let task = Task { [self] in
+                do {
+                    for try await (data, client) in front.packets {
+                        guard pass(data, limit: limit, toRelay: true) else { continue }
+                        let back = try backs.withLock { backs in
+                            if let back = backs[client] { return (back, false) }
+                            let back = try RelayLoopbackSocket()
+                            backs[client] = back
+                            return (back, true)
+                        }
+                        if back.1 { relayBack(back.0, to: client, limit: limit) }
+                        later { try? back.0.send(data, to: upstream) }
+                    }
+                } catch {}
+            }
+            tasks.withLock { $0.append(task) }
+        }
+
+        private func relayBack(_ back: RelayLoopbackSocket, to client: UInt16, limit: Int) {
+            let front = front
+            let task = Task { [self] in
+                do {
+                    for try await (data, _) in back.packets where pass(data, limit: limit, toRelay: false) {
+                        later { try? front.send(data, to: client) }
+                    }
+                } catch {}
+            }
+            tasks.withLock { $0.append(task) }
+        }
+
+        /// A serial queue runs equal delays in the order they were scheduled.
+        private func later(_ work: @escaping @Sendable () -> Void) {
+            var deadline = DispatchTime.now() + delay
+            if Double.random(in: 0..<1) < late.share { deadline = deadline + late.by }
+            queue.asyncAfter(deadline: deadline, execute: work)
+        }
+
+        private func pass(_ data: Data, limit: Int, toRelay: Bool) -> Bool {
+            guard data.count > limit else { return true }
+            counts.withLock {
+                if toRelay { $0.toRelay += 1 } else { $0.fromRelay += 1 }
+                $0.largest = max($0.largest, data.count)
+            }
+            return false
+        }
+
+        func close() {
+            tasks.withLock { for task in $0 { task.cancel() } }
+            front.close()
+            backs.withLock { for back in $0.values { back.close() } }
         }
     }
 

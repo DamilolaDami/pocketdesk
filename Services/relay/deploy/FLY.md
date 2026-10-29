@@ -18,7 +18,9 @@ Forwarded video/audio/input through Fly is not yet verified; do not treat readin
 as proof that remote sessions work.
 
 Both native outer QUIC and Quinn are capped at 1,200-byte UDP payloads. Quinn MTU discovery
-and segmentation offload are disabled to keep packets within Fly's UDP transport limits.
+and segmentation offload are disabled to keep packets within Fly's UDP transport limits, and
+the endpoint advertises a 1,200-byte `max_udp_payload_size`: with Quinn's default of 1,472,
+Apple's QUIC sometimes sends larger packets despite its own setting, and Fly drops them.
 
 ## Provision and DNS
 

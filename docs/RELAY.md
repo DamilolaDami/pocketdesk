@@ -279,9 +279,14 @@ apps use the internet") must describe the relay, as it already promises.
 - [x] Phone: a relay connection option on paired Mac cards and "Via relay" in stream info.
 - [x] Local Quinn/Apple QUIC integration tests for allowed, unpaired and forgotten phones.
 - [x] Deploy to Fly (London) and verify a pinned session end to end through it.
-- [ ] Fix throughput through the deployed relay: about one full-size packet in five is lost
-  while streaming, which holds video near 0.1 Mbps (a local relay runs at 40 Mbps). Ruled out:
-  packet size, piece ordering, drops in the apps, and this connection's plain packet loss.
+- [x] Fix throughput through the deployed relay (about one full-size packet in five was lost,
+  holding video near 0.1 Mbps). Two causes, both reproduced locally by
+  `RelayThroughputTests.videoThroughRelayWithFlysUDPLimit`, which puts a Fly-like UDP path
+  (1,200-byte limit, a round trip, occasional reordering) in front of a local relay:
+  the shims kept only one incomplete packet per session, so any reordering between two packets'
+  pieces threw one away (0.8 → 3 Mbps there); and the relay advertised Quinn's default
+  1,472-byte `max_udp_payload_size`, so Apple's QUIC sometimes grew its packets past Fly's limit
+  and they vanished. Needs confirming against the deployed relay once it's redeployed.
 - [ ] Validate physical devices across the real network matrix.
 
 ### Phase 3: direct connections
@@ -307,9 +312,9 @@ apps use the internet") must describe the relay, as it already promises.
 
 ## Open questions
 
-- Where are full-size packets lost while streaming through the deployed relay? Next step:
-  aggregate per-leg loss counters on the relay (no identities), to tell the Mac → relay leg
-  from the relay → phone leg.
+- Reordering still costs throughput (about 3 Mbps with 5% of packets late, against 15 Mbps
+  without): the QUIC sessions inside read a late packet as a lost one. A sequence number per
+  piece would let the shims put packets back in order, at the cost of a little delay.
 - Should forwarding be free with a cap, and direct always free?
 - Is a helper on the home network (for waking) worth building, or is "keep awake on power" enough?
 - Do we want IPv6 first? Many mobile networks give phones public IPv6 addresses, which makes

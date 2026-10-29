@@ -170,17 +170,27 @@ public enum RelayPacket {
     }
 }
 
-/// One incomplete packet per session; bounded and expiring, even under malformed traffic.
+/// Reassembles two-piece packets; bounded and expiring, even under malformed traffic.
+///
+/// Networks reorder back-to-back packets (Fly's UDP path does it often), so a piece of the
+/// next packet can arrive between the two pieces of this one. Holding a single incomplete
+/// packet per session threw this one away each time, which lost most full-size packets as
+/// soon as there was any reordering. Several are held instead, the oldest giving way.
 public struct RelayPacketAssembler: Sendable {
-    private struct Pending: Sendable {
+    /// Incomplete packets held at once, across sessions: well over a round of reordering.
+    public static let maximumPending = 64
+    private struct Key: Hashable, Sendable {
+        var session: UUID
         var packet: UUID
+    }
+    private struct Pending: Sendable {
         var first: Data?
         var second: Data?
         var deadline: ContinuousClock.Instant
     }
-    private var pending: [UUID: Pending] = [:]
+    private var pending: [Key: Pending] = [:]
     public init() {}
-    public mutating func remove(_ session: UUID) { pending[session] = nil }
+    public mutating func remove(_ session: UUID) { pending = pending.filter { $0.key.session != session } }
     public mutating func receive(_ data: Data, now: ContinuousClock.Instant = .now) -> (session: UUID, payload: Data)? {
         guard data.count > 34, data.count <= 1034,
             let session = RelayPacket.uuid(Data(data.prefix(16))),
@@ -194,14 +204,19 @@ public struct RelayPacketAssembler: Sendable {
         guard count == 2, index <= 1, index != 0 || payload.count == 1000,
             index != 1 || payload.count <= 500
         else { return nil }
-        pending = pending.filter { $0.value.deadline > now }
-        guard pending[session] != nil || pending.count < 2 else { return nil }
-        if pending[session]?.packet != packet {
-            pending[session] = Pending(packet: packet, deadline: now + .seconds(1))
+        let key = Key(session: session, packet: packet)
+        if let held = pending[key], held.deadline <= now { pending[key] = nil }
+        if pending[key] == nil {
+            pending = pending.filter { $0.value.deadline > now }
+            if pending.count >= Self.maximumPending,
+                let oldest = pending.min(by: { $0.value.deadline < $1.value.deadline })?.key {
+                pending[oldest] = nil
+            }
+            pending[key] = Pending(deadline: now + .seconds(1))
         }
-        if index == 0 { pending[session]?.first = payload } else { pending[session]?.second = payload }
-        guard let first = pending[session]?.first, let second = pending[session]?.second else { return nil }
-        pending[session] = nil
+        if index == 0 { pending[key]?.first = payload } else { pending[key]?.second = payload }
+        guard let first = pending[key]?.first, let second = pending[key]?.second else { return nil }
+        pending[key] = nil
         return (session, first + second)
     }
 }

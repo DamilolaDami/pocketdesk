@@ -146,8 +146,8 @@ verifies LAN failure → relay fallback, the pinned inner session, video/audio/i
 unpaired rejection and revocation. CI runs it before the broader native package tests.
 The Mac uses a separate unadvertised, packet-bounded QUIC listener for relayed sessions,
 with the same HostService handlers and a pinned-only TLS gate. The LAN listener retains its
-existing settings. A session through the deployed relay works end to end, but is slow: about
-one full-size packet in five is lost while streaming (see "Open questions" in the design).
+existing settings. A session through the deployed relay works end to end. `RelayThroughputTests` also measures
+the local relay behind a Fly-like UDP path (1,200-byte limit, a round trip, some reordering).
 This is a single-instance implementation, not a production launch.
 
 To measure throughput, `RelayThroughputTests` streams 1.2 MB of video through a local relay

@@ -34,7 +34,12 @@ async fn main() -> anyhow::Result<()> {
         "max-connections must be positive"
     );
     let (config, mut tls_digest) = load_tls(&options.cert, &options.key)?;
-    let endpoint = quinn::Endpoint::server(config, listen)?;
+    let endpoint = quinn::Endpoint::new(
+        tls::endpoint_config(),
+        Some(config),
+        std::net::UdpSocket::bind(listen)?,
+        Arc::new(quinn::TokioRuntime),
+    )?;
     // Pushes are on only when the operator gave an APNs key (APNS_* in the environment).
     let apns = apns::Apns::from_env()?.map(Arc::new);
     eprintln!(
